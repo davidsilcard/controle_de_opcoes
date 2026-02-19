@@ -215,3 +215,4 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - Encerramento manual de opção vendida na aba `Posições` agora sincroniza automaticamente a recompra no `ledger` (tipo `BUY`), sem duplicar lançamento em salvamentos repetidos.
   - Fluxos de prêmio/DARF passaram a validar se o ticker é realmente opção (`infer_option_type`), evitando tratar lote de ação como opção quando houver ticker/ativo divergente por erro de cadastro.
   - Aba `Auditoria` agora mostra também visão de caixa operacional por posição (`Prêmio + DARF + Recompra`), além da visão fiscal, para refletir melhor o efeito real no caixa do cliente.
+  - Aba `Covered Call` ganhou visão didática de performance no caixa com cards mensais de `Prêmios líquidos` e `Resultado líquido` (`Prêmio + DARF + Recompra`) para real e simulado.

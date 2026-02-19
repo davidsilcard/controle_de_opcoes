@@ -154,12 +154,15 @@ def get_monthly_premiums(
     *,
     is_simulated: Optional[bool] = False,
     include_darf: bool = False,
+    include_buyback: bool = False,
     strategy_tag: Optional[str] = None,
 ) -> List[dict]:
     """Retorna soma de prêmios agrupados por mês (YYYY-MM).
 
     - is_simulated: False (padrão) -> somente real; True -> somente simulado; None -> ambos.
-    - include_darf: soma também DARF (negativo) para exibir líquido (PREMIUM - DARF).
+    - include_darf: soma também DARF (negativo) para exibir líquido fiscal (PREMIUM - DARF).
+    - include_buyback: soma também recompras (`BUY`) vinculadas à opção
+      (descrição iniciando em `Recompra opção`), para visão operacional de caixa.
     """
     conn = _get_conn()
     try:
@@ -169,13 +172,19 @@ def get_monthly_premiums(
         use_strategy_filter = strategy is not None
         if use_strategy_filter and not _has_positions_table(conn):
             return []
+        type_filters = ["l.type = ?"]
+        params.append(TransactionType.PREMIUM.value)
         if include_darf:
             # DARF de provisão é lançado com position_id; evita misturar com DARF "pago" (manual).
-            where.append("(l.type = ? OR (l.type = ? AND l.position_id IS NOT NULL))")
-            params.extend([TransactionType.PREMIUM.value, TransactionType.DARF.value])
-        else:
-            where.append("l.type = ?")
-            params.append(TransactionType.PREMIUM.value)
+            type_filters.append("(l.type = ? AND l.position_id IS NOT NULL)")
+            params.append(TransactionType.DARF.value)
+        if include_buyback:
+            # Recompra registrada automaticamente no encerramento de opção vendida.
+            type_filters.append(
+                "(l.type = ? AND l.position_id IS NOT NULL AND COALESCE(l.description, '') LIKE 'Recompra opção %')"
+            )
+            params.append(TransactionType.BUY.value)
+        where.append(f"({' OR '.join(type_filters)})")
         if is_simulated is not None:
             where.append("COALESCE(l.is_simulated, 0) = ?")
             params.append(1 if is_simulated else 0)

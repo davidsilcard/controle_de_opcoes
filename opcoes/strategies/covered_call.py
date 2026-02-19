@@ -423,10 +423,42 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         buyback_target_pct=defaults.buyback_target_pct,
     )
 
+    # Visão financeira didática para cliente:
+    # - prêmio líquido fiscal: PREMIUM + DARF
+    # - resultado operacional: PREMIUM + DARF + recompra (BUY)
+    monthly_premiums = finance.get_monthly_premiums(
+        include_darf=True,
+        include_buyback=False,
+        is_simulated=False,
+        strategy_tag="covered_call",
+    )
+    simulated_monthly_premiums = finance.get_monthly_premiums(
+        include_darf=True,
+        include_buyback=False,
+        is_simulated=True,
+        strategy_tag="covered_call",
+    )
+    monthly_operational_result = finance.get_monthly_premiums(
+        include_darf=True,
+        include_buyback=True,
+        is_simulated=False,
+        strategy_tag="covered_call",
+    )
+    simulated_monthly_operational_result = finance.get_monthly_premiums(
+        include_darf=True,
+        include_buyback=True,
+        is_simulated=True,
+        strategy_tag="covered_call",
+    )
+
     ctx["filters"] = {
         "min_extrinsic": min_extrinsic,
         "min_days": min_days,
         "max_days": max_days,
         "min_dist_strike": min_dist_strike,
     }
+    ctx["monthly_premiums"] = monthly_premiums
+    ctx["simulated_monthly_premiums"] = simulated_monthly_premiums
+    ctx["monthly_operational_result"] = monthly_operational_result
+    ctx["simulated_monthly_operational_result"] = simulated_monthly_operational_result
     return ctx

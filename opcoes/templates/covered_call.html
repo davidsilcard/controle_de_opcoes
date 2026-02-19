@@ -185,6 +185,91 @@
         </div>
       </div>
 
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card h-100 border-success-subtle">
+            <div class="card-header">Prêmios líquidos (Real)</div>
+            <div class="card-body small">
+              {% if monthly_premiums %}
+                {% for m in monthly_premiums %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem prêmios reais registrados.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-primary-subtle">
+            <div class="card-header">Resultado líquido (Real)</div>
+            <div class="card-body small">
+              {% if monthly_operational_result %}
+                {% for m in monthly_operational_result %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem resultado operacional real registrado.</p>
+              {% endif %}
+              <div class="text-muted mt-2">
+                Prêmio + DARF + recompra por mês (data dos lançamentos no caixa).
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-warning-subtle">
+            <div class="card-header bg-warning-subtle">Prêmios líquidos (Simulado)</div>
+            <div class="card-body small">
+              {% if simulated_monthly_premiums %}
+                {% for m in simulated_monthly_premiums %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem prêmios simulados registrados.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-warning-subtle">
+            <div class="card-header bg-warning-subtle">Resultado líquido (Simulado)</div>
+            <div class="card-body small">
+              {% if simulated_monthly_operational_result %}
+                {% for m in simulated_monthly_operational_result %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem resultado operacional simulado registrado.</p>
+              {% endif %}
+              <div class="text-muted mt-2">
+                Prêmio + DARF + recompra por mês (data dos lançamentos no caixa).
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <h2 class="h5 mt-4">Lotes de {{ underlying }} (real)</h2>
       {% if not lots_real %}
         <p class="text-muted small">Nenhum lote de {{ underlying }} real cadastrado.</p>
