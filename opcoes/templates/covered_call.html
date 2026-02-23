@@ -8,6 +8,15 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
     >
+    <style>
+      .cc-sidebar {
+        position: sticky;
+        top: 84px;
+      }
+      .cc-sidebar .list-group-item {
+        padding: 0.35rem 0.6rem;
+      }
+    </style>
   </head>
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top">
@@ -26,7 +35,9 @@
       </div>
     </nav>
 
-    <div class="container">
+    <div class="container-fluid px-3 px-lg-4">
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-9 col-xl-10">
       <h1 class="h4 mb-3">Covered Call – {{ underlying }}</h1>
 
       <form class="row g-2 mb-4" method="get" action="/covered-call">
@@ -71,6 +82,32 @@
             class="form-control form-control-sm"
             value="{{ filters.min_dist_strike }}"
           >
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Alvo acima do maior valor (%)</label>
+          <input
+            type="number"
+            step="0.1"
+            name="target_upside_pct"
+            class="form-control form-control-sm"
+            value="{{ filters.target_upside_pct }}"
+          >
+        </div>
+        <div class="col-sm-4 d-flex align-items-end">
+          <div class="form-check mb-1">
+            <input type="hidden" name="only_target_hits" value="0">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="only_target_hits"
+              name="only_target_hits"
+              value="1"
+              {% if filters.only_target_hits %}checked{% endif %}
+            >
+            <label class="form-check-label small" for="only_target_hits">
+              Mostrar só oportunidades que batem meta
+            </label>
+          </div>
         </div>
         <div class="col-sm-2 d-flex align-items-end justify-content-end">
           <button class="btn btn-primary btn-sm" type="submit">Aplicar</button>
@@ -645,8 +682,29 @@
         Filtra opções de {{ underlying }} no último snapshot com prêmio extrínseco mínimo e dias úteis até o vencimento.
         Use esse painel como apoio para encontrar strikes/vencimentos para suas covered calls.
       </p>
+      <div class="alert alert-info small">
+        Base de alvo = maior entre preço médio livre e spot.
+        {% if sell_target.base_price is not none and sell_target.target_price is not none %}
+          Preço médio livre:
+          {% if sell_target.avg_free_price is not none %}R$ {{ "%.2f"|format(sell_target.avg_free_price) }}{% else %}-{% endif %}
+          | Spot:
+          {% if sell_target.spot_price is not none %}R$ {{ "%.2f"|format(sell_target.spot_price) }}{% else %}-{% endif %}
+          | Base: R$ {{ "%.2f"|format(sell_target.base_price) }}
+          | Meta +{{ "%.1f"|format(sell_target.upside_pct) }}%: <strong>R$ {{ "%.2f"|format(sell_target.target_price) }}</strong>
+          | Oportunidades que batem a meta: <strong>{{ sell_target.hits_count }}</strong>
+          {% if filters.only_target_hits %}| Exibindo somente as que batem a meta.{% else %}.{% endif %}
+        {% else %}
+          Sem base suficiente para calcular a meta (faltam preço médio livre e spot).
+        {% endif %}
+      </div>
       {% if not suggestions %}
-        <p class="text-muted small">Nenhuma sugestão encontrada com os filtros atuais.</p>
+        <p class="text-muted small">
+          {% if filters.only_target_hits %}
+            Nenhuma sugestão bate a meta com os filtros atuais.
+          {% else %}
+            Nenhuma sugestão encontrada com os filtros atuais.
+          {% endif %}
+        </p>
       {% else %}
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -659,6 +717,9 @@
                 <th class="text-end">Spot</th>
                 <th class="text-end">Dist. Strike%</th>
                 <th class="text-end">Extr.% Spot</th>
+                <th class="text-end">Prêmio ref.</th>
+                <th class="text-end">Venda efetiva</th>
+                <th class="text-center">Meta</th>
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">Score</th>
                 <th class="text-center">Destaque</th>
@@ -666,7 +727,7 @@
             </thead>
             <tbody>
               {% for opp in suggestions %}
-                <tr>
+                <tr class="{% if opp.target_hit %}table-success{% endif %}">
                   <td>{{ opp.ticker }}</td>
                   <td>{{ opp.vencimento }}</td>
                   <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
@@ -681,6 +742,36 @@
                   </td>
                   <td class="text-end">
                     {% if opp.extrinsic_pct_spot is not none %}{{ "%.2f"|format(opp.extrinsic_pct_spot) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.premium_ref is not none %}{{ "%.2f"|format(opp.premium_ref) }}{% else %}-{% endif %}
+                    <div class="text-muted small">{% if opp.premium_source %}{{ opp.premium_source }}{% else %}-{% endif %}</div>
+                  </td>
+                  <td class="text-end">
+                    {% if opp.effective_sale_price is not none %}{{ "%.2f"|format(opp.effective_sale_price) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-center">
+                    {% if opp.target_hit %}
+                      <span class="badge text-bg-success">Atinge</span>
+                    {% elif opp.strike_target_hit %}
+                      <span class="badge text-bg-secondary" title="Strike atinge, mas prêmio de referência não é suficiente para bater a meta.">Quase</span>
+                    {% else %}
+                      <span class="badge text-bg-light">Não</span>
+                    {% endif %}
+                    <div class="text-muted small">
+                      {% if opp.premium_pct_base is not none %}
+                        Prêmio: {{ "%.2f"|format(opp.premium_pct_base) }}%
+                      {% else %}
+                        Prêmio: -
+                      {% endif %}
+                    </div>
+                    <div class="small {% if opp.meta_advantage_pct is not none and opp.meta_advantage_pct >= 0 %}text-success{% else %}text-muted{% endif %}">
+                      {% if opp.meta_advantage_pct is not none %}
+                        {% if opp.meta_advantage_pct >= 0 %}+{% endif %}{{ "%.2f"|format(opp.meta_advantage_pct) }}% vs meta
+                      {% else %}
+                        - vs meta
+                      {% endif %}
+                    </div>
                   </td>
                   <td class="text-end">
                     {% if opp.pct_2x is not none %}{{ "%.2f"|format(opp.pct_2x) }}{% else %}-{% endif %}
@@ -701,6 +792,35 @@
           </table>
         </div>
       {% endif %}
+        </div>
+        <aside class="col-lg-3 col-xl-2">
+          <div class="card cc-sidebar">
+            <div class="card-header py-2">Filtro rápido</div>
+            <div class="list-group list-group-flush small">
+              {% if underlying_quick_filter %}
+                {% for item in underlying_quick_filter %}
+                  <a
+                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if item.ticker == underlying %}active{% endif %}"
+                    href="{{ url_for('covered_call', underlying=item.ticker, min_extrinsic=filters.min_extrinsic, min_days=filters.min_days, max_days=filters.max_days, min_dist_strike=filters.min_dist_strike, target_upside_pct=filters.target_upside_pct, only_target_hits=(1 if filters.only_target_hits else 0)) }}"
+                  >
+                    <span>{{ item.ticker }}</span>
+                    {% if item.qty_total > 0 %}
+                      <span class="badge {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-secondary{% endif %}">
+                        {{ item.qty_total }}
+                      </span>
+                    {% endif %}
+                  </a>
+                {% endfor %}
+              {% else %}
+                <div class="list-group-item text-muted">Sem ativos de garantia cadastrados.</div>
+              {% endif %}
+            </div>
+            <div class="card-footer small text-muted">
+              Ativos da garantia para trocar o alvo sem digitar.
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   </body>
 </html>

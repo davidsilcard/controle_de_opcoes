@@ -43,6 +43,7 @@ class CoveredCallSettings:
     max_days: int = 200
     min_dist_strike: float = 1.0
     buyback_target_pct: float = 50.0
+    only_target_hits: bool = False
 
 
 @dataclass
@@ -201,6 +202,16 @@ def get_covered_call_settings() -> CoveredCallSettings:
         except ValueError:
             return default
 
+    def _parse_bool(name: str, default: bool) -> bool:
+        text = raw.get(name, "").strip().lower()
+        if not text:
+            return default
+        if text in {"1", "true", "yes", "on", "sim"}:
+            return True
+        if text in {"0", "false", "no", "off", "nao", "não"}:
+            return False
+        return default
+
     underlying = raw.get("ccall_underlying", "").strip().upper() or "CMIG4"
 
     return CoveredCallSettings(
@@ -210,6 +221,7 @@ def get_covered_call_settings() -> CoveredCallSettings:
         max_days=_parse_int("ccall_max_days", 200),
         min_dist_strike=_parse_float("ccall_min_dist_strike", 1.0),
         buyback_target_pct=_parse_float("ccall_buyback_target_pct", 50.0),
+        only_target_hits=_parse_bool("ccall_only_target_hits", False),
     )
 
 
@@ -346,6 +358,7 @@ def update_covered_call_settings(
     max_days: int,
     min_dist_strike: float,
     buyback_target_pct: float,
+    only_target_hits: bool,
 ) -> None:
     conn = _connect()
     try:
@@ -356,6 +369,7 @@ def update_covered_call_settings(
             "ccall_max_days": int(max_days),
             "ccall_min_dist_strike": float(min_dist_strike),
             "ccall_buyback_target_pct": float(buyback_target_pct),
+            "ccall_only_target_hits": "1" if bool(only_target_hits) else "0",
         }
         for key, value in params.items():
             conn.execute(

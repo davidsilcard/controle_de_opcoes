@@ -132,6 +132,96 @@ def test_stock_with_mismatched_underlying_is_not_treated_as_option(monkeypatch, 
     assert f"/positions/recalc-premium/{pos_id}" not in html
 
 
+def test_update_position_allows_underlying_edit_and_autofill_for_stock(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "positions_underlying_update.db"
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+    _ensure_snapshot_tables(db_path)
+
+    pos_id = portfolio.add_position(
+        ticker="HYPE3",
+        underlying="",
+        trade_date="2026-02-19",
+        qty=300,
+        entry_price=26.14,
+        trade_type="swing",
+        side="long",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    res = client.post(
+        f"/positions/update/{pos_id}",
+        data=_build_update_payload(
+            ticker="HYPE3",
+            underlying="",
+            status="open",
+            trade_type="swing",
+            side="long",
+            strategy_tag="",
+            qty="300",
+            entry_price="26.14",
+            fees="0",
+            trade_date="2026-02-19",
+            exit_date="",
+            exit_price="",
+            partial_qty="",
+            partial_price="",
+            partial_date="",
+            exit_reason="",
+            irrf="",
+        ),
+    )
+    assert res.status_code in (302, 303)
+    assert portfolio.get_position(pos_id)["underlying"] == "HYPE3"
+
+    res = client.post(
+        f"/positions/update/{pos_id}",
+        data=_build_update_payload(
+            ticker="HYPE3",
+            underlying="HYPE4",
+            status="open",
+            trade_type="swing",
+            side="long",
+            strategy_tag="",
+            qty="300",
+            entry_price="26.14",
+            fees="0",
+            trade_date="2026-02-19",
+            exit_date="",
+            exit_price="",
+            partial_qty="",
+            partial_price="",
+            partial_date="",
+            exit_reason="",
+            irrf="",
+        ),
+    )
+    assert res.status_code in (302, 303)
+    assert portfolio.get_position(pos_id)["underlying"] == "HYPE4"
+
+
+def test_migration_fills_blank_underlying_for_stock_positions(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "positions_underlying_migration.db"
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+    _ensure_snapshot_tables(db_path)
+
+    pos_id = portfolio.add_position(
+        ticker="BBSE3",
+        underlying="",
+        trade_date="2026-02-19",
+        qty=1000,
+        entry_price=35.27,
+        trade_type="swing",
+        side="long",
+    )
+
+    pos = portfolio.get_position(pos_id)
+    assert pos is not None
+    assert pos["underlying"] == "BBSE3"
+
+
 def test_register_premium_ignores_non_option_ticker(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "register_ignore_non_option.db"
     monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Mapping, Tuple
 
 from .. import finance
@@ -25,6 +26,43 @@ def _get_float_arg(args: Mapping[str, Any], name: str, default: float) -> float:
         return default
 
 
+def _get_bool_arg(args: Mapping[str, Any], name: str, default: bool) -> bool:
+    raw: Any = None
+    if hasattr(args, "getlist"):
+        try:
+            values = args.getlist(name)  # type: ignore[attr-defined]
+            if values:
+                raw = values[-1]
+        except Exception:
+            raw = None
+    if raw is None and name in args:
+        raw = args.get(name)
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on", "sim", "s"}:
+        return True
+    if text in {"0", "false", "no", "off", "nao", "não", "n", ""}:
+        return False
+    return default
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _looks_like_equity_ticker(value: Any) -> bool:
+    text = (value or "").strip().upper()
+    if not text:
+        return False
+    return re.fullmatch(r"[A-Z]{4}\d{1,2}", text) is not None
+
+
 def _is_short_strategy_position(pos: Dict, strategy_tag: str) -> bool:
     side = (pos.get("side") or "").strip().lower()
     if side == "long":
@@ -32,6 +70,91 @@ def _is_short_strategy_position(pos: Dict, strategy_tag: str) -> bool:
     if side == "short":
         return True
     return (pos.get("strategy_tag") or "").strip().lower() == strategy_tag
+
+
+def _is_stock_lot_position(pos: Mapping[str, Any]) -> bool:
+    ticker = (pos.get("ticker") or "").strip().upper()
+    underlying = (pos.get("underlying") or "").strip().upper()
+    strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+    trade_type = (pos.get("trade_type") or "").strip().lower()
+    if not ticker:
+        return False
+    if (pos.get("side") or "").strip().lower() == "short":
+        return False
+    open_qty = _safe_int(pos.get("open_qty") or pos.get("qty"))
+    if open_qty <= 0:
+        return False
+    if strategy_tag == "estoque":
+        return True
+    if strategy_tag == "ranking":
+        return False
+    if trade_type == "stock":
+        return True
+    if underlying and ticker == underlying:
+        return True
+    if not underlying and _looks_like_equity_ticker(ticker):
+        return True
+    if _looks_like_equity_ticker(ticker) and _looks_like_equity_ticker(underlying):
+        return True
+    return False
+
+
+def _build_underlying_quick_filter(
+    positions_open: List[Dict],
+    current_underlying: str,
+) -> List[Dict[str, Any]]:
+    rows: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure_row(ticker: str) -> Dict[str, Any]:
+        return rows.setdefault(
+            ticker,
+            {
+                "ticker": ticker,
+                "qty_real": 0,
+                "qty_simulated": 0,
+                "qty_total": 0,
+                "has_open_calls": False,
+            },
+        )
+
+    for pos in positions_open:
+        ticker = (pos.get("ticker") or "").strip().upper()
+        underlying = (pos.get("underlying") or "").strip().upper()
+        open_qty = _safe_int(pos.get("open_qty") or pos.get("qty"))
+        is_simulated = bool(pos.get("is_simulated"))
+
+        if _is_stock_lot_position(pos):
+            # Para ações em estoque, o ticker é a referência principal de navegação.
+            item = _ensure_row(ticker)
+            if is_simulated:
+                item["qty_simulated"] += open_qty
+            else:
+                item["qty_real"] += open_qty
+            item["qty_total"] = int(item["qty_real"] + item["qty_simulated"])
+            continue
+
+        if (
+            open_qty > 0
+            and underlying
+            and infer_option_type(ticker) == "CALL"
+            and _is_short_strategy_position(pos, "covered_call")
+        ):
+            item = _ensure_row(underlying)
+            item["has_open_calls"] = True
+
+    selected = (current_underlying or "").strip().upper()
+    if selected:
+        _ensure_row(selected)
+
+    ordered = sorted(
+        rows.values(),
+        key=lambda item: (
+            item["ticker"] != selected,
+            -int(item.get("qty_total") or 0),
+            item["ticker"],
+        ),
+    )
+    return ordered
 
 
 def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, Any], List[Dict], List[Dict]]:
@@ -242,6 +365,29 @@ def _parse_float(value) -> float | None:
         return None
 
 
+def _pick_call_premium(row: Mapping[str, Any]) -> tuple[float | None, str]:
+    for key in ("best_bid", "ultimo", "preco_teorico"):
+        val = _parse_float(row.get(key))
+        if val is not None and val > 0:
+            return val, key
+    return None, ""
+
+
+def _extrinsic_pct_spot_from_premium_ref(
+    *,
+    premium_ref: float | None,
+    strike: float | None,
+    underlying_price: float | None,
+) -> float | None:
+    if premium_ref is None or underlying_price is None or underlying_price <= 0:
+        return None
+    intrinsic = 0.0
+    if strike is not None:
+        intrinsic = max(float(underlying_price) - float(strike), 0.0)
+    extrinsic = max(float(premium_ref) - intrinsic, 0.0)
+    return (extrinsic / float(underlying_price)) * 100.0
+
+
 def _apply_buyback_metrics(
     call_positions: List[Dict],
     *,
@@ -291,6 +437,8 @@ def calculate_covered_call_strategy(
     max_days: int,
     min_dist_strike: float,
     buyback_target_pct: float,
+    target_upside_pct: float,
+    only_target_hits: bool,
 ) -> Dict[str, Any]:
     """
     Pure strategy logic for Covered Call.
@@ -301,6 +449,21 @@ def calculate_covered_call_strategy(
 
     stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
     stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
+
+    spot_price = _parse_float(quote.get("price") if quote else None)
+    avg_free_price = stock_real.get("free_avg_price")
+    if avg_free_price is None:
+        avg_free_price = stock_sim.get("free_avg_price")
+    base_price = None
+    if avg_free_price is not None and spot_price is not None:
+        base_price = max(float(avg_free_price), float(spot_price))
+    elif avg_free_price is not None:
+        base_price = float(avg_free_price)
+    elif spot_price is not None:
+        base_price = float(spot_price)
+    target_price = None
+    if base_price is not None:
+        target_price = base_price * (1.0 + (float(target_upside_pct or 0.0) / 100.0))
 
     call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
     call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
@@ -315,7 +478,7 @@ def calculate_covered_call_strategy(
     # It fetches AND filters. We should split it.
     
     # Let's do the filtering here directly on options_rows
-    suggestions: List[Dict] = []
+    all_suggestions: List[Dict] = []
     for r in options_rows:
         opt_type = (r.get("option_type") or infer_option_type(r.get("ticker")) or "").upper()
         if opt_type and opt_type != "CALL":
@@ -325,37 +488,74 @@ def calculate_covered_call_strategy(
             continue
         if dias_uteis < min_days or dias_uteis > max_days:
             continue
-        extrinsic = _parse_float(r["extrinsic_pct_spot"])
+        strike = _parse_float(r["strike"])
+        underlying_price = _parse_float(r["underlying_price"])
+        premium, premium_source = _pick_call_premium(r)
+        extrinsic_ref_pct = _extrinsic_pct_spot_from_premium_ref(
+            premium_ref=premium,
+            strike=strike,
+            underlying_price=underlying_price,
+        )
+        extrinsic = extrinsic_ref_pct
+        if extrinsic is None:
+            extrinsic = _parse_float(r["extrinsic_pct_spot"])
         if extrinsic is None or extrinsic < min_extrinsic:
             continue
         dist = _parse_float(r["dist_perc_strike"])
         if dist is None or dist < min_dist_strike:
             continue
-        
+        effective_sale_price = (strike + premium) if (strike is not None and premium is not None) else None
+        target_hit = bool(target_price is not None and effective_sale_price is not None and effective_sale_price >= target_price)
+        strike_target_hit = bool(target_price is not None and strike is not None and strike >= target_price)
+        premium_pct_base = None
+        if base_price and base_price > 0 and premium is not None:
+            premium_pct_base = (premium / base_price) * 100.0
+        meta_advantage_pct = None
+        if target_price and target_price > 0 and effective_sale_price is not None:
+            meta_advantage_pct = ((effective_sale_price / target_price) - 1.0) * 100.0
+
         suggestion = {
             "ticker": r["ticker"],
             "underlying": r["underlying"],
             "vencimento": r["vencimento"],
             "dias_uteis": int(dias_uteis),
-            "strike": _parse_float(r["strike"]),
+            "strike": strike,
             "dist_perc_strike": _parse_float(r["dist_perc_strike"]),
-            "underlying_price": _parse_float(r["underlying_price"]),
+            "underlying_price": underlying_price,
             "extrinsic_pct_spot": extrinsic,
             "pct_2x": _parse_float(r["pct_2x"]),
             "score_total": _parse_float(r["score_total"]),
+            "premium_ref": premium,
+            "premium_source": premium_source,
+            "effective_sale_price": effective_sale_price,
+            "target_hit": target_hit,
+            "strike_target_hit": strike_target_hit,
+            "premium_pct_base": premium_pct_base,
+            "meta_advantage_pct": meta_advantage_pct,
         }
-        suggestions.append(suggestion)
+        all_suggestions.append(suggestion)
 
-    suggestions.sort(
+    all_suggestions.sort(
         key=lambda s: (
+            not bool(s.get("target_hit")),
             s.get("dias_uteis") or 0,
             -(s.get("extrinsic_pct_spot") or 0.0),
         )
     )
+    hits_count = sum(1 for s in all_suggestions if s.get("target_hit"))
+    if only_target_hits:
+        suggestions = [s for s in all_suggestions if s.get("target_hit")]
+    else:
+        suggestions = all_suggestions
 
+    if only_target_hits:
+        ranking_pool = suggestions
+    else:
+        target_pool = [s for s in suggestions if s.get("target_hit")]
+        ranking_pool = target_pool if target_pool else suggestions
     best_idx = None
     best_score = None
-    for idx, s in enumerate(suggestions):
+    for idx, s in enumerate(ranking_pool):
         extr = s.get("extrinsic_pct_spot")
         dias = s.get("dias_uteis")
         if extr is None or dias is None or dias <= 0:
@@ -365,8 +565,8 @@ def calculate_covered_call_strategy(
             best_score = score
             best_idx = idx
     if best_idx is not None:
-        suggestions[best_idx]["best_flag"] = True
-        suggestions[best_idx]["best_yield_per_day"] = best_score
+        ranking_pool[best_idx]["best_flag"] = True
+        ranking_pool[best_idx]["best_yield_per_day"] = best_score
 
     return {
         "underlying": underlying,
@@ -380,6 +580,14 @@ def calculate_covered_call_strategy(
         "call_summary_real": call_summary_real,
         "call_summary_sim": call_summary_sim,
         "suggestions": suggestions,
+        "sell_target": {
+            "upside_pct": float(target_upside_pct or 0.0),
+            "spot_price": spot_price,
+            "avg_free_price": avg_free_price,
+            "base_price": base_price,
+            "target_price": target_price,
+            "hits_count": hits_count,
+        },
         "buyback_target_pct": buyback_target_pct,
         "buyback_candidates_real": [p for p in covered_real if p.get("buyback_target_hit")],
         "buyback_candidates_simulated": [p for p in covered_sim if p.get("buyback_target_hit")],
@@ -394,9 +602,12 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     min_days = _get_int_arg(args, "min_days", defaults.min_days)
     max_days = _get_int_arg(args, "max_days", defaults.max_days)
     min_dist_strike = _get_float_arg(args, "min_dist_strike", defaults.min_dist_strike)
+    target_upside_pct = _get_float_arg(args, "target_upside_pct", 12.0)
+    only_target_hits = _get_bool_arg(args, "only_target_hits", defaults.only_target_hits)
 
     # IO / Data Fetching
     positions_open = list_positions(include_closed=False)
+    underlying_quick_filter = _build_underlying_quick_filter(positions_open, underlying)
     # We fetch rows here instead of inside the helper
     options_rows = fetch_latest_underlying_options(underlying=underlying)
     quote = fetch_latest_underlying_quote(underlying)
@@ -409,6 +620,7 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             max_days=max_days,
             min_dist_strike=min_dist_strike,
             buyback_target_pct=defaults.buyback_target_pct,
+            only_target_hits=only_target_hits,
         )
 
     ctx = calculate_covered_call_strategy(
@@ -421,6 +633,8 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         max_days=max_days,
         min_dist_strike=min_dist_strike,
         buyback_target_pct=defaults.buyback_target_pct,
+        target_upside_pct=target_upside_pct,
+        only_target_hits=only_target_hits,
     )
 
     # Visão financeira didática para cliente:
@@ -456,7 +670,10 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "min_days": min_days,
         "max_days": max_days,
         "min_dist_strike": min_dist_strike,
+        "target_upside_pct": target_upside_pct,
+        "only_target_hits": only_target_hits,
     }
+    ctx["underlying_quick_filter"] = underlying_quick_filter
     ctx["monthly_premiums"] = monthly_premiums
     ctx["simulated_monthly_premiums"] = simulated_monthly_premiums
     ctx["monthly_operational_result"] = monthly_operational_result

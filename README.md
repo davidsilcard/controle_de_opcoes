@@ -216,3 +216,11 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - Fluxos de prêmio/DARF passaram a validar se o ticker é realmente opção (`infer_option_type`), evitando tratar lote de ação como opção quando houver ticker/ativo divergente por erro de cadastro.
   - Aba `Auditoria` agora mostra também visão de caixa operacional por posição (`Prêmio + DARF + Recompra`), além da visão fiscal, para refletir melhor o efeito real no caixa do cliente.
   - Aba `Covered Call` ganhou visão didática de performance no caixa com cards mensais de `Prêmios líquidos` e `Resultado líquido` (`Prêmio + DARF + Recompra`) para real e simulado.
+  - Aba `Covered Call` ganhou filtro lateral rápido por ticker de garantia (ações em estoque e ativos com call em aberto), mantendo a navegação individual por ativo e preservando os filtros ao trocar o alvo.
+  - Filtro lateral da `Covered Call` foi reforçado para considerar ações em estoque mesmo quando o campo `Ativo` estiver vazio/divergente; a referência da navegação passou a ser o `Ticker` da ação.
+  - Aba `Posições` ganhou a estratégia `Estoque (garantia)` para classificar lotes de ações elegíveis para cobertura de call.
+  - Aba `Posições` agora permite editar o campo `Ativo` e o backend passou a persistir essa alteração; quando `Ativo` vier vazio em posição de ação, o sistema auto-preenche com o próprio `Ticker` (incluindo migração automática de registros antigos).
+  - Aba `Covered Call` passou a calcular meta didática de venda usando o maior valor entre `preço médio livre` e `spot`, com `% alvo` configurável na tela (default 12%), avaliando oportunidades por `preço efetivo = strike + prêmio de referência`.
+  - Aba `Covered Call` ganhou o checkbox `Mostrar só oportunidades que batem meta`; quando marcado, a tabela exibe apenas linhas que realmente atingem a meta e o estado do checkbox fica salvo para a próxima abertura da tela.
+  - Coluna `Meta` da `Covered Call` agora mostra também `% do prêmio sobre a base` e `% de folga/defasagem vs meta`, para facilitar leitura de vantagem além do status `Atinge/Não`.
+  - Aba `Covered Call` passou a calcular `Extr.% Spot` (e o filtro de extrínseco mínimo) usando a mesma referência de prêmio da linha (`bid`/`último`/`teórico`), evitando divergência entre filtro e preço efetivo exibido.

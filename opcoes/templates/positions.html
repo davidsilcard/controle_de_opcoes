@@ -75,6 +75,7 @@
             <option value="__none__" {% if filter_strategy_tag == '__none__' %}selected{% endif %}>Sem estratégia</option>
             <option value="cash_put" {% if filter_strategy_tag == 'cash_put' %}selected{% endif %}>Cash-Covered Put</option>
             <option value="covered_call" {% if filter_strategy_tag == 'covered_call' %}selected{% endif %}>Covered Call</option>
+            <option value="estoque" {% if filter_strategy_tag == 'estoque' %}selected{% endif %}>Estoque (garantia)</option>
             <option value="ranking" {% if filter_strategy_tag == 'ranking' %}selected{% endif %}>Aposta / Ranking</option>
             <option value="outro" {% if filter_strategy_tag == 'outro' %}selected{% endif %}>Outro</option>
           </select>
@@ -183,6 +184,7 @@
                     <option value="">-</option>
                     <option value="cash_put">Cash-Covered Put</option>
                     <option value="covered_call">Covered Call</option>
+                    <option value="estoque">Estoque (garantia)</option>
                     <option value="ranking">Aposta / Ranking</option>
                     <option value="outro">Outro</option>
                   </select>
@@ -246,7 +248,7 @@
                       <input type="hidden" name="next" value="{{ next_url }}">
                     </td>
                     <td style="min-width: 90px;"><input name="ticker" class="form-control form-control-sm" value="{{ pos.ticker }}" readonly></td>
-                    <td style="min-width: 90px;"><input name="underlying" class="form-control form-control-sm" value="{{ pos.underlying }}" readonly></td>
+                    <td style="min-width: 90px;"><input name="underlying" class="form-control form-control-sm" value="{{ pos.underlying }}"></td>
                     <td style="min-width: 90px;">
                       <select name="status" class="form-select form-select-sm">
                         <option value="open" {% if pos.status == 'open' %}selected{% endif %}>open</option>
@@ -270,6 +272,7 @@
                         <option value="" {% if not pos.strategy_tag %}selected{% endif %}>-</option>
                         <option value="cash_put" {% if pos.strategy_tag == 'cash_put' %}selected{% endif %}>Cash-Covered Put</option>
                         <option value="covered_call" {% if pos.strategy_tag == 'covered_call' %}selected{% endif %}>Covered Call</option>
+                        <option value="estoque" {% if pos.strategy_tag == 'estoque' %}selected{% endif %}>Estoque (garantia)</option>
                         <option value="ranking" {% if pos.strategy_tag == 'ranking' %}selected{% endif %}>Aposta / Ranking</option>
                         <option value="outro" {% if pos.strategy_tag == 'outro' %}selected{% endif %}>Outro</option>
                       </select>

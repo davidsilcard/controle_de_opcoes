@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -399,6 +400,7 @@ def create_app() -> Flask:
                 max_days=ccall_cfg.max_days,
                 min_dist_strike=ccall_cfg.min_dist_strike,
                 buyback_target_pct=ccall_buyback_target_pct,
+                only_target_hits=ccall_cfg.only_target_hits,
             )
 
             return redirect(url_for("settings_view"))
@@ -648,24 +650,29 @@ def create_app() -> Flask:
     @app.post("/positions/add")
     def add_position_view():
         form = request.form
-        underlying = form.get("underlying", "").strip()
         ticker = form.get("ticker", "").strip()
+        underlying_input = form.get("underlying", "").strip()
         is_simulated = form.get("is_simulated") == "1"
-        if not underlying:
-            underlying = _lookup_underlying_from_snapshot(ticker) or ""
         qty = int(form.get("qty", 0) or 0)
         entry_price = _parse_form_float(form.get("entry_price"))
         fees_input = form.get("fees")
-        if fees_input:
-            fees = _parse_form_float(fees_input)
-        else:
-            fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
         parent_raw = form.get("parent_position_id")
         parent_id = int(parent_raw) if parent_raw and parent_raw.strip() else None
         side_raw = (form.get("side") or "").strip()
         if not side_raw:
             # Se marcou prêmio, assume venda (short). Caso contrário, default long.
             side_raw = "short" if form.get("record_premium") == "1" else "long"
+        strategy_tag_raw = form.get("strategy_tag") or None
+        underlying = _resolve_underlying_for_position(
+            ticker=ticker,
+            underlying=underlying_input,
+            side=side_raw,
+            strategy_tag=strategy_tag_raw,
+        )
+        if fees_input:
+            fees = _parse_form_float(fees_input)
+        else:
+            fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
 
         pos_id = add_position(
             ticker=ticker,
@@ -680,7 +687,7 @@ def create_app() -> Flask:
             notes=form.get("notes") or None,
             is_simulated=is_simulated,
             parent_position_id=parent_id,
-            strategy_tag=form.get("strategy_tag") or None,
+            strategy_tag=strategy_tag_raw,
         )
 
         # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
@@ -854,6 +861,15 @@ def create_app() -> Flask:
     def update_position_view(position_id: int):
         form = request.form
         status = form.get("status") or None
+        ticker = (form.get("ticker") or "").strip()
+        side_raw = form.get("side") or None
+        strategy_tag_raw = form.get("strategy_tag") or None
+        underlying = _resolve_underlying_for_position(
+            ticker=ticker,
+            underlying=form.get("underlying") or "",
+            side=side_raw,
+            strategy_tag=strategy_tag_raw,
+        )
         is_simulated = None
         if form.get("is_simulated") is not None:
             is_simulated = form.get("is_simulated") == "1"
@@ -863,9 +879,10 @@ def create_app() -> Flask:
                 parent_id = int(form.get("parent_position_id"))
             except ValueError:
                 parent_id = None
-        side_raw = form.get("side") or None
         update_position(
             position_id=position_id,
+            ticker=ticker or None,
+            underlying=underlying,
             trade_date=form.get("trade_date") or None,
             qty=int(form["qty"]) if form.get("qty") else None,
             entry_price=_parse_form_float(form.get("entry_price")) if form.get("entry_price") else None,
@@ -883,9 +900,9 @@ def create_app() -> Flask:
             exit_reason=form.get("exit_reason") or None,
             is_simulated=is_simulated,
             parent_position_id=parent_id,
-            strategy_tag=form.get("strategy_tag") or None,
+            strategy_tag=strategy_tag_raw,
         )
-        ticker = (form.get("ticker") or "").strip().upper()
+        ticker = (ticker or "").strip().upper()
         side = (side_raw or "").strip().lower()
         if _is_option_ticker(ticker) and side == "short":
             qty_val = int(form["qty"]) if form.get("qty") else 0
@@ -963,6 +980,41 @@ def create_app() -> Flask:
 
     def _is_option_ticker(ticker: str | None) -> bool:
         return infer_option_type(ticker or "") in {"CALL", "PUT"}
+
+    def _looks_like_equity_ticker(ticker: str | None) -> bool:
+        text = (ticker or "").strip().upper()
+        if not text:
+            return False
+        return re.fullmatch(r"[A-Z]{4}\d{1,2}", text) is not None
+
+    def _resolve_underlying_for_position(
+        *,
+        ticker: str | None,
+        underlying: str | None,
+        side: str | None = None,
+        strategy_tag: str | None = None,
+    ) -> str:
+        t = (ticker or "").strip().upper()
+        u = (underlying or "").strip().upper()
+        if u:
+            return u
+
+        snap_underlying = _lookup_underlying_from_snapshot(t)
+        if snap_underlying:
+            return snap_underlying.strip().upper()
+
+        side_norm = (side or "").strip().lower()
+        strat_norm = (strategy_tag or "").strip().lower()
+        # Fallback para ações em estoque: quando o usuário não informar "Ativo",
+        # usamos o próprio ticker da ação.
+        if (
+            t
+            and _looks_like_equity_ticker(t)
+            and side_norm != "short"
+            and strat_norm not in {"cash_put", "covered_call", "ranking"}
+        ):
+            return t
+        return u
 
     def _lookup_option_strike(ticker: str) -> float | None:
         """Recupera o strike do ticker de opção a partir do último snapshot."""

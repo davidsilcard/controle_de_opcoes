@@ -54,6 +54,7 @@ def _ensure_tables(conn: sqlite3.Connection, *, commit: bool) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
     _ensure_position_columns(conn)
     _migrate_strategy_sides(conn)
+    _migrate_stock_underlying_defaults(conn)
     if commit:
         conn.commit()
 
@@ -91,6 +92,28 @@ def _migrate_strategy_sides(conn: sqlite3.Connection) -> None:
             WHERE LOWER(COALESCE(side, '')) != 'short'
               AND strategy_tag IN ('cash_put', 'covered_call')
               AND UPPER(COALESCE(ticker, '')) != UPPER(COALESCE(underlying, ''))
+            """
+        )
+    except sqlite3.Error:
+        # Evita quebrar o fluxo em bancos antigos/parciais.
+        return
+
+
+def _migrate_stock_underlying_defaults(conn: sqlite3.Connection) -> None:
+    """Preenche underlying vazio para ações em estoque, usando o próprio ticker."""
+
+    try:
+        conn.execute(
+            """
+            UPDATE positions
+            SET underlying = UPPER(TRIM(ticker))
+            WHERE COALESCE(TRIM(underlying), '') = ''
+              AND LOWER(COALESCE(side, 'long')) != 'short'
+              AND LOWER(COALESCE(strategy_tag, '')) NOT IN ('cash_put', 'covered_call', 'ranking')
+              AND (
+                    UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9]'
+                 OR UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9][0-9]'
+              )
             """
         )
     except sqlite3.Error:
@@ -216,6 +239,8 @@ def close_position(
 def update_position(
     *,
     position_id: int,
+    ticker: Optional[str] = None,
+    underlying: Optional[str] = None,
     trade_date: Optional[str] = None,
     qty: Optional[int] = None,
     entry_price: Optional[float] = None,
@@ -238,6 +263,12 @@ def update_position(
 ) -> None:
     fields = []
     params = []
+    if ticker is not None:
+        fields.append("ticker = ?")
+        params.append(_normalize_ticker(ticker))
+    if underlying is not None:
+        fields.append("underlying = ?")
+        params.append(_normalize_ticker(underlying))
     if trade_date is not None:
         fields.append("trade_date = ?")
         params.append(trade_date)
