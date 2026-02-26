@@ -219,6 +219,7 @@ Ao usar `--force`, se já houver dados no destino o comando cria backup automát
 - `OPCOES_ADMIN_USER` e `OPCOES_ADMIN_PASSWORD`: cria usuário inicial no startup da web.
 - `OPCOES_ADMIN_REPLACE_PASSWORD`: se `1`, atualiza senha do usuário bootstrap no startup.
 - `OPCOES_WEB_DEBUG`: habilita debug local da web (`0` por padrão).
+- `OPCOES_SQLITE_TIMEOUT_SECONDS`: tempo de espera em operações SQLite quando houver lock (default: `30`).
 - `OPCOES_SESSION_IDLE_MINUTES`: expiração por inatividade da sessão web (default: `15` minutos).
 - `OPCOES_SESSION_COOKIE_SECURE`: envia cookie de sessão apenas em HTTPS (`1` recomendado em produção).
 - `OPCOES_SESSION_COOKIE_SAMESITE`: política SameSite do cookie (`Lax` por padrão; opções comuns: `Lax`/`Strict`).
@@ -246,6 +247,7 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - Isolamento multiusuário validado na aba `Covered Call`, incluindo dados, filtro rápido lateral e persistência dos filtros/configurações por usuário logado.
   - Isolamento multiusuário validado na aba `Posições`, incluindo listagem e filtros (`ticker`, `estratégia`, `status`, `simulado`) por usuário logado.
   - Aba `Ranking` agora persiste preferências de filtros por usuário logado (`score`, `limite`, `recorrência`, `recurring_limit`, `underlying`, `tipo CALL/PUT`), mantendo isolamento entre contas.
+  - Camadas de `settings`, `portfolio` e `finance` passaram a evitar escrita de schema em leituras (sem `CREATE TABLE` em todo request), reduzindo risco de `sqlite3.OperationalError: database is locked`; gravações mantêm criação automática quando necessário.
   - Sessão web endurecida: login obrigatório em novo navegador/fechamento, expiração por inatividade (sliding session, default 15 min) e renovação automática de atividade sem derrubar usuário ativo.
   - Recalculo de score/IV no scraper aplicado em todos os casos (com e sem preço do ativo).
   - Segmentação de ranking por delta usando `abs(delta)` (corrige classificação de PUTs).

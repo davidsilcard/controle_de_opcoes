@@ -1,5 +1,6 @@
 import sqlite3
 import datetime as dt
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -30,18 +31,37 @@ class Transaction:
     position_strategy_tag: Optional[str] = None
 
 
-def _get_conn() -> sqlite3.Connection:
+def _sqlite_timeout_seconds() -> float:
+    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 30.0
+    if value <= 0:
+        value = 30.0
+    return value
+
+
+def _get_conn(*, ensure_schema: bool = False) -> sqlite3.Connection:
     db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
+    timeout_seconds = _sqlite_timeout_seconds()
+    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
     conn.row_factory = sqlite3.Row
-    _ensure_table(conn, commit=True)
+    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    if ensure_schema:
+        _ensure_table(conn, commit=True)
     return conn
 
 
-def _resolve_conn(conn: Optional[sqlite3.Connection]) -> tuple[sqlite3.Connection, bool]:
+def _resolve_conn(
+    conn: Optional[sqlite3.Connection],
+    *,
+    ensure_schema: bool = False,
+) -> tuple[sqlite3.Connection, bool]:
     if conn is None:
-        return _get_conn(), True
-    _ensure_table(conn, commit=not conn.in_transaction)
+        return _get_conn(ensure_schema=ensure_schema), True
+    if ensure_schema:
+        _ensure_table(conn, commit=not conn.in_transaction)
     if conn.row_factory is None:
         conn.row_factory = sqlite3.Row
     return conn, False
@@ -84,6 +104,13 @@ def _has_positions_table(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def _has_ledger_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger' LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
 def option_tax_rate(trade_type: str) -> float:
     """Retorna alíquota de IR para opções: 20% day trade, 15% swing."""
     return 0.20 if "day" in (trade_type or "").lower() else 0.15
@@ -112,7 +139,7 @@ def add_transaction(
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
     """Registra uma transação financeira."""
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
         cur = db.execute(
             """
@@ -137,6 +164,8 @@ def get_balance(mode: str = "all") -> float:
     mode = (mode or "all").lower()
     conn = _get_conn()
     try:
+        if not _has_ledger_table(conn):
+            return 0.0
         where = ""
         params: list[object] = []
         if mode == "real":
@@ -166,6 +195,8 @@ def get_monthly_premiums(
     """
     conn = _get_conn()
     try:
+        if not _has_ledger_table(conn):
+            return []
         strategy = _normalize_strategy_tag(strategy_tag)
         where: list[str] = []
         params: list[object] = []
@@ -221,6 +252,8 @@ def get_transactions(
 ) -> List[Transaction]:
     conn = _get_conn()
     try:
+        if not _has_ledger_table(conn):
+            return []
         where: list[str] = []
         params: list[object] = []
         strategy = _normalize_strategy_tag(strategy_tag)
@@ -286,6 +319,8 @@ def get_ledger_sums_by_position(
 ) -> Dict[int, Dict[str, float]]:
     db, owns_conn = _resolve_conn(conn)
     try:
+        if not _has_ledger_table(db):
+            return {}
         where: list[str] = ["position_id IS NOT NULL"]
         params: list[object] = []
         if types:
@@ -327,7 +362,7 @@ def recalc_position_premium_and_darf(
     conn: Optional[sqlite3.Connection] = None,
 ) -> Dict[str, float]:
     """Recalcula (upsert) prêmio e DARF vinculados a uma posição."""
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
         cur = db.execute(
             """
@@ -459,7 +494,7 @@ def sync_short_option_buyback(
 ) -> float:
     """Sincroniza a recompra de encerramento (BUY) para opção vendida."""
 
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
         cur = db.execute(
             """
@@ -538,6 +573,8 @@ def get_premium_position_ids(position_ids: Optional[List[int]] = None) -> set[in
         return set()
     conn = _get_conn()
     try:
+        if not _has_ledger_table(conn):
+            return set()
         params: list[object] = [TransactionType.PREMIUM.value]
         query = "SELECT DISTINCT position_id FROM ledger WHERE type = ? AND position_id IS NOT NULL"
         if position_ids:
@@ -553,6 +590,8 @@ def get_premium_position_ids(position_ids: Optional[List[int]] = None) -> set[in
 def has_position_premium(position_id: int) -> bool:
     conn = _get_conn()
     try:
+        if not _has_ledger_table(conn):
+            return False
         row = conn.execute(
             "SELECT 1 FROM ledger WHERE type = ? AND position_id = ? LIMIT 1",
             (TransactionType.PREMIUM.value, int(position_id)),
@@ -597,7 +636,7 @@ def update_transaction(
         return
 
     params.append(int(tx_id))
-    conn = _get_conn()
+    conn = _get_conn(ensure_schema=True)
     try:
         cur = conn.execute(
             f"UPDATE ledger SET {', '.join(fields)} WHERE id = ?",
@@ -612,7 +651,7 @@ def update_transaction(
 
 def delete_transaction(tx_id: int) -> None:
     """Remove uma transação do ledger."""
-    conn = _get_conn()
+    conn = _get_conn(ensure_schema=True)
     try:
         conn.execute("DELETE FROM ledger WHERE id = ?", (int(tx_id),))
         conn.commit()

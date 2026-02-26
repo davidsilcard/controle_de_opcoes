@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 from typing import Dict
@@ -62,11 +63,25 @@ class FundamentusSettings:
     put_min_score: float = 4.0
 
 
-def _connect() -> sqlite3.Connection:
+def _sqlite_timeout_seconds() -> float:
+    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 30.0
+    if value <= 0:
+        value = 30.0
+    return value
+
+
+def _connect(*, ensure_table: bool = False) -> sqlite3.Connection:
     db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
+    timeout_seconds = _sqlite_timeout_seconds()
+    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
     conn.row_factory = sqlite3.Row
-    _ensure_table(conn)
+    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    if ensure_table:
+        _ensure_table(conn)
     return conn
 
 
@@ -82,16 +97,41 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def get_fee_settings() -> FeeSettings:
-    """Carrega configuração de taxas. Se não existir, retorna zeros."""
-
+def _load_raw_settings() -> Dict[str, str]:
     conn = _connect()
     try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        try:
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table: settings" in str(exc):
+                return {}
+            raise
+    finally:
+        conn.close()
+    return {str(r["key"]): str(r["value"]) for r in rows}
+
+
+def _upsert_settings(params: Dict[str, object]) -> None:
+    conn = _connect(ensure_table=True)
+    try:
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
     finally:
         conn.close()
 
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+def get_fee_settings() -> FeeSettings:
+    """Carrega configuração de taxas. Se não existir, retorna zeros."""
+
+    raw = _load_raw_settings()
 
     def _parse(name: str) -> float:
         text = raw.get(name, "").strip()
@@ -113,13 +153,7 @@ def get_fee_settings() -> FeeSettings:
 
 
 def get_strategy_settings() -> StrategySettings:
-    conn = _connect()
-    try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    finally:
-        conn.close()
-
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+    raw = _load_raw_settings()
 
     def _parse_int(name: str, default: int) -> int:
         text = raw.get(name, "").strip()
@@ -138,13 +172,7 @@ def get_strategy_settings() -> StrategySettings:
 
 
 def get_ranking_view_settings() -> RankingViewSettings:
-    conn = _connect()
-    try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    finally:
-        conn.close()
-
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+    raw = _load_raw_settings()
 
     def _parse_int(name: str, default: int) -> int:
         text = raw.get(name, "").strip()
@@ -167,13 +195,7 @@ def get_ranking_view_settings() -> RankingViewSettings:
 
 
 def get_cash_put_settings() -> CashCoveredPutSettings:
-    conn = _connect()
-    try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    finally:
-        conn.close()
-
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+    raw = _load_raw_settings()
 
     def _parse_float(name: str, default: float) -> float:
         text = raw.get(name, "").strip()
@@ -211,13 +233,7 @@ def get_cash_put_settings() -> CashCoveredPutSettings:
 
 
 def get_covered_call_settings() -> CoveredCallSettings:
-    conn = _connect()
-    try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    finally:
-        conn.close()
-
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+    raw = _load_raw_settings()
 
     def _parse_float(name: str, default: float) -> float:
         text = raw.get(name, "").strip()
@@ -262,13 +278,7 @@ def get_covered_call_settings() -> CoveredCallSettings:
 
 
 def get_fundamentus_settings() -> FundamentusSettings:
-    conn = _connect()
-    try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    finally:
-        conn.close()
-
-    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+    raw = _load_raw_settings()
 
     def _parse_float(name: str, default: float) -> float:
         text = raw.get(name, "").strip()
@@ -298,26 +308,13 @@ def update_fee_settings(
 ) -> None:
     """Atualiza configuração de taxas (substitui os valores atuais)."""
 
-    conn = _connect()
-    try:
-        params = {
-            "fee_equity_fixed": equity_fixed,
-            "fee_equity_percent": equity_percent,
-            "fee_option_fixed": option_fixed,
-            "fee_option_percent_notional": option_percent_notional,
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "fee_equity_fixed": equity_fixed,
+        "fee_equity_percent": equity_percent,
+        "fee_option_fixed": option_fixed,
+        "fee_option_percent_notional": option_percent_notional,
+    }
+    _upsert_settings(params)
 
 
 def update_strategy_settings(
@@ -326,25 +323,12 @@ def update_strategy_settings(
     limit_opportunities: int,
     recurring_days: int,
 ) -> None:
-    conn = _connect()
-    try:
-        params = {
-            "strat_min_score": min_score,
-            "strat_limit_opportunities": limit_opportunities,
-            "strat_recurring_days": recurring_days,
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "strat_min_score": min_score,
+        "strat_limit_opportunities": limit_opportunities,
+        "strat_recurring_days": recurring_days,
+    }
+    _upsert_settings(params)
 
 
 def update_ranking_view_settings(
@@ -353,29 +337,16 @@ def update_ranking_view_settings(
     underlying_filter: str,
     option_type_filter: str,
 ) -> None:
-    conn = _connect()
-    try:
-        normalized_option_type = (option_type_filter or "").strip().upper()
-        if normalized_option_type not in {"CALL", "PUT"}:
-            normalized_option_type = ""
+    normalized_option_type = (option_type_filter or "").strip().upper()
+    if normalized_option_type not in {"CALL", "PUT"}:
+        normalized_option_type = ""
 
-        params = {
-            "rank_recurring_limit": int(recurring_limit),
-            "rank_underlying_filter": (underlying_filter or "").strip().upper(),
-            "rank_option_type_filter": normalized_option_type,
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "rank_recurring_limit": int(recurring_limit),
+        "rank_underlying_filter": (underlying_filter or "").strip().upper(),
+        "rank_option_type_filter": normalized_option_type,
+    }
+    _upsert_settings(params)
 
 
 def update_cash_put_settings(
@@ -390,31 +361,18 @@ def update_cash_put_settings(
     cash_mode: str,
     buyback_target_pct: float,
 ) -> None:
-    conn = _connect()
-    try:
-        params = {
-            "cash_put_underlying": (underlying or "").strip().upper() or "PETR4",
-            "cash_put_min_yield_pct": float(min_yield_pct),
-            "cash_put_min_buffer_pct": float(min_buffer_pct),
-            "cash_put_min_days": int(min_days),
-            "cash_put_max_days": int(max_days),
-            "cash_put_contract_size": int(contract_size),
-            "cash_put_limit": int(limit),
-            "cash_put_cash_mode": (cash_mode or "real").strip().lower() or "real",
-            "cash_put_buyback_target_pct": float(buyback_target_pct),
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "cash_put_underlying": (underlying or "").strip().upper() or "PETR4",
+        "cash_put_min_yield_pct": float(min_yield_pct),
+        "cash_put_min_buffer_pct": float(min_buffer_pct),
+        "cash_put_min_days": int(min_days),
+        "cash_put_max_days": int(max_days),
+        "cash_put_contract_size": int(contract_size),
+        "cash_put_limit": int(limit),
+        "cash_put_cash_mode": (cash_mode or "real").strip().lower() or "real",
+        "cash_put_buyback_target_pct": float(buyback_target_pct),
+    }
+    _upsert_settings(params)
 
 
 def update_covered_call_settings(
@@ -427,29 +385,16 @@ def update_covered_call_settings(
     buyback_target_pct: float,
     only_target_hits: bool,
 ) -> None:
-    conn = _connect()
-    try:
-        params = {
-            "ccall_underlying": (underlying or "").strip().upper() or "CMIG4",
-            "ccall_min_extrinsic": float(min_extrinsic),
-            "ccall_min_days": int(min_days),
-            "ccall_max_days": int(max_days),
-            "ccall_min_dist_strike": float(min_dist_strike),
-            "ccall_buyback_target_pct": float(buyback_target_pct),
-            "ccall_only_target_hits": "1" if bool(only_target_hits) else "0",
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "ccall_underlying": (underlying or "").strip().upper() or "CMIG4",
+        "ccall_min_extrinsic": float(min_extrinsic),
+        "ccall_min_days": int(min_days),
+        "ccall_max_days": int(max_days),
+        "ccall_min_dist_strike": float(min_dist_strike),
+        "ccall_buyback_target_pct": float(buyback_target_pct),
+        "ccall_only_target_hits": "1" if bool(only_target_hits) else "0",
+    }
+    _upsert_settings(params)
 
 
 def update_fundamentus_settings(
@@ -460,27 +405,14 @@ def update_fundamentus_settings(
     put_target_monthly_yield_pct: float,
     put_min_score: float,
 ) -> None:
-    conn = _connect()
-    try:
-        params = {
-            "fund_target_yield_pct": float(target_yield_pct),
-            "fund_put_distance_limit_pct": float(put_distance_limit_pct),
-            "fund_put_min_premium_pct": float(put_min_premium_pct),
-            "fund_put_target_monthly_yield_pct": float(put_target_monthly_yield_pct),
-            "fund_put_min_score": float(put_min_score),
-        }
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    params = {
+        "fund_target_yield_pct": float(target_yield_pct),
+        "fund_put_distance_limit_pct": float(put_distance_limit_pct),
+        "fund_put_min_premium_pct": float(put_min_premium_pct),
+        "fund_put_target_monthly_yield_pct": float(put_target_monthly_yield_pct),
+        "fund_put_min_score": float(put_min_score),
+    }
+    _upsert_settings(params)
 
 
 __all__ = [

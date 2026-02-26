@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from typing import Iterable, List, Optional
 
@@ -8,19 +9,38 @@ from .scraper.storage import _ensure_parent
 from .utils import infer_option_type, parse_ptbr_number
 
 
-def _connect() -> sqlite3.Connection:
+def _sqlite_timeout_seconds() -> float:
+    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 30.0
+    if value <= 0:
+        value = 30.0
+    return value
+
+
+def _connect(*, ensure_schema: bool = False) -> sqlite3.Connection:
     db_path = get_db_path()
     _ensure_parent(db_path)
-    conn = sqlite3.connect(db_path)
+    timeout_seconds = _sqlite_timeout_seconds()
+    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
     conn.row_factory = sqlite3.Row
-    _ensure_tables(conn, commit=True)
+    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    if ensure_schema:
+        _ensure_tables(conn, commit=True)
     return conn
 
 
-def _resolve_conn(conn: Optional[sqlite3.Connection]) -> tuple[sqlite3.Connection, bool]:
+def _resolve_conn(
+    conn: Optional[sqlite3.Connection],
+    *,
+    ensure_schema: bool = False,
+) -> tuple[sqlite3.Connection, bool]:
     if conn is None:
-        return _connect(), True
-    _ensure_tables(conn, commit=not conn.in_transaction)
+        return _connect(ensure_schema=ensure_schema), True
+    if ensure_schema:
+        _ensure_tables(conn, commit=not conn.in_transaction)
     if conn.row_factory is None:
         conn.row_factory = sqlite3.Row
     return conn, False
@@ -191,7 +211,7 @@ def add_position(
     strategy_tag: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     cursor = db.cursor()
     cursor.execute(
         """
@@ -252,7 +272,7 @@ def close_position(
     exit_reason: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     cur = db.cursor()
     cur.execute(
         """
@@ -365,7 +385,7 @@ def update_position(
         return
 
     params.append(int(position_id))
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     cur = db.cursor()
     cur.execute(f"UPDATE positions SET {', '.join(fields)} WHERE id = ?", params)
     if cur.rowcount == 0:
@@ -378,7 +398,7 @@ def update_position(
 
 
 def delete_position(*, position_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
-    db, owns_conn = _resolve_conn(conn)
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     cur = db.cursor()
     cur.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
     if owns_conn:
@@ -389,6 +409,11 @@ def delete_position(*, position_id: int, conn: Optional[sqlite3.Connection] = No
 def get_position(position_id: int, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     db, owns_conn = _resolve_conn(conn)
     try:
+        has_positions_table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
+        ).fetchone()
+        if not has_positions_table:
+            return None
         snap_subquery = _snapshot_subquery_sql(_has_option_snapshots_table(db))
         query = f"""
             SELECT
@@ -429,6 +454,13 @@ def list_positions(
     conn: Optional[sqlite3.Connection] = None,
 ) -> List[dict]:
     db, owns_conn = _resolve_conn(conn)
+    has_positions_table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
+    ).fetchone()
+    if not has_positions_table:
+        if owns_conn:
+            db.close()
+        return []
     where: List[str] = []
     params: List[object] = []
     if only_closed:
