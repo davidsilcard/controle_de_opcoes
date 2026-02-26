@@ -2,7 +2,7 @@ opcoes – Monitoramento e gestão de opções (CALLs/PUTs)
 
 Projeto para coletar dados de opções, rankear oportunidades, manter histórico e apoiar
 decisões com foco didático. A plataforma separa responsabilidades (scraper, ranking,
-estratégias, posições, finanças e DARF) e mantém trilha auditável no SQLite.
+estratégias, posições, finanças e DARF) e mantém trilha auditável em SQLite (padrão), com suporte gradual a PostgreSQL.
 
 ## Visão geral
 - Scraper diário do `https://opcoes.net.br/opcoes/bovespa` via Playwright.
@@ -146,6 +146,69 @@ poetry run python -m opcoes.cli tax --year 2025 --month 1 --mode all
 ```
 `--mode` aceita `real` (default), `simulated` ou `all`.
 
+### Diagnóstico de banco (pré-migração para servidor)
+```bash
+poetry add psycopg[binary]
+poetry run python -m opcoes.cli db check
+```
+Esse comando valida variáveis de ambiente, testa host/porta e executa `SELECT 1` no PostgreSQL.
+Observação: o `db check` valida conectividade e prontidão do PostgreSQL antes de ativar/expandir o runtime nesse backend.
+
+### Migração SQLite -> PostgreSQL (fase de preparação)
+Criar backup de segurança antes de qualquer troca de runtime:
+```bash
+poetry run python -m opcoes.cli db backup --username admin
+```
+Simular rollback sem sobrescrever nada:
+```bash
+poetry run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup> --dry-run
+```
+Executar rollback real (restaura SQLite):
+```bash
+poetry run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup>
+```
+Dry-run (não grava no PostgreSQL):
+```bash
+poetry run python -m opcoes.cli db migrate --username admin --dry-run
+```
+Migração efetiva:
+```bash
+poetry run python -m opcoes.cli db migrate --username admin --replace
+```
+Validar contagens após migração:
+```bash
+poetry run python -m opcoes.cli db verify --username admin
+```
+Executar checklist completo de cutover (conectividade + contagens + smoke das camadas):
+```bash
+poetry run python -m opcoes.cli db cutover-check --username admin
+```
+Aplicar índices recomendados no schema PostgreSQL (otimização de performance pós-migração):
+```bash
+poetry run python -m opcoes.cli db optimize --username admin
+```
+Opções úteis:
+- `db backup`: aceita `--backup-root`, `--source-dir`, `--source-main`, `--source-iv`, `--source-flow`, `--no-aux`, `--dry-run`.
+- `db rollback`: aceita `--target-dir`, `--no-aux`, `--no-restore-point`, `--dry-run`.
+- `db cutover-check`: aceita `--timeout`, `--schema`, `--source-dir`, `--source-main`, `--source-iv`, `--source-flow`, `--no-aux`.
+- `db optimize`: aceita `--schema`, `--no-analyze`.
+- `--schema nome_schema`: define schema de destino (default: username).
+- `--no-aux`: migra apenas `opcoes_snapshots.db` (sem `iv_history.db` e `flow_history.db`).
+- `--batch-size 5000`: ajusta tamanho do lote de leitura para o `COPY`.
+- `--source-dir` ou `--source-main/--source-iv/--source-flow`: sobrescreve caminhos padrão.
+
+Importante: essa etapa copia os dados para o PostgreSQL. O runtime já suporta fase gradual em PostgreSQL (com fallback para SQLite), ativada por variável de ambiente.
+
+### Runtime gradual (fase 2 em produção)
+- As camadas de **Ranking**, **Configurações** (`settings`), **Posições** (`portfolio`), **Financeiro** (`ledger`) e **DARF** já suportam PostgreSQL.
+- Fluxos transacionais (ex.: `assign_put`, `callaway`, sincronização de recompra) usam transação no backend ativo.
+- Para ativar:
+```bash
+export OPCOES_DB_BACKEND=postgres
+```
+- Fallback automático: se houver falha de conexão/query no PostgreSQL, o runtime volta para SQLite sem derrubar o fluxo.
+- Em modo web multiusuário, o schema PostgreSQL é derivado do usuário logado.
+
 ## Web app
 Rode:
 ```bash
@@ -161,7 +224,8 @@ Páginas principais:
 
 ### Acesso multiusuário (login + isolamento por usuário)
 - A web agora pode operar em modo multiusuário com login obrigatório.
-- Cada usuário autenticado usa um banco SQLite próprio em `data/users/<usuario>/opcoes_snapshots.db`.
+- No modo SQLite, cada usuário autenticado usa um banco próprio em `data/users/<usuario>/opcoes_snapshots.db`.
+- No modo PostgreSQL, cada usuário autenticado usa schema próprio (derivado do login).
 - Isso evita mistura de posições, caixa, DARF e configurações entre clientes.
 
 Criar usuário:
@@ -211,6 +275,10 @@ Ao usar `--force`, se já houver dados no destino o comando cria backup automát
 - `data/opcoes_latest.checkpoint.db`: checkpoint transacional da coleta (retomada por símbolo).
 
 ## Variáveis de ambiente
+- `OPCOES_DB_BACKEND`: backend de dados (`sqlite` padrão, `postgres` para fase gradual das camadas web/CLI).
+- `OPCOES_PG_SCHEMA`: schema PostgreSQL padrão quando não houver contexto de usuário web (default: `public`).
+- `DATABASE_URL`: string de conexão PostgreSQL (recomendado para `db check`).
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_HOST`, `DB_PORT`: alternativa ao `DATABASE_URL` para `db check`.
 - `OPCOES_DB_PATH`: define outro caminho para o SQLite (default: `data/opcoes_snapshots.db`).
 - `OPCOES_AUTH_ENABLED`: ativa/desativa login web (`1` por padrão; use `0` para desativar).
 - `OPCOES_SECRET_KEY`: chave de sessão Flask (obrigatório definir em produção).
@@ -238,6 +306,17 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
+  - Novo comando `poetry run python -m opcoes.cli db optimize` para criar índices recomendados no schema PostgreSQL (`option_snapshots`, `underlying_snapshots`, `positions`, `ledger`) e reduzir latência no runtime web/CLI.
+  - Novo comando `poetry run python -m opcoes.cli db cutover-check` com validação de prontidão para ativar runtime PostgreSQL (conectividade, consistência de contagens e smoke das camadas `portfolio/finance/darf/settings/report`).
+  - Fase gradual ampliada para PostgreSQL nas camadas de `portfolio`, `finance` e `darf`, com fallback automático para SQLite.
+  - Transações da camada `db` (`db_transaction`) agora respeitam o backend ativo (`postgres`/`sqlite`) para manter consistência dos fluxos de estratégia.
+  - Fase gradual ampliada: módulo de `settings` passou a ler/gravar em PostgreSQL quando `OPCOES_DB_BACKEND=postgres`, com fallback automático para SQLite em falhas.
+  - Fase 1 da troca de runtime iniciada: Ranking passou a suportar leitura via PostgreSQL (`OPCOES_DB_BACKEND=postgres`) com fallback automático para SQLite em falhas de conexão/query.
+  - Novos comandos `poetry run python -m opcoes.cli db backup` e `db rollback` para automação de backup/retorno dos SQLite antes da troca de runtime, com manifesto e `--dry-run`.
+  - Novo comando `poetry run python -m opcoes.cli db verify` para comparar contagens SQLite x PostgreSQL por tabela e validar integridade pós-migração.
+  - Novo comando `poetry run python -m opcoes.cli db migrate` para migrar bases SQLite por usuário (incluindo `iv_history`/`flow_history`) para PostgreSQL em schema dedicado, com modo `--dry-run` e cópia em streaming.
+  - Novo comando `poetry run python -m opcoes.cli db check` para validar prontidão de conexão com PostgreSQL (env + TCP + `SELECT 1`) antes da migração de banco.
+  - Runtime agora carrega automaticamente `.env` na inicialização via CLI/Web (`python -m opcoes.cli ...` e `python -m opcoes.web`), sem sobrescrever variáveis já exportadas no shell.
   - Base multiusuário adicionada na web: login/senha, sessão e isolamento de dados por usuário (um SQLite por conta), além de comando CLI para gestão de usuários (`user create`, `user list`).
   - CLI ganhou migração legada por usuário (`user migrate-legacy`) para vincular histórico anterior ao banco isolado de uma conta (com backup automático em sobrescrita).
   - Primeiro acesso de usuário novo agora exibe estado inicial guiado no Ranking (sem erro 500) quando ainda não houver snapshots coletados.

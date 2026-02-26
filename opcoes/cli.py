@@ -13,8 +13,29 @@ from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
-from .fundamentus import FundamentusFilterConfig, apply_filters, latest_snapshot_date, scrape_and_store
-from .history import cleanup_history, list_decisions, record_decision, record_ranking_entries
+from .db_backup import create_sqlite_backup, restore_sqlite_backup
+from .db_health import is_postgres_ready, run_db_check
+from .db_cutover import run_cutover_ready_check
+from .db_optimize import optimize_postgres_schema
+from .db_migration import (
+    migrate_sqlite_sources_to_postgres,
+    resolve_user_source_databases,
+    sanitize_schema_name,
+    verify_sqlite_sources_in_postgres,
+)
+from .fundamentus import (
+    FundamentusFilterConfig,
+    apply_filters,
+    latest_snapshot_date,
+    scrape_and_store,
+)
+from .history import (
+    cleanup_history,
+    list_decisions,
+    record_decision,
+    record_ranking_entries,
+)
+from .runtime_env import load_dotenv_once
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,11 +194,15 @@ def parse_args() -> argparse.Namespace:
 
     pa = pcs.add_parser("add", help="Registra uma nova posição (compra/venda)")
     pa.add_argument("--ticker", required=True, help="Ticker da opção (ex.: USIMJ605)")
-    pa.add_argument("--underlying", required=True, help="Ticker do ativo base (ex.: USIM5)")
+    pa.add_argument(
+        "--underlying", required=True, help="Ticker do ativo base (ex.: USIM5)"
+    )
     pa.add_argument("--trade-date", required=True, help="Data da compra (YYYY-MM-DD)")
     pa.add_argument("--qty", type=int, required=True, help="Quantidade de contratos")
     pa.add_argument("--price", type=float, required=True, help="Preço por contrato")
-    pa.add_argument("--fees", type=float, default=0.0, help="Custos/Taxas adicionais (opcional)")
+    pa.add_argument(
+        "--fees", type=float, default=0.0, help="Custos/Taxas adicionais (opcional)"
+    )
     pa.add_argument(
         "--side",
         choices=["long", "short"],
@@ -199,18 +224,38 @@ def parse_args() -> argparse.Namespace:
 
     pl = pcs.add_parser("list", help="Lista posições registradas")
     group = pl.add_mutually_exclusive_group()
-    group.add_argument("--include-closed", action="store_true", help="Inclui posições fechadas")
-    group.add_argument("--only-closed", action="store_true", help="Mostra apenas fechadas")
+    group.add_argument(
+        "--include-closed", action="store_true", help="Inclui posições fechadas"
+    )
+    group.add_argument(
+        "--only-closed", action="store_true", help="Mostra apenas fechadas"
+    )
     pl.add_argument("--ticker", type=str, default=None, help="Filtra por ticker exato")
 
     pc_close = pcs.add_parser("close", help="Fecha uma posição aberta")
-    pc_close.add_argument("--id", type=int, required=True, help="ID da posição (veja em position list)")
-    pc_close.add_argument("--exit-date", required=True, help="Data de saída (YYYY-MM-DD)")
-    pc_close.add_argument("--price", type=float, required=True, help="Preço de saída por contrato")
+    pc_close.add_argument(
+        "--id", type=int, required=True, help="ID da posição (veja em position list)"
+    )
+    pc_close.add_argument(
+        "--exit-date", required=True, help="Data de saída (YYYY-MM-DD)"
+    )
+    pc_close.add_argument(
+        "--price", type=float, required=True, help="Preço de saída por contrato"
+    )
 
     rc = sub.add_parser("report", help="Gera relatório diário pós-scrape")
-    rc.add_argument("--min-score", type=int, default=8, help="Score mínimo para oportunidades (default: 8)")
-    rc.add_argument("--limit", type=int, default=20, help="Quantidade máxima de oportunidades listadas")
+    rc.add_argument(
+        "--min-score",
+        type=int,
+        default=8,
+        help="Score mínimo para oportunidades (default: 8)",
+    )
+    rc.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Quantidade máxima de oportunidades listadas",
+    )
     rc.add_argument(
         "--no-persist",
         dest="persist",
@@ -234,17 +279,40 @@ def parse_args() -> argparse.Namespace:
         help="Arquivo CSV de saída (default: data/opcoes_latest.csv)",
     )
 
-    dec = sub.add_parser("decision", help="Registra ou lista decisões (linha completa do snapshot)")
+    dec = sub.add_parser(
+        "decision", help="Registra ou lista decisões (linha completa do snapshot)"
+    )
     decs = dec.add_subparsers(dest="subcmd", required=True)
-    dec_add = decs.add_parser("add", help="Registra a linha do ticker do snapshot mais recente (ou data específica)")
-    dec_add.add_argument("--ticker", required=True, help="Ticker da opção (ex.: B3SAB150)")
-    dec_add.add_argument("--snapshot-date", type=str, default=None, help="Data do snapshot YYYY-MM-DD (opcional)")
-    dec_add.add_argument("--notes", type=str, default=None, help="Observações (opcional)")
+    dec_add = decs.add_parser(
+        "add",
+        help="Registra a linha do ticker do snapshot mais recente (ou data específica)",
+    )
+    dec_add.add_argument(
+        "--ticker", required=True, help="Ticker da opção (ex.: B3SAB150)"
+    )
+    dec_add.add_argument(
+        "--snapshot-date",
+        type=str,
+        default=None,
+        help="Data do snapshot YYYY-MM-DD (opcional)",
+    )
+    dec_add.add_argument(
+        "--notes", type=str, default=None, help="Observações (opcional)"
+    )
     dec_list = decs.add_parser("list", help="Lista decisões registradas")
-    dec_list.add_argument("--limit", type=int, default=50, help="Limite de linhas (default: 50)")
+    dec_list.add_argument(
+        "--limit", type=int, default=50, help="Limite de linhas (default: 50)"
+    )
 
-    cl = sub.add_parser("cleanup", help="Remove rankings (e opcionalmente snapshots) antigos/vencidos")
-    cl.add_argument("--retention-days", type=int, default=180, help="Janela de retenção em dias (default: 180)")
+    cl = sub.add_parser(
+        "cleanup", help="Remove rankings (e opcionalmente snapshots) antigos/vencidos"
+    )
+    cl.add_argument(
+        "--retention-days",
+        type=int,
+        default=180,
+        help="Janela de retenção em dias (default: 180)",
+    )
     cl.add_argument(
         "--purge-snapshots",
         action="store_true",
@@ -265,8 +333,14 @@ def parse_args() -> argparse.Namespace:
     ucs = uc.add_subparsers(dest="subcmd", required=True)
 
     uc_create = ucs.add_parser("create", help="Cria usuário de acesso web")
-    uc_create.add_argument("--username", required=True, help="Nome do usuário (minúsculo, 3-64 chars)")
-    uc_create.add_argument("--password", default=None, help="Senha. Se omitida, solicita via prompt seguro.")
+    uc_create.add_argument(
+        "--username", required=True, help="Nome do usuário (minúsculo, 3-64 chars)"
+    )
+    uc_create.add_argument(
+        "--password",
+        default=None,
+        help="Senha. Se omitida, solicita via prompt seguro.",
+    )
     uc_create.add_argument(
         "--replace",
         action="store_true",
@@ -309,8 +383,288 @@ def parse_args() -> argparse.Namespace:
         help="Sobrescreve destino se já tiver dados, criando backup automático.",
     )
 
+    dbc = sub.add_parser("db", help="Diagnóstico de banco de dados")
+    dbs = dbc.add_subparsers(dest="subcmd", required=True)
+    db_check = dbs.add_parser(
+        "check", help="Valida configuração e conexão com PostgreSQL"
+    )
+    db_check.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Timeout em segundos para teste de rede/SQL (default: 5).",
+    )
+    db_migrate = dbs.add_parser(
+        "migrate",
+        help="Migra dados SQLite para PostgreSQL (schema por usuário).",
+    )
+    db_migrate.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+    )
+    db_migrate.add_argument(
+        "--schema",
+        type=str,
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    db_migrate.add_argument(
+        "--source-dir",
+        type=Path,
+        default=None,
+        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
+    )
+    db_migrate.add_argument(
+        "--source-main",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco principal SQLite.",
+    )
+    db_migrate.add_argument(
+        "--source-iv",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco iv_history.db.",
+    )
+    db_migrate.add_argument(
+        "--source-flow",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco flow_history.db.",
+    )
+    db_migrate.add_argument(
+        "--no-aux",
+        action="store_true",
+        help="Migra apenas o banco principal (ignora iv_history e flow_history).",
+    )
+    db_migrate.add_argument(
+        "--replace",
+        action="store_true",
+        help="Sobrescreve tabelas existentes no schema destino.",
+    )
+    db_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra plano de migração sem gravar no PostgreSQL.",
+    )
+    db_migrate.add_argument(
+        "--batch-size",
+        type=int,
+        default=5000,
+        help="Tamanho do lote de leitura SQLite para COPY (default: 5000).",
+    )
+    db_verify = dbs.add_parser(
+        "verify",
+        help="Compara contagem de linhas entre SQLite e PostgreSQL para um usuário.",
+    )
+    db_verify.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+    )
+    db_verify.add_argument(
+        "--schema",
+        type=str,
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    db_verify.add_argument(
+        "--source-dir",
+        type=Path,
+        default=None,
+        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
+    )
+    db_verify.add_argument(
+        "--source-main",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco principal SQLite.",
+    )
+    db_verify.add_argument(
+        "--source-iv",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco iv_history.db.",
+    )
+    db_verify.add_argument(
+        "--source-flow",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco flow_history.db.",
+    )
+    db_verify.add_argument(
+        "--no-aux",
+        action="store_true",
+        help="Compara apenas o banco principal (ignora iv_history e flow_history).",
+    )
+    db_cutover = dbs.add_parser(
+        "cutover-check",
+        help="Checklist completo de prontidão para ativar runtime PostgreSQL.",
+    )
+    db_cutover.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+    )
+    db_cutover.add_argument(
+        "--schema",
+        type=str,
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    db_cutover.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Timeout em segundos para teste de rede/SQL (default: 5).",
+    )
+    db_cutover.add_argument(
+        "--source-dir",
+        type=Path,
+        default=None,
+        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
+    )
+    db_cutover.add_argument(
+        "--source-main",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco principal SQLite.",
+    )
+    db_cutover.add_argument(
+        "--source-iv",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco iv_history.db.",
+    )
+    db_cutover.add_argument(
+        "--source-flow",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco flow_history.db.",
+    )
+    db_cutover.add_argument(
+        "--no-aux",
+        action="store_true",
+        help="Executa verificação apenas com banco principal (ignora iv_history e flow_history).",
+    )
+    db_optimize = dbs.add_parser(
+        "optimize",
+        help="Cria índices recomendados no schema PostgreSQL para reduzir latência de runtime.",
+    )
+    db_optimize.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário de referência para derivar schema default (default: admin).",
+    )
+    db_optimize.add_argument(
+        "--schema",
+        type=str,
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    db_optimize.add_argument(
+        "--no-analyze",
+        action="store_true",
+        help="Não executa ANALYZE após criar índices.",
+    )
+    db_backup = dbs.add_parser(
+        "backup",
+        help="Cria backup dos bancos SQLite de um usuário para rollback seguro.",
+    )
+    db_backup.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+    )
+    db_backup.add_argument(
+        "--backup-root",
+        type=Path,
+        default=Path("data/backups/sqlite"),
+        help="Diretório raiz para armazenar backups (default: data/backups/sqlite).",
+    )
+    db_backup.add_argument(
+        "--source-dir",
+        type=Path,
+        default=None,
+        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
+    )
+    db_backup.add_argument(
+        "--source-main",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco principal SQLite.",
+    )
+    db_backup.add_argument(
+        "--source-iv",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco iv_history.db.",
+    )
+    db_backup.add_argument(
+        "--source-flow",
+        type=Path,
+        default=None,
+        help="Caminho explícito para o banco flow_history.db.",
+    )
+    db_backup.add_argument(
+        "--no-aux",
+        action="store_true",
+        help="Inclui apenas opcoes_snapshots.db no backup.",
+    )
+    db_backup.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra plano sem copiar arquivos.",
+    )
+
+    db_rollback = dbs.add_parser(
+        "rollback",
+        help="Restaura bancos SQLite a partir de um backup criado pelo comando db backup.",
+    )
+    db_rollback.add_argument(
+        "--backup-dir",
+        type=Path,
+        required=True,
+        help="Diretório do backup (contendo manifest.json).",
+    )
+    db_rollback.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Usuário destino padrão para restauração (default: admin).",
+    )
+    db_rollback.add_argument(
+        "--target-dir",
+        type=Path,
+        default=None,
+        help="Diretório de destino opcional para restaurar os arquivos SQLite.",
+    )
+    db_rollback.add_argument(
+        "--no-aux",
+        action="store_true",
+        help="Restaura apenas opcoes_snapshots.db.",
+    )
+    db_rollback.add_argument(
+        "--no-restore-point",
+        action="store_true",
+        help="Desativa criação de backup local dos arquivos atuais antes de sobrescrever.",
+    )
+    db_rollback.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra plano de restauração sem sobrescrever arquivos.",
+    )
+
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
-    fc.add_argument("--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)")
+    fc.add_argument(
+        "--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)"
+    )
     fc.add_argument(
         "--patrim-min",
         type=float,
@@ -331,7 +685,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     default_cfg = FundamentusFilterConfig()
-    ff = sub.add_parser("fundamentus-filter", help="Aplica filtros Fundamentus no snapshot")
+    ff = sub.add_parser(
+        "fundamentus-filter", help="Aplica filtros Fundamentus no snapshot"
+    )
     ff.add_argument(
         "--snapshot-date",
         type=str,
@@ -384,6 +740,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    loaded_env_path = load_dotenv_once()
     args = parse_args()
 
     if args.cmd == "scrape":
@@ -460,7 +817,9 @@ def main() -> None:
             print(f"Posição registrada com ID {pos_id}.")
         elif args.subcmd == "list":
             positions = list_positions(
-                include_closed=args.include_closed, only_closed=args.only_closed, ticker=args.ticker
+                include_closed=args.include_closed,
+                only_closed=args.only_closed,
+                ticker=args.ticker,
             )
             if not positions:
                 print("Nenhuma posição encontrada.")
@@ -469,7 +828,9 @@ def main() -> None:
         elif args.subcmd == "close":
             exit_date = _parse_trade_date(args.exit_date)
             try:
-                close_position(position_id=args.id, exit_date=exit_date, exit_price=args.price)
+                close_position(
+                    position_id=args.id, exit_date=exit_date, exit_price=args.price
+                )
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
             print(f"Posição {args.id} fechada em {exit_date} a {args.price:.2f}.")
@@ -492,7 +853,9 @@ def main() -> None:
             try:
                 date = _parse_trade_date(args.date) if args.date else None
             except SystemExit:
-                raise SystemExit("Data inválida em --date. Use o formato YYYY-MM-DD.") from None
+                raise SystemExit(
+                    "Data inválida em --date. Use o formato YYYY-MM-DD."
+                ) from None
             try:
                 out = export_snapshot(output_csv=args.output, snapshot_date=date)
             except RuntimeError as exc:
@@ -505,14 +868,18 @@ def main() -> None:
                 try:
                     snap_date = _parse_trade_date(args.snapshot_date)
                 except SystemExit:
-                    raise SystemExit("Data inválida em --snapshot-date. Use o formato YYYY-MM-DD.") from None
+                    raise SystemExit(
+                        "Data inválida em --snapshot-date. Use o formato YYYY-MM-DD."
+                    ) from None
             decision_id = record_decision(
                 args.ticker,
                 snapshot_date=snap_date,
                 notes=args.notes,
             )
             if decision_id is None:
-                raise SystemExit(f"Ticker {args.ticker} não encontrado no snapshot informado.")
+                raise SystemExit(
+                    f"Ticker {args.ticker} não encontrado no snapshot informado."
+                )
             print(f"Decisão registrada com ID {decision_id}.")
         elif args.subcmd == "list":
             rows = list_decisions(limit=args.limit)
@@ -521,7 +888,9 @@ def main() -> None:
             else:
                 _print_decisions(rows)
     elif args.cmd == "cleanup":
-        removed = cleanup_history(retention_days=args.retention_days, purge_snapshots=args.purge_snapshots)
+        removed = cleanup_history(
+            retention_days=args.retention_days, purge_snapshots=args.purge_snapshots
+        )
         print(
             "Limpeza concluída: "
             f"rankings {removed['ranking_entries']} apagados, runs {removed['ranking_runs']} apagados, "
@@ -537,13 +906,21 @@ def main() -> None:
         else:
             mode = "real"
             is_simulated = False
-        summary = compute_tax(month=args.month, year=args.year, is_simulated=is_simulated)
+        summary = compute_tax(
+            month=args.month, year=args.year, is_simulated=is_simulated
+        )
         print(f"Relatório fiscal {summary.month:02d}/{summary.year} (modo: {mode})")
-        print(f"  Swing trade: lucro líquido R$ {summary.swing_net:.2f}, IR devido R$ {summary.swing_ir:.2f}, IRRF R$ {summary.swing_irrf:.2f}")
-        print(f"  Day trade:   lucro líquido R$ {summary.daytrade_net:.2f}, IR devido R$ {summary.daytrade_ir:.2f}, IRRF R$ {summary.daytrade_irrf:.2f}")
+        print(
+            f"  Swing trade: lucro líquido R$ {summary.swing_net:.2f}, IR devido R$ {summary.swing_ir:.2f}, IRRF R$ {summary.swing_irrf:.2f}"
+        )
+        print(
+            f"  Day trade:   lucro líquido R$ {summary.daytrade_net:.2f}, IR devido R$ {summary.daytrade_ir:.2f}, IRRF R$ {summary.daytrade_irrf:.2f}"
+        )
         total_ir = summary.swing_ir + summary.daytrade_ir
         total_irrf = summary.swing_irrf + summary.daytrade_irrf
-        print(f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})")
+        print(
+            f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})"
+        )
     elif args.cmd == "user":
         if args.subcmd == "create":
             password = args.password
@@ -588,6 +965,285 @@ def main() -> None:
                 print(f"      destino: {dst}")
                 if backup:
                     print(f"      backup : {backup}")
+    elif args.cmd == "db":
+        if args.subcmd == "check":
+            report = run_db_check(timeout_seconds=float(args.timeout))
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print(f"Runtime atual: SQLite ({report['runtime_target']})")
+
+            if report.get("postgres_configured"):
+                source = report.get("postgres_source") or "desconhecida"
+                print(f"PostgreSQL configurado via: {source}")
+                print(f"Destino PostgreSQL: {report.get('postgres_target')}")
+                if report.get("tcp_ok") is not None:
+                    tcp_status = "OK" if report["tcp_ok"] else "falhou"
+                    print(
+                        f"Teste TCP host/porta: {tcp_status} ({report.get('tcp_message')})"
+                    )
+                if report.get("sql_ok") is not None:
+                    sql_status = "OK" if report["sql_ok"] else "falhou"
+                    print(
+                        f"Teste SQL (SELECT 1): {sql_status} ({report.get('sql_message')})"
+                    )
+            else:
+                print("PostgreSQL não está configurado.")
+
+            if not is_postgres_ready(report):
+                for err in report.get("errors", []):
+                    print(f"- {err}")
+                print(
+                    "Banco remoto ainda não está pronto para migração. "
+                    "Corrija os itens acima e rode: opcoes db check"
+                )
+                raise SystemExit(1)
+
+            print(
+                "Conectividade PostgreSQL validada. "
+                "Próximo passo: migrar schema e trocar camada de acesso (hoje ainda SQLite)."
+            )
+        elif args.subcmd == "migrate":
+            schema_name = sanitize_schema_name(args.schema or args.username)
+            sources = resolve_user_source_databases(
+                username=args.username,
+                source_dir=args.source_dir,
+                source_main=args.source_main,
+                source_iv=args.source_iv,
+                source_flow=args.source_flow,
+                include_aux=not bool(getattr(args, "no_aux", False)),
+            )
+
+            print(f"Schema destino: {schema_name}")
+            print("Fontes SQLite:")
+            for src in sources:
+                marker = "OK" if src.path.exists() else "AUSENTE"
+                req = "obrigatória" if src.required else "opcional"
+                print(f"  - {src.label}: {src.path} [{marker}; {req}]")
+
+            try:
+                report = migrate_sqlite_sources_to_postgres(
+                    schema=schema_name,
+                    sources=sources,
+                    replace=bool(getattr(args, "replace", False)),
+                    batch_size=max(int(args.batch_size or 1), 1),
+                    dry_run=bool(getattr(args, "dry_run", False)),
+                    log=print,
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha na migração: {exc}") from exc
+
+            print(f"Destino PostgreSQL: {report['postgres_target']}")
+            if report.get("dry_run"):
+                print("Dry-run concluído. Tabelas detectadas:")
+                for table in report.get("tables", []):
+                    print(
+                        f"  - {table['source']}.{table['name']}: {table['rows']} linha(s)"
+                    )
+                print(
+                    "Nenhuma escrita foi realizada. "
+                    "Rode novamente sem --dry-run para migrar de fato."
+                )
+            else:
+                print(
+                    f"Migração concluída com sucesso. "
+                    f"Linhas copiadas: {report.get('rows_copied', 0)}"
+                )
+        elif args.subcmd == "verify":
+            schema_name = sanitize_schema_name(args.schema or args.username)
+            sources = resolve_user_source_databases(
+                username=args.username,
+                source_dir=args.source_dir,
+                source_main=args.source_main,
+                source_iv=args.source_iv,
+                source_flow=args.source_flow,
+                include_aux=not bool(getattr(args, "no_aux", False)),
+            )
+
+            print(f"Schema alvo: {schema_name}")
+            print("Comparando tabelas:")
+            for src in sources:
+                marker = "OK" if src.path.exists() else "AUSENTE"
+                req = "obrigatória" if src.required else "opcional"
+                print(f"  - {src.label}: {src.path} [{marker}; {req}]")
+
+            try:
+                report = verify_sqlite_sources_in_postgres(
+                    schema=schema_name,
+                    sources=sources,
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha na verificação: {exc}") from exc
+
+            print(f"Destino PostgreSQL: {report['postgres_target']}")
+            for row in report.get("tables", []):
+                sqlite_rows = row.get("sqlite_rows")
+                pg_rows = row.get("postgres_rows")
+                status = row.get("status")
+                print(
+                    f"  - {row.get('source')}.{row.get('table')}: "
+                    f"sqlite={sqlite_rows} postgres={pg_rows} status={status}"
+                )
+
+            if not report.get("ok"):
+                raise SystemExit(
+                    "Verificação encontrou divergências entre SQLite e PostgreSQL."
+                )
+            print("Verificação concluída: contagens consistentes.")
+        elif args.subcmd == "cutover-check":
+            schema_name = sanitize_schema_name(args.schema or args.username)
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print(f"Schema alvo: {schema_name}")
+            print("Executando checklist de cutover...")
+
+            try:
+                result = run_cutover_ready_check(
+                    username=args.username,
+                    schema=args.schema,
+                    timeout_seconds=float(args.timeout),
+                    source_dir=args.source_dir,
+                    source_main=args.source_main,
+                    source_iv=args.source_iv,
+                    source_flow=args.source_flow,
+                    include_aux=not bool(getattr(args, "no_aux", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha no cutover-check: {exc}") from exc
+
+            db_check = result.get("db_check", {})
+            print("1) Conectividade PostgreSQL")
+            if db_check.get("postgres_configured"):
+                source = db_check.get("postgres_source") or "desconhecida"
+                print(f"   - Configurado via: {source}")
+                print(f"   - Destino: {db_check.get('postgres_target')}")
+                tcp_status = "OK" if db_check.get("tcp_ok") else "falhou"
+                sql_status = "OK" if db_check.get("sql_ok") else "falhou"
+                print(f"   - TCP host/porta: {tcp_status} ({db_check.get('tcp_message')})")
+                print(f"   - SQL SELECT 1: {sql_status} ({db_check.get('sql_message')})")
+            else:
+                print("   - PostgreSQL não configurado.")
+
+            verify = result.get("verify")
+            if verify:
+                print("2) Verificação de contagens SQLite x PostgreSQL")
+                print(f"   - Destino: {verify.get('postgres_target')}")
+                for row in verify.get("tables", []):
+                    print(
+                        f"   - {row.get('source')}.{row.get('table')}: "
+                        f"sqlite={row.get('sqlite_rows')} postgres={row.get('postgres_rows')} "
+                        f"status={row.get('status')}"
+                    )
+
+            smoke = result.get("smoke") or []
+            if smoke:
+                print("3) Smoke do runtime no PostgreSQL")
+                for step in smoke:
+                    status = "OK" if step.get("ok") else "falhou"
+                    print(f"   - {step.get('name')}: {status} ({step.get('detail')})")
+
+            if not result.get("ok"):
+                for err in result.get("errors", []):
+                    print(f"- {err}")
+                raise SystemExit(
+                    "Cutover ainda não está pronto. "
+                    "Corrija os itens acima e execute novamente: opcoes db cutover-check"
+                )
+
+            print("Checklist concluído: ambiente pronto para ativar runtime PostgreSQL.")
+            print("Próximos passos sugeridos:")
+            print("  1) export OPCOES_DB_BACKEND=postgres")
+            print("  2) Reiniciar a aplicação web/serviço")
+            print("  3) Validar login, ranking, posições, auditoria e DARF no usuário principal")
+        elif args.subcmd == "optimize":
+            schema_name = sanitize_schema_name(args.schema or args.username)
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print(f"Schema alvo: {schema_name}")
+            print("Aplicando índices recomendados...")
+            try:
+                report = optimize_postgres_schema(
+                    schema=schema_name,
+                    include_analyze=not bool(getattr(args, "no_analyze", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha no optimize: {exc}") from exc
+
+            print(f"Destino PostgreSQL: {report.get('postgres_target')}")
+            for sql in report.get("applied", []):
+                print(f"  - OK: {sql}")
+            for item in report.get("skipped", []):
+                print(f"  - SKIP: {item}")
+            analyzed = report.get("analyzed", [])
+            if analyzed:
+                print("ANALYZE executado em:")
+                for table in analyzed:
+                    print(f"  - {table}")
+            print("Optimize concluído.")
+        elif args.subcmd == "backup":
+            try:
+                report = create_sqlite_backup(
+                    username=args.username,
+                    backup_root=args.backup_root,
+                    source_dir=args.source_dir,
+                    source_main=args.source_main,
+                    source_iv=args.source_iv,
+                    source_flow=args.source_flow,
+                    include_aux=not bool(getattr(args, "no_aux", False)),
+                    dry_run=bool(getattr(args, "dry_run", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha no backup: {exc}") from exc
+
+            print(f"Backup dir: {report.get('backup_dir')}")
+            for item in report.get("files", []):
+                label = item.get("label")
+                src = item.get("source_path")
+                exists = item.get("exists")
+                copied = item.get("copied")
+                size = item.get("size_bytes")
+                status = "copiado" if copied else ("planejado" if exists else "ausente")
+                print(f"  - {label}: {src} [{status}; {size} bytes]")
+
+            if report.get("dry_run"):
+                print("Dry-run concluído. Nenhum arquivo foi copiado.")
+            else:
+                print(f"Manifesto: {report.get('manifest_path')}")
+                print("Backup concluído com sucesso.")
+        elif args.subcmd == "rollback":
+            try:
+                report = restore_sqlite_backup(
+                    backup_dir=args.backup_dir,
+                    username=args.username,
+                    target_dir=args.target_dir,
+                    include_aux=not bool(getattr(args, "no_aux", False)),
+                    create_restore_point=not bool(
+                        getattr(args, "no_restore_point", False)
+                    ),
+                    dry_run=bool(getattr(args, "dry_run", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha no rollback: {exc}") from exc
+
+            print(f"Backup origem: {report.get('backup_dir')}")
+            print(f"Destino: {report.get('target_dir')}")
+            for item in report.get("files", []):
+                label = item.get("label")
+                status = item.get("status")
+                src = item.get("backup_file")
+                dst = item.get("target_file")
+                restore_point = item.get("restore_point")
+                print(f"  - {label}: {status}")
+                if src:
+                    print(f"      backup : {src}")
+                if dst:
+                    print(f"      destino: {dst}")
+                if restore_point:
+                    print(f"      segurança local: {restore_point}")
+
+            if report.get("dry_run"):
+                print("Dry-run concluído. Nenhum arquivo foi sobrescrito.")
+            else:
+                print("Rollback concluído com sucesso.")
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:
@@ -598,7 +1254,9 @@ def main() -> None:
             timeout=args.timeout,
             snapshot_date=snap,
         )
-        print(f"Fundamentus: {count} linhas gravadas no snapshot {snap or dt.date.today().isoformat()}.")
+        print(
+            f"Fundamentus: {count} linhas gravadas no snapshot {snap or dt.date.today().isoformat()}."
+        )
     elif args.cmd == "fundamentus-filter":
         snap = None
         if args.snapshot_date:
@@ -751,7 +1409,11 @@ def _print_report(data) -> None:
         print(header)
         print("-" * len(header))
         for opp in data.recurring_opportunities:
-            presence = f"{opp['presence_pct']:.0f}%" if opp.get("presence_pct") is not None else "-"
+            presence = (
+                f"{opp['presence_pct']:.0f}%"
+                if opp.get("presence_pct") is not None
+                else "-"
+            )
             print(
                 f"{opp['ticker']:<10} {opp['underlying']:<6} "
                 f"{opp['hits']:>5d} "

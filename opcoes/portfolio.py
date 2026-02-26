@@ -1,12 +1,95 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Mapping, Optional
 
-from .config import get_db_path
+from .config import get_data_backend, get_db_path, get_postgres_schema
+from .db_health import resolve_postgres_target
 from .scraper.storage import _ensure_parent
 from .utils import infer_option_type, parse_ptbr_number
+
+
+class _PgResult:
+    def __init__(
+        self,
+        rows: Optional[list[Mapping[str, Any]]] = None,
+        *,
+        rowcount: int = 0,
+    ) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = None
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(
+        self,
+        *,
+        backend: str,
+        raw_conn: Any,
+        pg_row_factory: Any = None,
+    ) -> None:
+        self.backend = backend
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Iterable[object] = ()):
+        if self.backend == "sqlite":
+            return self._raw_conn.execute(query, tuple(params))
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+    def rollback(self) -> None:
+        self._raw_conn.rollback()
+
+    @property
+    def in_transaction(self) -> bool:
+        if self.backend == "sqlite":
+            return bool(getattr(self._raw_conn, "in_transaction", False))
+        info = getattr(self._raw_conn, "info", None)
+        status = getattr(info, "transaction_status", None)
+        if status is None:
+            return False
+        status_name = str(getattr(status, "name", status)).upper()
+        return status_name not in {"IDLE", "UNKNOWN"}
+
+
+def _first_col(row: Any) -> Any:
+    if row is None:
+        return None
+    if isinstance(row, Mapping):
+        values = list(row.values())
+        return values[0] if values else None
+    try:
+        return row[0]
+    except Exception:
+        return None
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
 
 
 def _sqlite_timeout_seconds() -> float:
@@ -20,89 +103,184 @@ def _sqlite_timeout_seconds() -> float:
     return value
 
 
-def _connect(*, ensure_schema: bool = False) -> sqlite3.Connection:
+def _connect_sqlite(*, ensure_schema: bool = False) -> _DbConn:
     db_path = get_db_path()
     _ensure_parent(db_path)
     timeout_seconds = _sqlite_timeout_seconds()
-    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    raw_conn = sqlite3.connect(db_path, timeout=timeout_seconds)
+    raw_conn.row_factory = sqlite3.Row
+    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    conn = _DbConn(backend="sqlite", raw_conn=raw_conn)
     if ensure_schema:
         _ensure_tables(conn, commit=True)
     return conn
 
 
+def _connect_postgres(*, ensure_schema: bool = False) -> _DbConn:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
+    with raw_conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    conn = _DbConn(backend="postgres", raw_conn=raw_conn, pg_row_factory=dict_row)
+    if ensure_schema:
+        _ensure_tables(conn, commit=True)
+    return conn
+
+
+def _connect(*, ensure_schema: bool = False) -> _DbConn:
+    backend = get_data_backend()
+    if backend == "postgres":
+        try:
+            return _connect_postgres(ensure_schema=ensure_schema)
+        except Exception:
+            return _connect_sqlite(ensure_schema=ensure_schema)
+    return _connect_sqlite(ensure_schema=ensure_schema)
+
+
+def _wrap_existing_conn(conn: Any) -> _DbConn:
+    if isinstance(conn, _DbConn):
+        return conn
+    module_name = conn.__class__.__module__
+    if module_name.startswith("sqlite3"):
+        return _DbConn(backend="sqlite", raw_conn=conn)
+    return _DbConn(backend="postgres", raw_conn=conn)
+
+
 def _resolve_conn(
-    conn: Optional[sqlite3.Connection],
+    conn: Optional[Any],
     *,
     ensure_schema: bool = False,
-) -> tuple[sqlite3.Connection, bool]:
+) -> tuple[_DbConn, bool]:
     if conn is None:
         return _connect(ensure_schema=ensure_schema), True
+    db = _wrap_existing_conn(conn)
     if ensure_schema:
-        _ensure_tables(conn, commit=not conn.in_transaction)
-    if conn.row_factory is None:
-        conn.row_factory = sqlite3.Row
-    return conn, False
+        _ensure_tables(db, commit=not db.in_transaction)
+    return db, False
 
 
-def _ensure_tables(conn: sqlite3.Connection, *, commit: bool) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS positions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            underlying TEXT NOT NULL,
-            trade_date TEXT NOT NULL,
-            qty INTEGER NOT NULL,
-            entry_price REAL NOT NULL,
-            fees REAL DEFAULT 0,
-            trade_type TEXT DEFAULT 'swing',
-            side TEXT DEFAULT 'long',
-            irrf REAL,
-            status TEXT NOT NULL DEFAULT 'open',
-            exit_date TEXT,
-            exit_price REAL,
-            notes TEXT,
-            partial_date TEXT,
-            partial_price REAL,
-            partial_qty INTEGER,
-            exit_reason TEXT
+def _ensure_tables(conn: _DbConn, *, commit: bool) -> None:
+    if conn.backend == "postgres":
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS positions (
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                underlying TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                qty INTEGER NOT NULL,
+                entry_price DOUBLE PRECISION NOT NULL,
+                fees DOUBLE PRECISION DEFAULT 0,
+                trade_type TEXT DEFAULT 'swing',
+                side TEXT DEFAULT 'long',
+                irrf DOUBLE PRECISION,
+                status TEXT NOT NULL DEFAULT 'open',
+                exit_date TEXT,
+                exit_price DOUBLE PRECISION,
+                notes TEXT,
+                partial_date TEXT,
+                partial_price DOUBLE PRECISION,
+                partial_qty INTEGER,
+                exit_reason TEXT,
+                is_simulated INTEGER DEFAULT 0,
+                parent_position_id BIGINT,
+                strategy_tag TEXT
+            )
+            """
         )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                underlying TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                qty INTEGER NOT NULL,
+                entry_price REAL NOT NULL,
+                fees REAL DEFAULT 0,
+                trade_type TEXT DEFAULT 'swing',
+                side TEXT DEFAULT 'long',
+                irrf REAL,
+                status TEXT NOT NULL DEFAULT 'open',
+                exit_date TEXT,
+                exit_price REAL,
+                notes TEXT,
+                partial_date TEXT,
+                partial_price REAL,
+                partial_qty INTEGER,
+                exit_reason TEXT
+            )
+            """
+        )
+
     _ensure_position_columns(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_positions_status_trade_date ON positions (status, trade_date DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_positions_strategy_status ON positions (strategy_tag, status)"
+    )
     _migrate_strategy_sides(conn)
     _migrate_stock_underlying_defaults(conn)
     if commit:
         conn.commit()
 
 
-def _ensure_position_columns(conn: sqlite3.Connection) -> None:
-    existing = {
-        row[1]
-        for row in conn.execute('PRAGMA table_info("positions")').fetchall()
-        if row and len(row) > 1
-    }
+def _ensure_position_columns(conn: _DbConn) -> None:
+    if conn.backend == "postgres":
+        rows = conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'positions'
+            """
+        ).fetchall()
+        existing = {str(r["column_name"]) for r in rows}
+    else:
+        existing = {
+            row[1]
+            for row in conn.execute('PRAGMA table_info("positions")').fetchall()
+            if row and len(row) > 1
+        }
     columns = {
         "partial_date": "TEXT",
-        "partial_price": "REAL",
+        "partial_price": "DOUBLE PRECISION" if conn.backend == "postgres" else "REAL",
         "partial_qty": "INTEGER",
         "exit_reason": "TEXT",
         "trade_type": "TEXT",
         "side": "TEXT DEFAULT 'long'",
-        "irrf": "REAL",
+        "irrf": "DOUBLE PRECISION" if conn.backend == "postgres" else "REAL",
         "is_simulated": "INTEGER DEFAULT 0",
-        "parent_position_id": "INTEGER",
+        "parent_position_id": "BIGINT" if conn.backend == "postgres" else "INTEGER",
         "strategy_tag": "TEXT",
     }
     for col, col_type in columns.items():
         if col not in existing:
-            conn.execute(f'ALTER TABLE positions ADD COLUMN "{col}" {col_type}')
+            if conn.backend == "postgres":
+                conn.execute(
+                    f'ALTER TABLE positions ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+                )
+            else:
+                conn.execute(f'ALTER TABLE positions ADD COLUMN "{col}" {col_type}')
 
 
-def _migrate_strategy_sides(conn: sqlite3.Connection) -> None:
+def _migrate_strategy_sides(conn: _DbConn) -> None:
     """Marca como vendidas posições de estratégia short (cash_put/covered_call)."""
     try:
         conn.execute(
@@ -114,29 +292,41 @@ def _migrate_strategy_sides(conn: sqlite3.Connection) -> None:
               AND UPPER(COALESCE(ticker, '')) != UPPER(COALESCE(underlying, ''))
             """
         )
-    except sqlite3.Error:
+    except Exception:
         # Evita quebrar o fluxo em bancos antigos/parciais.
         return
 
 
-def _migrate_stock_underlying_defaults(conn: sqlite3.Connection) -> None:
+def _migrate_stock_underlying_defaults(conn: _DbConn) -> None:
     """Preenche underlying vazio para ações em estoque, usando o próprio ticker."""
 
     try:
-        conn.execute(
-            """
-            UPDATE positions
-            SET underlying = UPPER(TRIM(ticker))
-            WHERE COALESCE(TRIM(underlying), '') = ''
-              AND LOWER(COALESCE(side, 'long')) != 'short'
-              AND LOWER(COALESCE(strategy_tag, '')) NOT IN ('cash_put', 'covered_call', 'ranking')
-              AND (
-                    UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9]'
-                 OR UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9][0-9]'
-              )
-            """
-        )
-    except sqlite3.Error:
+        if conn.backend == "postgres":
+            conn.execute(
+                """
+                UPDATE positions
+                SET underlying = UPPER(TRIM(ticker))
+                WHERE COALESCE(TRIM(underlying), '') = ''
+                  AND LOWER(COALESCE(side, 'long')) != 'short'
+                  AND LOWER(COALESCE(strategy_tag, '')) NOT IN ('cash_put', 'covered_call', 'ranking')
+                  AND UPPER(TRIM(ticker)) ~ '^[A-Z]{4}[0-9]{1,2}$'
+                """
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE positions
+                SET underlying = UPPER(TRIM(ticker))
+                WHERE COALESCE(TRIM(underlying), '') = ''
+                  AND LOWER(COALESCE(side, 'long')) != 'short'
+                  AND LOWER(COALESCE(strategy_tag, '')) NOT IN ('cash_put', 'covered_call', 'ranking')
+                  AND (
+                        UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9]'
+                     OR UPPER(TRIM(ticker)) GLOB '[A-Z][A-Z][A-Z][A-Z][0-9][0-9]'
+                  )
+                """
+            )
+    except Exception:
         # Evita quebrar o fluxo em bancos antigos/parciais.
         return
 
@@ -152,11 +342,23 @@ def _normalize_side(value: Optional[str]) -> str:
     return "long"
 
 
-def _has_option_snapshots_table(conn: sqlite3.Connection) -> bool:
+def _looks_like_stock_ticker(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", (value or "").strip().upper()))
+
+
+def _table_exists(conn: _DbConn, table_name: str) -> bool:
+    if conn.backend == "postgres":
+        row = conn.execute("SELECT to_regclass(?)", (table_name,)).fetchone()
+        return _first_col(row) is not None
     row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'option_snapshots' LIMIT 1"
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table_name,),
     ).fetchone()
     return row is not None
+
+
+def _has_option_snapshots_table(conn: _DbConn) -> bool:
+    return _table_exists(conn, "option_snapshots")
 
 
 def _snapshot_subquery_sql(has_snapshot_table: bool) -> str:
@@ -209,59 +411,96 @@ def add_position(
     is_simulated: bool = False,
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> int:
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
-    cursor = db.cursor()
-    cursor.execute(
-        """
-        INSERT INTO positions (
-            ticker,
-            underlying,
-            trade_date,
-            qty,
-            entry_price,
-            fees,
-            trade_type,
-            side,
-            irrf,
-            notes,
-            partial_date,
-            partial_price,
-            partial_qty,
-            exit_reason,
-            is_simulated,
-            parent_position_id,
-            strategy_tag
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            _normalize_ticker(ticker),
-            _normalize_ticker(underlying),
-            trade_date,
-            int(qty),
-            float(entry_price),
-            float(fees or 0.0),
-            trade_type,
-            _normalize_side(side),
-            float(irrf) if irrf is not None else None,
-            notes,
-            partial_date,
-            float(partial_price) if partial_price is not None else None,
-            int(partial_qty) if partial_qty is not None else None,
-            exit_reason,
-            1 if is_simulated else 0,
-            int(parent_position_id) if parent_position_id is not None else None,
-            strategy_tag or None,
-        ),
+    normalized_ticker = _normalize_ticker(ticker)
+    normalized_underlying = _normalize_ticker(underlying)
+    if not normalized_underlying and _looks_like_stock_ticker(normalized_ticker):
+        normalized_underlying = normalized_ticker
+    params = (
+        normalized_ticker,
+        normalized_underlying,
+        trade_date,
+        int(qty),
+        float(entry_price),
+        float(fees or 0.0),
+        trade_type,
+        _normalize_side(side),
+        float(irrf) if irrf is not None else None,
+        notes,
+        partial_date,
+        float(partial_price) if partial_price is not None else None,
+        int(partial_qty) if partial_qty is not None else None,
+        exit_reason,
+        1 if is_simulated else 0,
+        int(parent_position_id) if parent_position_id is not None else None,
+        strategy_tag or None,
     )
-    if owns_conn:
-        db.commit()
-    pos_id = cursor.lastrowid
-    if owns_conn:
-        db.close()
-    return int(pos_id)
+    try:
+        if db.backend == "postgres":
+            row = db.execute(
+                """
+                INSERT INTO positions (
+                    ticker,
+                    underlying,
+                    trade_date,
+                    qty,
+                    entry_price,
+                    fees,
+                    trade_type,
+                    side,
+                    irrf,
+                    notes,
+                    partial_date,
+                    partial_price,
+                    partial_qty,
+                    exit_reason,
+                    is_simulated,
+                    parent_position_id,
+                    strategy_tag
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                params,
+            ).fetchone()
+            pos_id = _first_col(row)
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO positions (
+                    ticker,
+                    underlying,
+                    trade_date,
+                    qty,
+                    entry_price,
+                    fees,
+                    trade_type,
+                    side,
+                    irrf,
+                    notes,
+                    partial_date,
+                    partial_price,
+                    partial_qty,
+                    exit_reason,
+                    is_simulated,
+                    parent_position_id,
+                    strategy_tag
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            pos_id = getattr(cur, "lastrowid", None)
+        if pos_id is None:
+            raise RuntimeError("Falha ao obter id da posição inserida.")
+        if owns_conn:
+            db.commit()
+        return int(pos_id)
+    finally:
+        if owns_conn:
+            db.close()
 
 
 def close_position(
@@ -270,11 +509,10 @@ def close_position(
     exit_date: str,
     exit_price: float,
     exit_reason: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> None:
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
-    cur = db.cursor()
-    cur.execute(
+    cur = db.execute(
         """
         UPDATE positions
         SET status = 'closed',
@@ -317,7 +555,7 @@ def update_position(
     is_simulated: Optional[bool] = None,
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> None:
     fields = []
     params = []
@@ -386,8 +624,7 @@ def update_position(
 
     params.append(int(position_id))
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
-    cur = db.cursor()
-    cur.execute(f"UPDATE positions SET {', '.join(fields)} WHERE id = ?", params)
+    cur = db.execute(f"UPDATE positions SET {', '.join(fields)} WHERE id = ?", params)
     if cur.rowcount == 0:
         if owns_conn:
             db.close()
@@ -397,43 +634,93 @@ def update_position(
         db.close()
 
 
-def delete_position(*, position_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+def delete_position(*, position_id: int, conn: Optional[Any] = None) -> None:
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
-    cur = db.cursor()
-    cur.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
+    db.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
     if owns_conn:
         db.commit()
         db.close()
 
 
-def get_position(position_id: int, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_position(position_id: int, *, conn: Optional[Any] = None) -> Optional[dict]:
     db, owns_conn = _resolve_conn(conn)
     try:
-        has_positions_table = db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
-        ).fetchone()
-        if not has_positions_table:
+        if not _table_exists(db, "positions"):
             return None
-        snap_subquery = _snapshot_subquery_sql(_has_option_snapshots_table(db))
-        query = f"""
-            SELECT
-                p.*,
-                snap.snapshot_date AS last_snapshot_date,
-                snap."ultimo" AS last_price_raw,
-                snap."score_total" AS last_score_total,
-                snap."trend_flag" AS last_trend_flag,
-                snap."vencimento" AS last_vencimento,
-                snap."dias_uteis" AS last_dias_uteis,
-                snap."underlying_price" AS last_underlying_price,
-                snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-                snap."%_Alta_p_2x" AS last_pct_2x,
-                snap."strike" AS last_strike
-            FROM positions p
-            LEFT JOIN (
-                {snap_subquery}
-            ) AS snap ON snap.ticker = p.ticker
-            WHERE p.id = ?
-        """
+        has_snapshots = _has_option_snapshots_table(db)
+        if db.backend == "postgres":
+            if has_snapshots:
+                query = """
+                    SELECT
+                        p.*,
+                        snap.snapshot_date AS last_snapshot_date,
+                        snap."ultimo" AS last_price_raw,
+                        snap."score_total" AS last_score_total,
+                        snap."trend_flag" AS last_trend_flag,
+                        snap."vencimento" AS last_vencimento,
+                        snap."dias_uteis" AS last_dias_uteis,
+                        snap."underlying_price" AS last_underlying_price,
+                        snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+                        snap."%_Alta_p_2x" AS last_pct_2x,
+                        snap."strike" AS last_strike
+                    FROM positions p
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            os.snapshot_date,
+                            os."ultimo",
+                            os."score_total",
+                            os."trend_flag",
+                            os."vencimento",
+                            os."dias_uteis",
+                            os."underlying_price",
+                            os."extrinsic_pct_spot",
+                            os."%_Alta_p_2x",
+                            os."strike"
+                        FROM option_snapshots os
+                        WHERE os.ticker = p.ticker
+                        ORDER BY os.snapshot_date DESC
+                        LIMIT 1
+                    ) AS snap ON TRUE
+                    WHERE p.id = ?
+                """
+            else:
+                query = """
+                    SELECT
+                        p.*,
+                        NULL AS last_snapshot_date,
+                        NULL AS last_price_raw,
+                        NULL AS last_score_total,
+                        NULL AS last_trend_flag,
+                        NULL AS last_vencimento,
+                        NULL AS last_dias_uteis,
+                        NULL AS last_underlying_price,
+                        NULL AS last_extrinsic_pct_spot,
+                        NULL AS last_pct_2x,
+                        NULL AS last_strike
+                    FROM positions p
+                    WHERE p.id = ?
+                """
+        else:
+            snap_subquery = _snapshot_subquery_sql(has_snapshots)
+            query = f"""
+                SELECT
+                    p.*,
+                    snap.snapshot_date AS last_snapshot_date,
+                    snap."ultimo" AS last_price_raw,
+                    snap."score_total" AS last_score_total,
+                    snap."trend_flag" AS last_trend_flag,
+                    snap."vencimento" AS last_vencimento,
+                    snap."dias_uteis" AS last_dias_uteis,
+                    snap."underlying_price" AS last_underlying_price,
+                    snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+                    snap."%_Alta_p_2x" AS last_pct_2x,
+                    snap."strike" AS last_strike
+                FROM positions p
+                LEFT JOIN (
+                    {snap_subquery}
+                ) AS snap ON snap.ticker = p.ticker
+                WHERE p.id = ?
+            """
         row = db.execute(query, (int(position_id),)).fetchone()
         return _row_to_dict(row) if row else None
     finally:
@@ -451,13 +738,10 @@ def list_positions(
     strategy_tag: Optional[str] = None,
     trade_type: Optional[str] = None,
     is_simulated: Optional[bool] = None,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> List[dict]:
     db, owns_conn = _resolve_conn(conn)
-    has_positions_table = db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
-    ).fetchone()
-    if not has_positions_table:
+    if not _table_exists(db, "positions"):
         if owns_conn:
             db.close()
         return []
@@ -489,34 +773,90 @@ def list_positions(
         where.append("COALESCE(p.is_simulated, 0) = ?")
         params.append(1 if is_simulated else 0)
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    snap_subquery = _snapshot_subquery_sql(_has_option_snapshots_table(db))
-    query = f"""
-        SELECT
-            p.*,
-            snap.snapshot_date AS last_snapshot_date,
-            snap."ultimo" AS last_price_raw,
-            snap."score_total" AS last_score_total,
-            snap."trend_flag" AS last_trend_flag,
-            snap."vencimento" AS last_vencimento,
-            snap."dias_uteis" AS last_dias_uteis,
-            snap."underlying_price" AS last_underlying_price,
-            snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-            snap."%_Alta_p_2x" AS last_pct_2x,
-            snap."strike" AS last_strike
-        FROM positions p
-        LEFT JOIN (
-            {snap_subquery}
-        ) AS snap ON snap.ticker = p.ticker
-        {where_clause}
-        ORDER BY p.trade_date DESC, p.id DESC
-    """
+    has_snapshots = _has_option_snapshots_table(db)
+    if db.backend == "postgres":
+        if has_snapshots:
+            query = f"""
+                SELECT
+                    p.*,
+                    snap.snapshot_date AS last_snapshot_date,
+                    snap."ultimo" AS last_price_raw,
+                    snap."score_total" AS last_score_total,
+                    snap."trend_flag" AS last_trend_flag,
+                    snap."vencimento" AS last_vencimento,
+                    snap."dias_uteis" AS last_dias_uteis,
+                    snap."underlying_price" AS last_underlying_price,
+                    snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+                    snap."%_Alta_p_2x" AS last_pct_2x,
+                    snap."strike" AS last_strike
+                FROM positions p
+                LEFT JOIN LATERAL (
+                    SELECT
+                        os.snapshot_date,
+                        os."ultimo",
+                        os."score_total",
+                        os."trend_flag",
+                        os."vencimento",
+                        os."dias_uteis",
+                        os."underlying_price",
+                        os."extrinsic_pct_spot",
+                        os."%_Alta_p_2x",
+                        os."strike"
+                    FROM option_snapshots os
+                    WHERE os.ticker = p.ticker
+                    ORDER BY os.snapshot_date DESC
+                    LIMIT 1
+                ) AS snap ON TRUE
+                {where_clause}
+                ORDER BY p.trade_date DESC, p.id DESC
+            """
+        else:
+            query = f"""
+                SELECT
+                    p.*,
+                    NULL AS last_snapshot_date,
+                    NULL AS last_price_raw,
+                    NULL AS last_score_total,
+                    NULL AS last_trend_flag,
+                    NULL AS last_vencimento,
+                    NULL AS last_dias_uteis,
+                    NULL AS last_underlying_price,
+                    NULL AS last_extrinsic_pct_spot,
+                    NULL AS last_pct_2x,
+                    NULL AS last_strike
+                FROM positions p
+                {where_clause}
+                ORDER BY p.trade_date DESC, p.id DESC
+            """
+    else:
+        snap_subquery = _snapshot_subquery_sql(has_snapshots)
+        query = f"""
+            SELECT
+                p.*,
+                snap.snapshot_date AS last_snapshot_date,
+                snap."ultimo" AS last_price_raw,
+                snap."score_total" AS last_score_total,
+                snap."trend_flag" AS last_trend_flag,
+                snap."vencimento" AS last_vencimento,
+                snap."dias_uteis" AS last_dias_uteis,
+                snap."underlying_price" AS last_underlying_price,
+                snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+                snap."%_Alta_p_2x" AS last_pct_2x,
+                snap."strike" AS last_strike
+            FROM positions p
+            LEFT JOIN (
+                {snap_subquery}
+            ) AS snap ON snap.ticker = p.ticker
+            {where_clause}
+            ORDER BY p.trade_date DESC, p.id DESC
+        """
     rows = db.execute(query, params).fetchall()
     if owns_conn:
         db.close()
     return [_row_to_dict(row) for row in rows]
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
+def _row_to_dict(row: Any) -> dict:
     def parse_decimal(value: object) -> Optional[float]:
         parsed = parse_ptbr_number(value)
         if parsed is None:

@@ -5,12 +5,67 @@ import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import quant
 from .scraper.storage import CSV_FIELDS, _ensure_parent
-from .config import get_db_path
+from .config import get_data_backend, get_db_path, get_postgres_schema
+from .db_health import resolve_postgres_target
 from .portfolio import list_positions
+
+
+class _PgResult:
+    def __init__(self, rows: List[Mapping[str, Any]]) -> None:
+        self._rows = list(rows)
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _ReportConnection:
+    def __init__(self, *, backend: str, conn: Any, pg_row_factory: Any = None) -> None:
+        self.backend = backend
+        self._conn = conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        if self.backend == "sqlite":
+            return self._conn.execute(query, tuple(params))
+        query_pg = _qmark_to_pyformat(query)
+        with self._conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            if cur.description is None:
+                return _PgResult([])
+            rows = cur.fetchall()
+        return _PgResult(rows)
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def _qmark_to_pyformat(query: str) -> str:
+    return query.replace("%", "%%").replace("?", "%s")
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _first_column(row: Any) -> Any:
+    if row is None:
+        return None
+    if isinstance(row, Mapping):
+        values = list(row.values())
+        return values[0] if values else None
+    try:
+        return row[0]
+    except Exception:
+        return None
 
 
 @dataclass
@@ -38,15 +93,53 @@ def generate_report(
     hv_days: int = 21,
 ) -> ReportData:
     conn = _connect()
+    try:
+        return _generate_report_from_conn(
+            conn,
+            min_score=min_score,
+            limit=limit,
+            recurring_days=recurring_days,
+            recurring_limit=recurring_limit,
+            hv_days=hv_days,
+        )
+    except Exception:
+        if conn.backend != "postgres":
+            raise
+        fallback = _connect_sqlite()
+        try:
+            return _generate_report_from_conn(
+                fallback,
+                min_score=min_score,
+                limit=limit,
+                recurring_days=recurring_days,
+                recurring_limit=recurring_limit,
+                hv_days=hv_days,
+            )
+        finally:
+            fallback.close()
+    finally:
+        conn.close()
+
+
+def _generate_report_from_conn(
+    conn: _ReportConnection,
+    *,
+    min_score: int,
+    limit: int,
+    recurring_days: int,
+    recurring_limit: int,
+    hv_days: int,
+) -> ReportData:
     snapshot_date = _latest_snapshot_date(conn)
     if not snapshot_date:
-        conn.close()
         raise RuntimeError("Nenhum snapshot encontrado. Rode o scraper primeiro.")
     # Busca mais linhas que o limite final para não ficar sem opções negociáveis
     fetch_limit = max(limit * 5, limit)
     opportunities = _fetch_opportunities(conn, snapshot_date, min_score, fetch_limit)
     hv_windows = _normalize_hv_windows([21, 63, 126, 252, hv_days])
-    hv_maps = _compute_hv_maps(conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_windows)
+    hv_maps = _compute_hv_maps(
+        conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_windows
+    )
     for opp in opportunities:
         underlying = (opp.get("underlying") or "").strip().upper()
         hv_by_window = {w: hv_maps.get(w, {}).get(underlying) for w in hv_windows}
@@ -55,7 +148,9 @@ def generate_report(
         opp["hv_126d"] = hv_by_window.get(126)
         opp["hv_252d"] = hv_by_window.get(252)
 
-        hv_ref_window, hv_ref = _pick_hv_reference_window(opp.get("dias_uteis"), hv_by_window)
+        hv_ref_window, hv_ref = _pick_hv_reference_window(
+            opp.get("dias_uteis"), hv_by_window
+        )
         opp["hv_ref_window"] = hv_ref_window
         opp["hv_ref"] = hv_ref
 
@@ -83,7 +178,6 @@ def generate_report(
     recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
         conn, snapshot_date, min_score, recurring_days, recurring_limit
     )
-    conn.close()
 
     tradeable_opps: List[Dict[str, object]] = []
     theoretical_opps: List[Dict[str, object]] = []
@@ -178,13 +272,44 @@ def generate_report(
     )
 
 
-def _connect() -> sqlite3.Connection:
+def _connect_sqlite() -> _ReportConnection:
     db_path = get_db_path()
     _ensure_parent(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    _ensure_snapshot_columns(conn)
-    return conn
+    sqlite_conn = sqlite3.connect(db_path)
+    sqlite_conn.row_factory = sqlite3.Row
+    _ensure_snapshot_columns(sqlite_conn)
+    return _ReportConnection(backend="sqlite", conn=sqlite_conn)
+
+
+def _connect_postgres() -> _ReportConnection:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    conn = psycopg.connect(target.dsn)
+    with conn.cursor() as cur:
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    return _ReportConnection(backend="postgres", conn=conn, pg_row_factory=dict_row)
+
+
+def _connect() -> _ReportConnection:
+    backend = get_data_backend()
+    if backend == "postgres":
+        try:
+            return _connect_postgres()
+        except Exception:
+            return _connect_sqlite()
+    return _connect_sqlite()
 
 
 def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
@@ -212,14 +337,14 @@ def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _latest_snapshot_date(conn: sqlite3.Connection) -> Optional[str]:
+def _latest_snapshot_date(conn: _ReportConnection) -> Optional[str]:
     row = conn.execute("SELECT MAX(snapshot_date) FROM option_snapshots").fetchone()
-    value = row[0] if row else None
+    value = _first_column(row)
     return str(value) if value else None
 
 
 def _fetch_opportunities(
-    conn: sqlite3.Connection,
+    conn: _ReportConnection,
     snapshot_date: str,
     min_score: int,
     limit: int,
@@ -280,7 +405,7 @@ def _fetch_opportunities(
     return [_row_to_dict(row) for row in rows]
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
+def _row_to_dict(row: Mapping[str, Any]) -> Dict[str, object]:
     return {
         "ticker": row["ticker"],
         "underlying": row["underlying"],
@@ -358,7 +483,7 @@ def _build_alerts(positions: List[Dict[str, object]], *, min_score: int) -> List
 
 
 def _fetch_recurring_opportunities(
-    conn: sqlite3.Connection,
+    conn: _ReportConnection,
     latest_snapshot_date: str,
     min_score: int,
     history_days: int,
@@ -377,7 +502,7 @@ def _fetch_recurring_opportunities(
         "SELECT COUNT(DISTINCT snapshot_date) FROM option_snapshots WHERE snapshot_date >= ?",
         (window_start,),
     ).fetchone()
-    snapshot_days = int(total_snapshots_row[0] or 0) if total_snapshots_row else 0
+    snapshot_days = int(_first_column(total_snapshots_row) or 0) if total_snapshots_row else 0
 
     filtered_query = """
         WITH filtered AS (
@@ -441,7 +566,7 @@ def _fetch_recurring_opportunities(
 
 
 def _compute_hv_map(
-    conn: sqlite3.Connection,
+    conn: _ReportConnection,
     snapshot_date: str,
     underlyings: List[str],
     window_days: int,
@@ -518,7 +643,7 @@ def _normalize_hv_windows(values: Iterable[int]) -> List[int]:
 
 
 def _compute_hv_maps(
-    conn: sqlite3.Connection,
+    conn: _ReportConnection,
     snapshot_date: str,
     underlyings: Sequence[str],
     windows: Sequence[int],

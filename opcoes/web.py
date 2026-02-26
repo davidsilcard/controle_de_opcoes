@@ -15,8 +15,22 @@ from .auth import (
     normalize_username,
     user_db_path,
 )
-from .config import get_db_path, reset_db_path_override, set_db_path_override
-from .portfolio import add_position, delete_position, list_positions, update_position, close_position, get_position
+from .config import (
+    get_db_path,
+    reset_db_path_override,
+    reset_pg_schema_override,
+    set_db_path_override,
+    set_pg_schema_override,
+)
+from .runtime_env import load_dotenv_once
+from .portfolio import (
+    add_position,
+    delete_position,
+    list_positions,
+    update_position,
+    close_position,
+    get_position,
+)
 from .utils import infer_option_type, parse_ptbr_number
 from .settings import (
     CashCoveredPutSettings,
@@ -35,7 +49,12 @@ from .settings import (
     update_strategy_settings,
     update_fundamentus_settings,
 )
-from .strategies import get_cash_covered_put_context, get_covered_call_context, get_fundamentus_context, get_ranking_context
+from .strategies import (
+    get_cash_covered_put_context,
+    get_covered_call_context,
+    get_fundamentus_context,
+    get_ranking_context,
+)
 from .flows import FlowError, assign_put, callaway
 from . import finance, darf
 
@@ -63,8 +82,12 @@ def create_app() -> Flask:
         return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True
-    app.config["SESSION_COOKIE_SECURE"] = _env_bool("OPCOES_SESSION_COOKIE_SECURE", False)
-    app.config["SESSION_COOKIE_SAMESITE"] = (os.getenv("OPCOES_SESSION_COOKIE_SAMESITE", "Lax") or "Lax").strip()
+    app.config["SESSION_COOKIE_SECURE"] = _env_bool(
+        "OPCOES_SESSION_COOKIE_SECURE", False
+    )
+    app.config["SESSION_COOKIE_SAMESITE"] = (
+        os.getenv("OPCOES_SESSION_COOKIE_SAMESITE", "Lax") or "Lax"
+    ).strip()
     # Session cookie (sem remember-me): ao fechar navegador, exige login novamente.
     app.config["SESSION_PERMANENT"] = False
 
@@ -85,6 +108,7 @@ def create_app() -> Flask:
     @app.before_request
     def _bind_user_context():
         g.db_path_override_token = None
+        g.pg_schema_override_token = None
         g.current_username = None
 
         if app.testing or not _is_auth_enabled():
@@ -96,19 +120,32 @@ def create_app() -> Flask:
 
         username = normalize_username(session.get("username") or "")
         if not username:
-            next_url = request.full_path if request.full_path and request.full_path != "/?" else request.path
+            next_url = (
+                request.full_path
+                if request.full_path and request.full_path != "/?"
+                else request.path
+            )
             return redirect(url_for("login", next=next_url))
 
         now_ts = _utc_now_ts()
         idle_timeout_seconds = _session_idle_timeout_seconds()
         raw_last_activity = session.get("last_activity_at")
         try:
-            last_activity_ts = int(raw_last_activity) if raw_last_activity is not None else None
+            last_activity_ts = (
+                int(raw_last_activity) if raw_last_activity is not None else None
+            )
         except (TypeError, ValueError):
             last_activity_ts = None
 
-        if last_activity_ts is not None and (now_ts - last_activity_ts) > idle_timeout_seconds:
-            next_url = request.full_path if request.full_path and request.full_path != "/?" else request.path
+        if (
+            last_activity_ts is not None
+            and (now_ts - last_activity_ts) > idle_timeout_seconds
+        ):
+            next_url = (
+                request.full_path
+                if request.full_path and request.full_path != "/?"
+                else request.path
+            )
             session.clear()
             return redirect(url_for("login", next=next_url, reason="expired"))
 
@@ -124,6 +161,7 @@ def create_app() -> Flask:
             return redirect(url_for("login"))
 
         g.db_path_override_token = set_db_path_override(db_path)
+        g.pg_schema_override_token = set_pg_schema_override(username)
         g.current_username = username
         return None
 
@@ -133,13 +171,19 @@ def create_app() -> Flask:
         if token is not None:
             reset_db_path_override(token)
             g.db_path_override_token = None
+        pg_token = getattr(g, "pg_schema_override_token", None)
+        if pg_token is not None:
+            reset_pg_schema_override(pg_token)
+            g.pg_schema_override_token = None
 
     @app.context_processor
     def _inject_user_context():
         auth_active = not app.testing and _is_auth_enabled()
         return {
             "auth_enabled": auth_active,
-            "current_username": normalize_username(session.get("username") or "") if auth_active else "",
+            "current_username": (
+                normalize_username(session.get("username") or "") if auth_active else ""
+            ),
         }
 
     @app.route("/login", methods=["GET", "POST"])
@@ -196,11 +240,15 @@ def create_app() -> Flask:
         is_simulated = mode == "simulated"
         selected_period = (request.args.get("period") or "").strip()
 
-        provisions = darf.get_monthly_darf_provisions(is_simulated=is_simulated, limit=36)
+        provisions = darf.get_monthly_darf_provisions(
+            is_simulated=is_simulated, limit=36
+        )
         records = darf.list_months(is_simulated=is_simulated, limit=36)
         record_by_period = {r.period: r for r in records}
 
-        periods = sorted(set(provisions.keys()) | set(record_by_period.keys()), reverse=True)
+        periods = sorted(
+            set(provisions.keys()) | set(record_by_period.keys()), reverse=True
+        )
         if not selected_period:
             if periods:
                 selected_period = periods[0]
@@ -247,13 +295,17 @@ def create_app() -> Flask:
 
         selected_record = None
         try:
-            selected_record = darf.get_month(period=selected_period, is_simulated=is_simulated)
+            selected_record = darf.get_month(
+                period=selected_period, is_simulated=is_simulated
+            )
         except Exception:
             selected_record = None
 
         provision_entries = []
         try:
-            provision_entries = darf.list_provision_entries(period=selected_period, is_simulated=is_simulated)
+            provision_entries = darf.list_provision_entries(
+                period=selected_period, is_simulated=is_simulated
+            )
         except Exception:
             provision_entries = []
 
@@ -275,7 +327,9 @@ def create_app() -> Flask:
         mode = "simulated" if is_simulated else "real"
 
         try:
-            entries = darf.list_provision_entries(period=period, is_simulated=is_simulated)
+            entries = darf.list_provision_entries(
+                period=period, is_simulated=is_simulated
+            )
             provisioned = max(0.0, -sum(float(e.get("amount") or 0.0) for e in entries))
             due_date = darf.last_business_day_next_month(period)
         except Exception:
@@ -297,18 +351,33 @@ def create_app() -> Flask:
         period = (form.get("period") or "").strip()
         is_simulated = form.get("is_simulated") == "1"
         mode = "simulated" if is_simulated else "real"
-        paid_date = _parse_form_date(form.get("paid_date")) or datetime.date.today().isoformat()
-        paid_amount = _parse_form_float(form.get("paid_amount")) if form.get("paid_amount") else None
+        paid_date = (
+            _parse_form_date(form.get("paid_date")) or datetime.date.today().isoformat()
+        )
+        paid_amount = (
+            _parse_form_float(form.get("paid_amount"))
+            if form.get("paid_amount")
+            else None
+        )
 
         try:
             rec = darf.get_month(period=period, is_simulated=is_simulated)
             if not rec:
-                entries = darf.list_provision_entries(period=period, is_simulated=is_simulated)
-                provisioned = max(0.0, -sum(float(e.get("amount") or 0.0) for e in entries))
+                entries = darf.list_provision_entries(
+                    period=period, is_simulated=is_simulated
+                )
+                provisioned = max(
+                    0.0, -sum(float(e.get("amount") or 0.0) for e in entries)
+                )
                 if provisioned <= 0:
                     return redirect(url_for("darf_view", mode=mode, period=period))
                 due_date = darf.last_business_day_next_month(period)
-                darf.upsert_month(period=period, due_date=due_date, amount=provisioned, is_simulated=is_simulated)
+                darf.upsert_month(
+                    period=period,
+                    due_date=due_date,
+                    amount=provisioned,
+                    is_simulated=is_simulated,
+                )
             darf.mark_paid(
                 period=period,
                 paid_date=paid_date,
@@ -328,17 +397,17 @@ def create_app() -> Flask:
         desc = form.get("description") or "Movimentação manual"
         date = form.get("date") or datetime.date.today().isoformat()
         is_simulated = form.get("is_simulated") == "1"
-        
+
         # Valid transaction type
         try:
             tx_type = finance.TransactionType(type_str)
         except ValueError:
-            return redirect(url_for("cash_covered_put")) # Or error page
+            return redirect(url_for("cash_covered_put"))  # Or error page
 
         # Negative amount for withdrawal
         if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
             amount = -amount
-            
+
         finance.add_transaction(
             date=date,
             type=tx_type,
@@ -397,9 +466,17 @@ def create_app() -> Flask:
 
         if (pos.get("status") or "").strip().lower() != "open":
             if opt_type == "PUT":
-                return redirect(url_for("cash_covered_put", underlying=underlying) if underlying else url_for("cash_covered_put"))
+                return redirect(
+                    url_for("cash_covered_put", underlying=underlying)
+                    if underlying
+                    else url_for("cash_covered_put")
+                )
             if opt_type == "CALL":
-                return redirect(url_for("covered_call", underlying=underlying) if underlying else url_for("covered_call"))
+                return redirect(
+                    url_for("covered_call", underlying=underlying)
+                    if underlying
+                    else url_for("covered_call")
+                )
             return redirect(url_for("positions"))
 
         if opt_type not in {"PUT", "CALL"}:
@@ -413,8 +490,16 @@ def create_app() -> Flask:
         )
 
         if opt_type == "PUT":
-            return redirect(url_for("cash_covered_put", underlying=underlying) if underlying else url_for("cash_covered_put"))
-        return redirect(url_for("covered_call", underlying=underlying) if underlying else url_for("covered_call"))
+            return redirect(
+                url_for("cash_covered_put", underlying=underlying)
+                if underlying
+                else url_for("cash_covered_put")
+            )
+        return redirect(
+            url_for("covered_call", underlying=underlying)
+            if underlying
+            else url_for("covered_call")
+        )
 
     @app.post("/finance/update/<int:tx_id>")
     def finance_update(tx_id: int):
@@ -455,19 +540,21 @@ def create_app() -> Flask:
     def settings_view() -> str:
         if request.method == "POST":
             form = request.form
-            
+
             # Fee Settings
             equity_fixed = _parse_form_float(form.get("equity_fixed"))
             equity_percent = _parse_form_float(form.get("equity_percent"))
             option_fixed = _parse_form_float(form.get("option_fixed"))
-            option_percent_notional = _parse_form_float(form.get("option_percent_notional"))
+            option_percent_notional = _parse_form_float(
+                form.get("option_percent_notional")
+            )
             update_fee_settings(
                 equity_fixed=equity_fixed,
                 equity_percent=equity_percent,
                 option_fixed=option_fixed,
                 option_percent_notional=option_percent_notional,
             )
-            
+
             # Strategy Settings
             min_score = int(form.get("strat_min_score", 8))
             limit_opp = int(form.get("strat_limit_opportunities", 30))
@@ -487,7 +574,9 @@ def create_app() -> Flask:
                 return _parse_form_float(raw)
 
             update_fundamentus_settings(
-                target_yield_pct=_form_float_or_default("fund_target_yield_pct", fund_cfg.target_yield_pct),
+                target_yield_pct=_form_float_or_default(
+                    "fund_target_yield_pct", fund_cfg.target_yield_pct
+                ),
                 put_distance_limit_pct=_form_float_or_default(
                     "fund_put_distance_limit_pct",
                     fund_cfg.put_distance_limit_pct,
@@ -500,7 +589,9 @@ def create_app() -> Flask:
                     "fund_put_target_monthly_yield_pct",
                     fund_cfg.put_target_monthly_yield_pct,
                 ),
-                put_min_score=_form_float_or_default("fund_put_min_score", fund_cfg.put_min_score),
+                put_min_score=_form_float_or_default(
+                    "fund_put_min_score", fund_cfg.put_min_score
+                ),
             )
 
             cash_put_cfg = get_cash_put_settings()
@@ -552,6 +643,7 @@ def create_app() -> Flask:
             covered_call=ccall_cfg,
             cash_put=cash_put_cfg,
         )
+
     @app.route("/positions")
     def positions() -> str:
         ticker_contains = (request.args.get("ticker") or "").strip().upper()
@@ -618,14 +710,22 @@ def create_app() -> Flask:
 
         positions_all = list_positions(include_closed=True)
         if is_simulated is not None:
-            positions_all = [p for p in positions_all if bool(p.get("is_simulated")) == is_simulated]
+            positions_all = [
+                p for p in positions_all if bool(p.get("is_simulated")) == is_simulated
+            ]
 
         ledger_sums = finance.get_ledger_sums_by_position(
-            types=[finance.TransactionType.PREMIUM, finance.TransactionType.DARF, finance.TransactionType.BUY],
+            types=[
+                finance.TransactionType.PREMIUM,
+                finance.TransactionType.DARF,
+                finance.TransactionType.BUY,
+            ],
             is_simulated=is_simulated,
         )
 
-        def _money_diff(actual: Optional[float], expected: Optional[float]) -> Optional[float]:
+        def _money_diff(
+            actual: Optional[float], expected: Optional[float]
+        ) -> Optional[float]:
             if actual is None and expected is None:
                 return None
             return round(float(actual or 0.0) - float(expected or 0.0), 2)
@@ -645,7 +745,10 @@ def create_app() -> Flask:
         }
 
         for pos in positions_all:
-            if not include_closed and (pos.get("status") or "").strip().lower() == "closed":
+            if (
+                not include_closed
+                and (pos.get("status") or "").strip().lower() == "closed"
+            ):
                 continue
 
             pid = int(pos.get("id") or 0)
@@ -679,9 +782,15 @@ def create_app() -> Flask:
                 if status_norm == "closed" and exit_price is not None and close_qty > 0:
                     expected_buyback = -round(float(exit_price) * int(close_qty), 2)
 
-            actual_premium = ledger_sums.get(pid, {}).get(finance.TransactionType.PREMIUM.value)
-            actual_darf = ledger_sums.get(pid, {}).get(finance.TransactionType.DARF.value)
-            actual_buyback = ledger_sums.get(pid, {}).get(finance.TransactionType.BUY.value)
+            actual_premium = ledger_sums.get(pid, {}).get(
+                finance.TransactionType.PREMIUM.value
+            )
+            actual_darf = ledger_sums.get(pid, {}).get(
+                finance.TransactionType.DARF.value
+            )
+            actual_buyback = ledger_sums.get(pid, {}).get(
+                finance.TransactionType.BUY.value
+            )
 
             if (
                 expected_premium is None
@@ -697,7 +806,9 @@ def create_app() -> Flask:
             expected_cash_net = None
             actual_cash_net = None
             if expected_premium is not None or expected_darf is not None:
-                expected_net = float(expected_premium or 0.0) + float(expected_darf or 0.0)
+                expected_net = float(expected_premium or 0.0) + float(
+                    expected_darf or 0.0
+                )
                 expected_cash_net = expected_net + float(expected_buyback or 0.0)
             if actual_premium is not None or actual_darf is not None:
                 actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
@@ -747,7 +858,9 @@ def create_app() -> Flask:
 
         totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
         totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
-        totals["expected_cash_net"] = totals["expected_net"] + totals["expected_buyback"]
+        totals["expected_cash_net"] = (
+            totals["expected_net"] + totals["expected_buyback"]
+        )
         totals["actual_cash_net"] = totals["actual_net"] + totals["actual_buyback"]
 
         position_ids = {int(p.get("id") or 0) for p in positions_all}
@@ -759,7 +872,9 @@ def create_app() -> Flask:
                 "actual_buyback": sums.get(finance.TransactionType.BUY.value),
                 "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0),
-                "actual_cash_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
+                "actual_cash_net": (
+                    sums.get(finance.TransactionType.PREMIUM.value) or 0.0
+                )
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0)
                 + (sums.get(finance.TransactionType.BUY.value) or 0.0),
             }
@@ -806,7 +921,12 @@ def create_app() -> Flask:
         if fees_input:
             fees = _parse_form_float(fees_input)
         else:
-            fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
+            fees = _auto_fees(
+                ticker=ticker,
+                underlying=underlying or ticker,
+                qty=qty,
+                entry_price=entry_price,
+            )
 
         pos_id = add_position(
             ticker=ticker,
@@ -1019,17 +1139,29 @@ def create_app() -> Flask:
             underlying=underlying,
             trade_date=form.get("trade_date") or None,
             qty=int(form["qty"]) if form.get("qty") else None,
-            entry_price=_parse_form_float(form.get("entry_price")) if form.get("entry_price") else None,
+            entry_price=(
+                _parse_form_float(form.get("entry_price"))
+                if form.get("entry_price")
+                else None
+            ),
             fees=_parse_form_float(form.get("fees")) if form.get("fees") else None,
             status=status,
             exit_date=form.get("exit_date") or None,
-            exit_price=_parse_form_float(form.get("exit_price")) if form.get("exit_price") else None,
+            exit_price=(
+                _parse_form_float(form.get("exit_price"))
+                if form.get("exit_price")
+                else None
+            ),
             notes=form.get("notes") or None,
             trade_type=form.get("trade_type") or None,
             side=side_raw,
             irrf=_parse_form_float(form.get("irrf")) if form.get("irrf") else None,
             partial_date=form.get("partial_date") or None,
-            partial_price=_parse_form_float(form.get("partial_price")) if form.get("partial_price") else None,
+            partial_price=(
+                _parse_form_float(form.get("partial_price"))
+                if form.get("partial_price")
+                else None
+            ),
             partial_qty=int(form["partial_qty"]) if form.get("partial_qty") else None,
             exit_reason=form.get("exit_reason") or None,
             is_simulated=is_simulated,
@@ -1040,7 +1172,9 @@ def create_app() -> Flask:
         side = (side_raw or "").strip().lower()
         if _is_option_ticker(ticker) and side == "short":
             qty_val = int(form["qty"]) if form.get("qty") else 0
-            partial_qty_val = int(form["partial_qty"]) if form.get("partial_qty") else None
+            partial_qty_val = (
+                int(form["partial_qty"]) if form.get("partial_qty") else None
+            )
             is_simulated_flag = form.get("is_simulated") == "1"
             finance.sync_short_option_buyback(
                 position_id=position_id,
@@ -1049,7 +1183,11 @@ def create_app() -> Flask:
                 partial_qty=partial_qty_val,
                 status=status,
                 exit_date=form.get("exit_date") or None,
-                exit_price=_parse_form_float(form.get("exit_price")) if form.get("exit_price") else None,
+                exit_price=(
+                    _parse_form_float(form.get("exit_price"))
+                    if form.get("exit_price")
+                    else None
+                ),
                 is_simulated=is_simulated_flag,
             )
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
@@ -1057,7 +1195,9 @@ def create_app() -> Flask:
     @app.post("/positions/delete/<int:position_id>")
     def delete_position_view(position_id: int):
         delete_position(position_id=position_id)
-        return redirect(_safe_next_url(request.form.get("next")) or url_for("positions"))
+        return redirect(
+            _safe_next_url(request.form.get("next")) or url_for("positions")
+        )
 
     def _parse_form_float(value: str | None) -> float:
         if not value:
@@ -1097,7 +1237,7 @@ def create_app() -> Flask:
         conn = sqlite3.connect(db_path)
         try:
             row = conn.execute(
-                'SELECT underlying FROM option_snapshots WHERE ticker = ? ORDER BY snapshot_date DESC LIMIT 1',
+                "SELECT underlying FROM option_snapshots WHERE ticker = ? ORDER BY snapshot_date DESC LIMIT 1",
                 (t,),
             ).fetchone()
             return row[0] if row else None
@@ -1223,6 +1363,13 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
+    load_dotenv_once()
     app = create_app()
-    debug_mode = os.getenv("OPCOES_WEB_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on", "sim"}
+    debug_mode = os.getenv("OPCOES_WEB_DEBUG", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "sim",
+    }
     app.run(debug=debug_mode)

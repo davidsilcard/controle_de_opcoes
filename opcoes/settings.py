@@ -5,7 +5,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict
 
-from .config import get_db_path
+from .config import get_data_backend, get_db_path, get_postgres_schema
+from .db_health import resolve_postgres_target
 
 
 @dataclass
@@ -74,18 +75,44 @@ def _sqlite_timeout_seconds() -> float:
     return value
 
 
-def _connect(*, ensure_table: bool = False) -> sqlite3.Connection:
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _connect_sqlite(*, ensure_table: bool = False) -> sqlite3.Connection:
     db_path = get_db_path()
     timeout_seconds = _sqlite_timeout_seconds()
     conn = sqlite3.connect(db_path, timeout=timeout_seconds)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
     if ensure_table:
-        _ensure_table(conn)
+        _ensure_table_sqlite(conn)
     return conn
 
 
-def _ensure_table(conn: sqlite3.Connection) -> None:
+def _connect_postgres(*, ensure_table: bool = False):
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+
+    try:
+        import psycopg
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    conn = psycopg.connect(target.dsn)
+    with conn.cursor() as cur:
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    if ensure_table:
+        _ensure_table_postgres(conn)
+    return conn
+
+
+def _ensure_table_sqlite(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS settings (
@@ -97,8 +124,21 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _load_raw_settings() -> Dict[str, str]:
-    conn = _connect()
+def _ensure_table_postgres(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+    conn.commit()
+
+
+def _load_raw_settings_sqlite() -> Dict[str, str]:
+    conn = _connect_sqlite()
     try:
         try:
             rows = conn.execute("SELECT key, value FROM settings").fetchall()
@@ -111,8 +151,33 @@ def _load_raw_settings() -> Dict[str, str]:
     return {str(r["key"]): str(r["value"]) for r in rows}
 
 
-def _upsert_settings(params: Dict[str, object]) -> None:
-    conn = _connect(ensure_table=True)
+def _load_raw_settings_postgres() -> Dict[str, str]:
+    conn = _connect_postgres()
+    try:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT key, value FROM settings")
+                rows = cur.fetchall()
+        except Exception as exc:
+            if 'relation "settings" does not exist' in str(exc):
+                return {}
+            raise
+    finally:
+        conn.close()
+    return {str(r[0]): str(r[1]) for r in rows}
+
+
+def _load_raw_settings() -> Dict[str, str]:
+    if get_data_backend() == "postgres":
+        try:
+            return _load_raw_settings_postgres()
+        except Exception:
+            return _load_raw_settings_sqlite()
+    return _load_raw_settings_sqlite()
+
+
+def _upsert_settings_sqlite(params: Dict[str, object]) -> None:
+    conn = _connect_sqlite(ensure_table=True)
     try:
         for key, value in params.items():
             conn.execute(
@@ -126,6 +191,35 @@ def _upsert_settings(params: Dict[str, object]) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _upsert_settings_postgres(params: Dict[str, object]) -> None:
+    conn = _connect_postgres(ensure_table=True)
+    try:
+        with conn.cursor() as cur:
+            for key, value in params.items():
+                cur.execute(
+                    """
+                    INSERT INTO settings (key, value)
+                    VALUES (%s, %s)
+                    ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    (key, str(value)),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _upsert_settings(params: Dict[str, object]) -> None:
+    if get_data_backend() == "postgres":
+        try:
+            _upsert_settings_postgres(params)
+            return
+        except Exception:
+            _upsert_settings_sqlite(params)
+            return
+    _upsert_settings_sqlite(params)
 
 
 def get_fee_settings() -> FeeSettings:

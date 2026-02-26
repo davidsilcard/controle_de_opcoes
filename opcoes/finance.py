@@ -1,11 +1,12 @@
-import sqlite3
 import datetime as dt
 import os
+import sqlite3
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .config import get_db_path
+from .config import get_data_backend, get_db_path, get_postgres_schema
+from .db_health import resolve_postgres_target
 
 
 class TransactionType(str, Enum):
@@ -42,52 +43,210 @@ def _sqlite_timeout_seconds() -> float:
     return value
 
 
-def _get_conn(*, ensure_schema: bool = False) -> sqlite3.Connection:
+class _PgResult:
+    def __init__(
+        self,
+        rows: Optional[list[Mapping[str, Any]]] = None,
+        *,
+        rowcount: int = 0,
+        lastrowid: Optional[int] = None,
+    ) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(
+        self,
+        *,
+        backend: str,
+        raw_conn: Any,
+        pg_row_factory: Any = None,
+    ) -> None:
+        self.backend = backend
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        if self.backend == "sqlite":
+            return self._raw_conn.execute(query, tuple(params))
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def rollback(self) -> None:
+        self._raw_conn.rollback()
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+    @property
+    def in_transaction(self) -> bool:
+        if self.backend == "sqlite":
+            return bool(getattr(self._raw_conn, "in_transaction", False))
+        info = getattr(self._raw_conn, "info", None)
+        status = getattr(info, "transaction_status", None)
+        if status is None:
+            return False
+        status_name = str(getattr(status, "name", status)).upper()
+        return status_name not in {"IDLE", "UNKNOWN"}
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _first_col(row: Any) -> Any:
+    if row is None:
+        return None
+    if isinstance(row, Mapping):
+        values = list(row.values())
+        return values[0] if values else None
+    try:
+        return row[0]
+    except Exception:
+        return None
+
+
+def _connect_sqlite(*, ensure_schema: bool = False) -> _DbConn:
     db_path = get_db_path()
     timeout_seconds = _sqlite_timeout_seconds()
-    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    raw_conn = sqlite3.connect(db_path, timeout=timeout_seconds)
+    raw_conn.row_factory = sqlite3.Row
+    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    conn = _DbConn(backend="sqlite", raw_conn=raw_conn)
     if ensure_schema:
         _ensure_table(conn, commit=True)
     return conn
 
 
+def _connect_postgres(*, ensure_schema: bool = False) -> _DbConn:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
+    with raw_conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    conn = _DbConn(backend="postgres", raw_conn=raw_conn, pg_row_factory=dict_row)
+    if ensure_schema:
+        _ensure_table(conn, commit=True)
+    return conn
+
+
+def _get_conn(*, ensure_schema: bool = False) -> _DbConn:
+    backend = get_data_backend()
+    if backend == "postgres":
+        try:
+            return _connect_postgres(ensure_schema=ensure_schema)
+        except Exception:
+            return _connect_sqlite(ensure_schema=ensure_schema)
+    return _connect_sqlite(ensure_schema=ensure_schema)
+
+
+def _wrap_existing_conn(conn: Any) -> _DbConn:
+    if isinstance(conn, _DbConn):
+        return conn
+    module_name = conn.__class__.__module__
+    if module_name.startswith("sqlite3"):
+        return _DbConn(backend="sqlite", raw_conn=conn)
+    return _DbConn(backend="postgres", raw_conn=conn)
+
+
 def _resolve_conn(
-    conn: Optional[sqlite3.Connection],
+    conn: Optional[Any],
     *,
     ensure_schema: bool = False,
-) -> tuple[sqlite3.Connection, bool]:
+) -> tuple[_DbConn, bool]:
     if conn is None:
         return _get_conn(ensure_schema=ensure_schema), True
+    db = _wrap_existing_conn(conn)
     if ensure_schema:
-        _ensure_table(conn, commit=not conn.in_transaction)
-    if conn.row_factory is None:
-        conn.row_factory = sqlite3.Row
-    return conn, False
+        _ensure_table(db, commit=not db.in_transaction)
+    return db, False
 
 
-def _ensure_table(conn: sqlite3.Connection, *, commit: bool) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ledger (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            description TEXT,
-            position_id INTEGER
+def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
+    if conn.backend == "postgres":
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ledger (
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount DOUBLE PRECISION NOT NULL,
+                description TEXT,
+                position_id BIGINT
+            )
+            """
         )
-        """
-    )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                description TEXT,
+                position_id INTEGER
+            )
+            """
+        )
     # Garantir colunas extras em versões antigas do banco
-    existing = {
-        row[1]
-        for row in conn.execute('PRAGMA table_info("ledger")').fetchall()
-        if row and len(row) > 1
-    }
+    if conn.backend == "postgres":
+        existing = {
+            str(row["column_name"])
+            for row in conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'ledger'
+                """
+            ).fetchall()
+        }
+    else:
+        existing = {
+            row[1]
+            for row in conn.execute('PRAGMA table_info("ledger")').fetchall()
+            if row and len(row) > 1
+        }
     if "is_simulated" not in existing:
-        conn.execute('ALTER TABLE ledger ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
+        if conn.backend == "postgres":
+            conn.execute('ALTER TABLE ledger ADD COLUMN IF NOT EXISTS "is_simulated" INTEGER DEFAULT 0')
+        else:
+            conn.execute('ALTER TABLE ledger ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_type_position_id ON ledger (type, position_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_position_id ON ledger (position_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger (date DESC)")
     if commit:
         conn.commit()
 
@@ -97,18 +256,23 @@ def _normalize_strategy_tag(value: Optional[str]) -> Optional[str]:
     return text or None
 
 
-def _has_positions_table(conn: sqlite3.Connection) -> bool:
+def _table_exists(conn: _DbConn, table_name: str) -> bool:
+    if conn.backend == "postgres":
+        row = conn.execute("SELECT to_regclass(?)", (table_name,)).fetchone()
+        return _first_col(row) is not None
     row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table_name,),
     ).fetchone()
     return row is not None
 
 
-def _has_ledger_table(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger' LIMIT 1"
-    ).fetchone()
-    return row is not None
+def _has_positions_table(conn: _DbConn) -> bool:
+    return _table_exists(conn, "positions")
+
+
+def _has_ledger_table(conn: _DbConn) -> bool:
+    return _table_exists(conn, "ledger")
 
 
 def option_tax_rate(trade_type: str) -> float:
@@ -136,21 +300,37 @@ def add_transaction(
     description: str = None,
     position_id: int = None,
     is_simulated: bool = False,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> int:
     """Registra uma transação financeira."""
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
-        cur = db.execute(
-            """
-            INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (date, type.value, amount, description, position_id, 1 if is_simulated else 0),
-        )
+        type_value = type.value if isinstance(type, TransactionType) else str(type)
+        params = (date, type_value, amount, description, position_id, 1 if is_simulated else 0)
+        if db.backend == "postgres":
+            row = db.execute(
+                """
+                INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                params,
+            ).fetchone()
+            tx_id = _first_col(row)
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            tx_id = getattr(cur, "lastrowid", None)
+        if tx_id is None:
+            raise RuntimeError("Falha ao obter id da transação inserida.")
         if owns_conn:
             db.commit()
-        return cur.lastrowid
+        return int(tx_id)
     finally:
         if owns_conn:
             db.close()
@@ -173,7 +353,13 @@ def get_balance(mode: str = "all") -> float:
         elif mode == "simulated":
             where = "WHERE is_simulated = 1"
         row = conn.execute(f"SELECT SUM(amount) as total FROM ledger {where}", params).fetchone()
-        return row["total"] if row and row["total"] is not None else 0.0
+        if not row:
+            return 0.0
+        if isinstance(row, Mapping):
+            total = row.get("total")
+        else:
+            total = row[0]
+        return float(total) if total is not None else 0.0
     finally:
         conn.close()
 
@@ -228,17 +414,17 @@ def get_monthly_premiums(
             from_clause = "FROM ledger l"
 
         query = f"""
-            SELECT strftime('%Y-%m', l.date) as month, SUM(l.amount) as total
+            SELECT substr(l.date, 1, 7) AS month, SUM(l.amount) AS total
             {from_clause}
             WHERE {' AND '.join(where)}
             GROUP BY month
             ORDER BY month DESC
             LIMIT ?
         """
-        rows = conn.execute(query, (*params, limit_months)).fetchall()
+        rows = conn.execute(query, (*params, int(limit_months))).fetchall()
         # Inverte para ordem cronológica (gráfico)
         results = [{"month": r["month"], "total": r["total"]} for r in rows]
-        return results[::-1] 
+        return results[::-1]
     finally:
         conn.close()
 
@@ -315,7 +501,7 @@ def get_ledger_sums_by_position(
     *,
     types: Optional[List[TransactionType]] = None,
     is_simulated: Optional[bool] = None,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> Dict[int, Dict[str, float]]:
     db, owns_conn = _resolve_conn(conn)
     try:
@@ -359,7 +545,7 @@ def recalc_position_premium_and_darf(
     premium_amount: float,
     trade_type: str,
     is_simulated: bool,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> Dict[str, float]:
     """Recalcula (upsert) prêmio e DARF vinculados a uma posição."""
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
@@ -490,7 +676,7 @@ def sync_short_option_buyback(
     exit_date: Optional[str],
     exit_price: Optional[float],
     is_simulated: bool,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: Optional[Any] = None,
 ) -> float:
     """Sincroniza a recompra de encerramento (BUY) para opção vendida."""
 
