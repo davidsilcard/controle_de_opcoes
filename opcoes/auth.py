@@ -3,9 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import shutil
 import sqlite3
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -160,6 +161,86 @@ def ensure_bootstrap_user_from_env() -> bool:
     return create_user(username=username, password=password, replace=replace)
 
 
+def _default_legacy_sources(source_db: Optional[Path]) -> tuple[Path, Path, Path]:
+    main = Path(source_db).expanduser() if source_db is not None else Path("data/opcoes_snapshots.db")
+    base = main.parent
+    return main, base / "iv_history.db", base / "flow_history.db"
+
+
+def _copy_with_optional_backup(
+    *,
+    src: Path,
+    dst: Path,
+    force: bool,
+    keep_backup: bool,
+) -> Dict[str, Optional[str]]:
+    src = src.expanduser()
+    dst = dst.expanduser()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.exists():
+        return {"status": "missing_source", "src": str(src), "dst": str(dst), "backup": None}
+
+    if src.resolve() == dst.resolve():
+        return {"status": "same_path", "src": str(src), "dst": str(dst), "backup": None}
+
+    backup_path: Optional[Path] = None
+    if dst.exists() and dst.stat().st_size > 0:
+        if not force:
+            raise FileExistsError(
+                f"Destino já possui dados: {dst}. Use force=True para sobrescrever."
+            )
+        if keep_backup:
+            stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+            backup_path = dst.with_suffix(f"{dst.suffix}.backup-{stamp}")
+            shutil.copy2(dst, backup_path)
+
+    shutil.copy2(src, dst)
+    return {
+        "status": "copied",
+        "src": str(src),
+        "dst": str(dst),
+        "backup": str(backup_path) if backup_path else None,
+    }
+
+
+def migrate_legacy_user_data(
+    *,
+    username: str,
+    source_db: Optional[Path] = None,
+    source_iv_db: Optional[Path] = None,
+    source_flow_db: Optional[Path] = None,
+    force: bool = False,
+    keep_backup: bool = True,
+) -> Dict[str, Dict[str, Optional[str]]]:
+    """
+    Migra dados legados (single-user) para o contexto de um usuário.
+
+    Copia:
+    - banco principal (opcoes_snapshots.db)
+    - iv_history.db
+    - flow_history.db
+    """
+
+    safe_username = validate_username(username)
+    src_main_default, src_iv_default, src_flow_default = _default_legacy_sources(source_db)
+    src_main = src_main_default
+    src_iv = Path(source_iv_db).expanduser() if source_iv_db is not None else src_iv_default
+    src_flow = Path(source_flow_db).expanduser() if source_flow_db is not None else src_flow_default
+
+    dst_main = user_db_path(safe_username)
+    dst_base = dst_main.parent
+    dst_iv = dst_base / "iv_history.db"
+    dst_flow = dst_base / "flow_history.db"
+
+    results = {
+        "main": _copy_with_optional_backup(src=src_main, dst=dst_main, force=force, keep_backup=keep_backup),
+        "iv_history": _copy_with_optional_backup(src=src_iv, dst=dst_iv, force=force, keep_backup=keep_backup),
+        "flow_history": _copy_with_optional_backup(src=src_flow, dst=dst_flow, force=force, keep_backup=keep_backup),
+    }
+    return results
+
+
 __all__ = [
     "authenticate_user",
     "create_user",
@@ -167,6 +248,7 @@ __all__ = [
     "get_auth_db_path",
     "get_users_db_dir",
     "list_users",
+    "migrate_legacy_user_data",
     "normalize_username",
     "user_db_path",
     "validate_password",

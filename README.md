@@ -176,6 +176,15 @@ Listar usuários:
 ```bash
 poetry run python -m opcoes.cli user list
 ```
+Vincular dados legados (single-user) para um usuário:
+```bash
+poetry run python -m opcoes.cli user migrate-legacy --username admin --force
+```
+Por padrão usa como origem:
+- `data/opcoes_snapshots.db`
+- `data/iv_history.db`
+- `data/flow_history.db`
+Ao usar `--force`, se já houver dados no destino o comando cria backup automático antes de sobrescrever.
 
 ## Funcionamento do ranking e scores
 - Checklist derivado: `Status_Moneyness`, `%_Alta_p_2x`, `Status_2x`, `Status_Liquidez`, `Status_Theta`.
@@ -226,6 +235,14 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
   - Base multiusuário adicionada na web: login/senha, sessão e isolamento de dados por usuário (um SQLite por conta), além de comando CLI para gestão de usuários (`user create`, `user list`).
+  - CLI ganhou migração legada por usuário (`user migrate-legacy`) para vincular histórico anterior ao banco isolado de uma conta (com backup automático em sobrescrita).
+  - Primeiro acesso de usuário novo agora exibe estado inicial guiado no Ranking (sem erro 500) quando ainda não houver snapshots coletados.
+  - Camada de posições/auditoria ficou resiliente para contas novas sem snapshots, evitando erro 500 quando `option_snapshots` ainda não existe no banco do usuário.
+  - Isolamento multiusuário validado também nas abas `Configurações`, `Fundamentus`, `Auditoria` e `DARF`, garantindo que cada usuário visualize e altere apenas os próprios dados.
+  - Isolamento multiusuário validado na aba `Cash-Covered Put`, incluindo dados da estratégia e persistência dos filtros/configurações por usuário logado.
+  - Isolamento multiusuário validado na aba `Covered Call`, incluindo dados, filtro rápido lateral e persistência dos filtros/configurações por usuário logado.
+  - Isolamento multiusuário validado na aba `Posições`, incluindo listagem e filtros (`ticker`, `estratégia`, `status`, `simulado`) por usuário logado.
+  - Aba `Ranking` agora persiste preferências de filtros por usuário logado (`score`, `limite`, `recorrência`, `recurring_limit`, `underlying`, `tipo CALL/PUT`), mantendo isolamento entre contas.
   - Recalculo de score/IV no scraper aplicado em todos os casos (com e sem preço do ativo).
   - Segmentação de ranking por delta usando `abs(delta)` (corrige classificação de PUTs).
   - Cálculo de prêmio/DARF centralizado e DARF sempre arredondado em centavos.

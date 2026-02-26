@@ -23,6 +23,13 @@ class StrategySettings:
 
 
 @dataclass
+class RankingViewSettings:
+    recurring_limit: int = 15
+    underlying_filter: str = ""
+    option_type_filter: str = ""
+
+
+@dataclass
 class CashCoveredPutSettings:
     underlying: str = "PETR4"
     min_yield_pct: float = 1.0
@@ -127,6 +134,35 @@ def get_strategy_settings() -> StrategySettings:
         min_score=_parse_int("strat_min_score", 8),
         limit_opportunities=_parse_int("strat_limit_opportunities", 30),
         recurring_days=_parse_int("strat_recurring_days", 30),
+    )
+
+
+def get_ranking_view_settings() -> RankingViewSettings:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    finally:
+        conn.close()
+
+    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+    def _parse_int(name: str, default: int) -> int:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        try:
+            return int(text)
+        except ValueError:
+            return default
+
+    option_type_filter = raw.get("rank_option_type_filter", "").strip().upper()
+    if option_type_filter not in {"CALL", "PUT"}:
+        option_type_filter = ""
+
+    return RankingViewSettings(
+        recurring_limit=_parse_int("rank_recurring_limit", 15),
+        underlying_filter=raw.get("rank_underlying_filter", "").strip().upper(),
+        option_type_filter=option_type_filter,
     )
 
 
@@ -311,6 +347,37 @@ def update_strategy_settings(
         conn.close()
 
 
+def update_ranking_view_settings(
+    *,
+    recurring_limit: int,
+    underlying_filter: str,
+    option_type_filter: str,
+) -> None:
+    conn = _connect()
+    try:
+        normalized_option_type = (option_type_filter or "").strip().upper()
+        if normalized_option_type not in {"CALL", "PUT"}:
+            normalized_option_type = ""
+
+        params = {
+            "rank_recurring_limit": int(recurring_limit),
+            "rank_underlying_filter": (underlying_filter or "").strip().upper(),
+            "rank_option_type_filter": normalized_option_type,
+        }
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_cash_put_settings(
     *,
     underlying: str,
@@ -423,6 +490,9 @@ __all__ = [
     "StrategySettings",
     "get_strategy_settings",
     "update_strategy_settings",
+    "RankingViewSettings",
+    "get_ranking_view_settings",
+    "update_ranking_view_settings",
     "CashCoveredPutSettings",
     "get_cash_put_settings",
     "update_cash_put_settings",

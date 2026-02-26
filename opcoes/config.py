@@ -26,12 +26,17 @@ def get_db_path() -> Path:
 
     override_ctx = _db_path_override.get()
     if override_ctx is not None:
-        return override_ctx
+        path = override_ctx
+    else:
+        override = os.getenv("OPCOES_DB_PATH")
+        if override:
+            path = Path(override).expanduser()
+        else:
+            path = DEFAULT_DB_PATH
 
-    override = os.getenv("OPCOES_DB_PATH")
-    if override:
-        return Path(override).expanduser()
-    return DEFAULT_DB_PATH
+    # Suporte a bancos por usuário: cria diretório pai ao resolver o caminho.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 __all__ = [

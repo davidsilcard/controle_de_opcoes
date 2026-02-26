@@ -28,13 +28,18 @@
 
     <div class="container">
       <h1 class="h4 mb-3">Ranking diário</h1>
+      {% if empty_state_message %}
+        <div class="alert alert-info py-2" role="alert">
+          {{ empty_state_message }}
+        </div>
+      {% endif %}
       <p class="text-muted">
         Snapshot: {{ data.snapshot_date }} |
         Tipo: {% if option_type_filter == "CALL" %}CALLs{% elif option_type_filter == "PUT" %}PUTs{% else %}Todas{% endif %}
       </p>
       <div class="mb-2">
         <div class="btn-group btn-group-sm" role="group" aria-label="Filtro tipo">
-          <a class="btn {% if not option_type_filter %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/">Todas</a>
+          <a class="btn {% if not option_type_filter %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/?option_type=">Todas</a>
           <a class="btn {% if option_type_filter == 'CALL' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/?option_type=CALL">Ranking CALLs</a>
           <a class="btn {% if option_type_filter == 'PUT' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/?option_type=PUT">Ranking PUTs</a>
         </div>

@@ -5,7 +5,7 @@ import getpass
 from pathlib import Path
 from typing import List, Optional
 
-from .auth import create_user, list_users
+from .auth import create_user, list_users, migrate_legacy_user_data
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
 from .portfolio import add_position, list_positions, close_position
@@ -280,6 +280,35 @@ def parse_args() -> argparse.Namespace:
         help="Inclui usuários inativos.",
     )
 
+    uc_migrate = ucs.add_parser(
+        "migrate-legacy",
+        help="Vincula dados legados (single-user) para um usuário específico",
+    )
+    uc_migrate.add_argument("--username", required=True, help="Usuário de destino.")
+    uc_migrate.add_argument(
+        "--source-db",
+        type=Path,
+        default=Path("data/opcoes_snapshots.db"),
+        help="Banco legado principal (default: data/opcoes_snapshots.db).",
+    )
+    uc_migrate.add_argument(
+        "--source-iv-db",
+        type=Path,
+        default=None,
+        help="Banco legado de IV (default: mesmo diretório do source-db/iv_history.db).",
+    )
+    uc_migrate.add_argument(
+        "--source-flow-db",
+        type=Path,
+        default=None,
+        help="Banco legado de fluxo (default: mesmo diretório do source-db/flow_history.db).",
+    )
+    uc_migrate.add_argument(
+        "--force",
+        action="store_true",
+        help="Sobrescreve destino se já tiver dados, criando backup automático.",
+    )
+
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
     fc.add_argument("--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)")
     fc.add_argument(
@@ -538,6 +567,27 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
+        elif args.subcmd == "migrate-legacy":
+            result = migrate_legacy_user_data(
+                username=args.username,
+                source_db=args.source_db,
+                source_iv_db=args.source_iv_db,
+                source_flow_db=args.source_flow_db,
+                force=bool(getattr(args, "force", False)),
+                keep_backup=True,
+            )
+            print(f"Migração concluída para usuário '{args.username}':")
+            for key in ("main", "iv_history", "flow_history"):
+                item = result.get(key, {})
+                status = item.get("status") or "unknown"
+                src = item.get("src") or "-"
+                dst = item.get("dst") or "-"
+                backup = item.get("backup")
+                print(f"  - {key}: {status}")
+                print(f"      origem : {src}")
+                print(f"      destino: {dst}")
+                if backup:
+                    print(f"      backup : {backup}")
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:

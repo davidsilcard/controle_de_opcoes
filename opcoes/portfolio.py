@@ -132,6 +132,44 @@ def _normalize_side(value: Optional[str]) -> str:
     return "long"
 
 
+def _has_option_snapshots_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'option_snapshots' LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
+def _snapshot_subquery_sql(has_snapshot_table: bool) -> str:
+    if has_snapshot_table:
+        return """
+            SELECT os1.*
+            FROM option_snapshots os1
+            INNER JOIN (
+                SELECT ticker, MAX(snapshot_date) AS snapshot_date
+                FROM option_snapshots
+                GROUP BY ticker
+            ) latest
+            ON os1.ticker = latest.ticker AND os1.snapshot_date = latest.snapshot_date
+        """
+
+    # Banco recém-criado (sem snapshots): mantém o JOIN compatível retornando NULLs.
+    return """
+        SELECT
+            NULL AS ticker,
+            NULL AS snapshot_date,
+            NULL AS "ultimo",
+            NULL AS "score_total",
+            NULL AS "trend_flag",
+            NULL AS "vencimento",
+            NULL AS "dias_uteis",
+            NULL AS "underlying_price",
+            NULL AS "extrinsic_pct_spot",
+            NULL AS "%_Alta_p_2x",
+            NULL AS "strike"
+        WHERE 1 = 0
+    """
+
+
 def add_position(
     *,
     ticker: str,
@@ -351,7 +389,8 @@ def delete_position(*, position_id: int, conn: Optional[sqlite3.Connection] = No
 def get_position(position_id: int, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     db, owns_conn = _resolve_conn(conn)
     try:
-        query = """
+        snap_subquery = _snapshot_subquery_sql(_has_option_snapshots_table(db))
+        query = f"""
             SELECT
                 p.*,
                 snap.snapshot_date AS last_snapshot_date,
@@ -366,14 +405,7 @@ def get_position(position_id: int, *, conn: Optional[sqlite3.Connection] = None)
                 snap."strike" AS last_strike
             FROM positions p
             LEFT JOIN (
-                SELECT os1.*
-                FROM option_snapshots os1
-                INNER JOIN (
-                    SELECT ticker, MAX(snapshot_date) AS snapshot_date
-                    FROM option_snapshots
-                    GROUP BY ticker
-                ) latest
-                ON os1.ticker = latest.ticker AND os1.snapshot_date = latest.snapshot_date
+                {snap_subquery}
             ) AS snap ON snap.ticker = p.ticker
             WHERE p.id = ?
         """
@@ -425,6 +457,7 @@ def list_positions(
         where.append("COALESCE(p.is_simulated, 0) = ?")
         params.append(1 if is_simulated else 0)
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+    snap_subquery = _snapshot_subquery_sql(_has_option_snapshots_table(db))
     query = f"""
         SELECT
             p.*,
@@ -440,14 +473,7 @@ def list_positions(
             snap."strike" AS last_strike
         FROM positions p
         LEFT JOIN (
-            SELECT os1.*
-            FROM option_snapshots os1
-            INNER JOIN (
-                SELECT ticker, MAX(snapshot_date) AS snapshot_date
-                FROM option_snapshots
-                GROUP BY ticker
-            ) latest
-            ON os1.ticker = latest.ticker AND os1.snapshot_date = latest.snapshot_date
+            {snap_subquery}
         ) AS snap ON snap.ticker = p.ticker
         {where_clause}
         ORDER BY p.trade_date DESC, p.id DESC

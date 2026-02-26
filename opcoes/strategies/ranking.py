@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import Any, Dict, List, Mapping
 
 from ..report import ReportData, generate_report
 from ..utils import infer_option_type, parse_ptbr_number
-from ..settings import get_strategy_settings
+from ..settings import (
+    get_ranking_view_settings,
+    get_strategy_settings,
+    update_ranking_view_settings,
+    update_strategy_settings,
+)
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -15,6 +21,13 @@ def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return default
+
+
+def _get_text_arg(args: Mapping[str, Any], name: str, default: str) -> str:
+    if name not in args:
+        return default
+    raw = args.get(name)
+    return str(raw or "").strip()
 
 
 def _compute_totals(positions: List[Dict]) -> Dict[str, Any]:
@@ -237,16 +250,34 @@ def calculate_ranking_strategy(
     }
 
 
+def _build_empty_report_data() -> ReportData:
+    return ReportData(
+        snapshot_date="-",
+        opportunities=[],
+        theoretical_opportunities=[],
+        rational_opportunities=[],
+        lottery_opportunities=[],
+        positions=[],
+        alerts=[],
+        recurring_opportunities=[],
+        recurring_window_start=None,
+        recurring_window_days=0,
+        recurring_snapshot_days=0,
+        hv_window_days=21,
+    )
+
+
 def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     strat_settings = get_strategy_settings()
-    
+    ranking_settings = get_ranking_view_settings()
+
     min_score = _get_int_arg(args, "min_score", strat_settings.min_score)
     limit = _get_int_arg(args, "limit", strat_settings.limit_opportunities)
     recurring_days = _get_int_arg(args, "recurring_days", strat_settings.recurring_days)
-    recurring_limit = _get_int_arg(args, "recurring_limit", 15)
-    
-    underlying_filter = (args.get("underlying") or "").strip().upper()
-    option_type_filter = (args.get("option_type") or "").strip().upper()
+    recurring_limit = _get_int_arg(args, "recurring_limit", ranking_settings.recurring_limit)
+
+    underlying_filter = _get_text_arg(args, "underlying", ranking_settings.underlying_filter).upper()
+    option_type_filter = _get_text_arg(args, "option_type", ranking_settings.option_type_filter).upper()
     if option_type_filter in {"CALLS", "CALL"}:
         option_type_filter = "CALL"
     elif option_type_filter in {"PUTS", "PUT"}:
@@ -254,16 +285,61 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     else:
         option_type_filter = ""
 
-    # IO / Data Fetching
-    data: ReportData = generate_report(
-        min_score=min_score,
-        limit=limit,
-        recurring_days=recurring_days,
-        recurring_limit=recurring_limit,
+    should_persist_filters = any(
+        key in args
+        for key in (
+            "min_score",
+            "limit",
+            "recurring_days",
+            "recurring_limit",
+            "underlying",
+            "option_type",
+        )
     )
+    if should_persist_filters:
+        update_strategy_settings(
+            min_score=min_score,
+            limit_opportunities=limit,
+            recurring_days=recurring_days,
+        )
+        update_ranking_view_settings(
+            recurring_limit=recurring_limit,
+            underlying_filter=underlying_filter,
+            option_type_filter=option_type_filter,
+        )
+
+    # IO / Data Fetching
+    empty_state_message = ""
+    try:
+        data: ReportData = generate_report(
+            min_score=min_score,
+            limit=limit,
+            recurring_days=recurring_days,
+            recurring_limit=recurring_limit,
+        )
+    except RuntimeError as exc:
+        # Primeiro acesso de usuário novo: ainda sem snapshots.
+        if "Nenhum snapshot encontrado" in str(exc):
+            data = _build_empty_report_data()
+            empty_state_message = (
+                "Ainda não há snapshots para este usuário. "
+                "Rode a coleta (scrape) para começar a visualizar oportunidades."
+            )
+        else:
+            raise
+    except sqlite3.OperationalError as exc:
+        # Primeiro acesso: schema ainda não inicializado para snapshots.
+        if "no such table: option_snapshots" in str(exc):
+            data = _build_empty_report_data()
+            empty_state_message = (
+                "Ainda não há snapshots para este usuário. "
+                "Rode a coleta (scrape) para começar a visualizar oportunidades."
+            )
+        else:
+            raise
 
     # Pure Logic Delegation
-    return calculate_ranking_strategy(
+    ctx = calculate_ranking_strategy(
         data=data,
         min_score=min_score,
         limit=limit,
@@ -272,3 +348,6 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         underlying_filter=underlying_filter,
         option_type_filter=option_type_filter,
     )
+    if empty_state_message:
+        ctx["empty_state_message"] = empty_state_message
+    return ctx
