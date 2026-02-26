@@ -45,6 +45,29 @@ def create_app() -> Flask:
     app.secret_key = os.getenv("OPCOES_SECRET_KEY", "troque-esta-chave-em-producao")
     ensure_bootstrap_user_from_env()
 
+    def _env_bool(name: str, default: bool = False) -> bool:
+        raw = os.getenv(name, "1" if default else "0").strip().lower()
+        return raw in {"1", "true", "yes", "on", "sim", "s"}
+
+    def _session_idle_timeout_seconds() -> int:
+        raw = os.getenv("OPCOES_SESSION_IDLE_MINUTES", "15").strip()
+        try:
+            minutes = int(raw)
+        except ValueError:
+            minutes = 15
+        if minutes <= 0:
+            minutes = 15
+        return minutes * 60
+
+    def _utc_now_ts() -> int:
+        return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SECURE"] = _env_bool("OPCOES_SESSION_COOKIE_SECURE", False)
+    app.config["SESSION_COOKIE_SAMESITE"] = (os.getenv("OPCOES_SESSION_COOKIE_SAMESITE", "Lax") or "Lax").strip()
+    # Session cookie (sem remember-me): ao fechar navegador, exige login novamente.
+    app.config["SESSION_PERMANENT"] = False
+
     def _is_auth_enabled() -> bool:
         raw = os.getenv("OPCOES_AUTH_ENABLED", "1").strip().lower()
         return raw not in {"0", "false", "no", "off", "nao", "não"}
@@ -75,6 +98,25 @@ def create_app() -> Flask:
         if not username:
             next_url = request.full_path if request.full_path and request.full_path != "/?" else request.path
             return redirect(url_for("login", next=next_url))
+
+        now_ts = _utc_now_ts()
+        idle_timeout_seconds = _session_idle_timeout_seconds()
+        raw_last_activity = session.get("last_activity_at")
+        try:
+            last_activity_ts = int(raw_last_activity) if raw_last_activity is not None else None
+        except (TypeError, ValueError):
+            last_activity_ts = None
+
+        if last_activity_ts is not None and (now_ts - last_activity_ts) > idle_timeout_seconds:
+            next_url = request.full_path if request.full_path and request.full_path != "/?" else request.path
+            session.clear()
+            return redirect(url_for("login", next=next_url, reason="expired"))
+
+        if "session_started_at" not in session:
+            session["session_started_at"] = now_ts
+        # Sliding session: renova enquanto usuário estiver ativo.
+        session["last_activity_at"] = now_ts
+
         try:
             db_path = user_db_path(username)
         except ValueError:
@@ -106,6 +148,8 @@ def create_app() -> Flask:
             return redirect(url_for("index"))
 
         error = None
+        if request.method == "GET" and request.args.get("reason") == "expired":
+            error = "Sessão expirada por inatividade. Entre novamente."
         next_url = _safe_redirect_target(request.values.get("next"))
         if request.method == "POST":
             username = normalize_username(request.form.get("username") or "")
@@ -113,6 +157,9 @@ def create_app() -> Flask:
             if authenticate_user(username=username, password=password):
                 session.clear()
                 session["username"] = username
+                now_ts = _utc_now_ts()
+                session["session_started_at"] = now_ts
+                session["last_activity_at"] = now_ts
                 return redirect(next_url)
             error = "Usuário ou senha inválidos."
 
