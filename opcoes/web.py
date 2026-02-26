@@ -4,6 +4,8 @@ import datetime
 import os
 import re
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -63,6 +65,24 @@ def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.secret_key = os.getenv("OPCOES_SECRET_KEY", "troque-esta-chave-em-producao")
     ensure_bootstrap_user_from_env()
+    ranking_cache: dict[tuple, tuple[float, dict]] = {}
+    ranking_cache_lock = threading.Lock()
+    ranking_cache_write_endpoints = {
+        "darf_generate",
+        "darf_pay",
+        "finance_add",
+        "finance_assign",
+        "finance_callaway",
+        "finance_expire",
+        "finance_update",
+        "finance_delete",
+        "settings_view",
+        "add_position_view",
+        "register_position_premium",
+        "recalc_position_premium",
+        "update_position_view",
+        "delete_position_view",
+    }
 
     def _env_bool(name: str, default: bool = False) -> bool:
         raw = os.getenv(name, "1" if default else "0").strip().lower()
@@ -80,6 +100,77 @@ def create_app() -> Flask:
 
     def _utc_now_ts() -> int:
         return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+    def _ranking_cache_ttl_seconds() -> int:
+        raw = os.getenv("OPCOES_RANKING_CACHE_SECONDS", "45").strip()
+        try:
+            ttl = int(raw)
+        except ValueError:
+            ttl = 45
+        return max(ttl, 0)
+
+    def _ranking_cache_namespace(username: str | None) -> str:
+        normalized = normalize_username(username or "")
+        if normalized:
+            return f"user:{normalized}"
+        return f"db:{get_db_path()}"
+
+    def _current_ranking_cache_namespace() -> str:
+        username = getattr(g, "current_username", None)
+        if not username:
+            username = normalize_username(session.get("username") or "")
+        return _ranking_cache_namespace(username)
+
+    def _ranking_cache_key() -> tuple:
+        args_signature = tuple(
+            (key, tuple(sorted(str(v) for v in request.args.getlist(key))))
+            for key in sorted(request.args.keys())
+        )
+        backend = os.getenv("OPCOES_DB_BACKEND", "sqlite").strip().lower() or "sqlite"
+        return ("index", backend, _current_ranking_cache_namespace(), args_signature)
+
+    def _get_ranking_cache(cache_key: tuple) -> Optional[dict]:
+        ttl = _ranking_cache_ttl_seconds()
+        if ttl <= 0:
+            return None
+        now = time.monotonic()
+        with ranking_cache_lock:
+            entry = ranking_cache.get(cache_key)
+            if not entry:
+                return None
+            expires_at, payload = entry
+            if expires_at <= now:
+                ranking_cache.pop(cache_key, None)
+                return None
+            return payload
+
+    def _set_ranking_cache(cache_key: tuple, payload: dict) -> None:
+        ttl = _ranking_cache_ttl_seconds()
+        if ttl <= 0:
+            return
+        now = time.monotonic()
+        expires_at = now + float(ttl)
+        with ranking_cache_lock:
+            ranking_cache[cache_key] = (expires_at, payload)
+            if len(ranking_cache) > 256:
+                stale_keys = [
+                    key
+                    for key, (exp, _ctx) in ranking_cache.items()
+                    if exp <= now
+                ]
+                for key in stale_keys:
+                    ranking_cache.pop(key, None)
+
+    def _invalidate_ranking_cache_for_namespace(namespace: str) -> None:
+        if not namespace:
+            return
+        with ranking_cache_lock:
+            keys = [key for key in ranking_cache.keys() if len(key) > 2 and key[2] == namespace]
+            for key in keys:
+                ranking_cache.pop(key, None)
+
+    def _invalidate_ranking_cache_for_current_user() -> None:
+        _invalidate_ranking_cache_for_namespace(_current_ranking_cache_namespace())
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SECURE"] = _env_bool(
@@ -176,6 +267,13 @@ def create_app() -> Flask:
             reset_pg_schema_override(pg_token)
             g.pg_schema_override_token = None
 
+    @app.after_request
+    def _invalidate_ranking_cache_after_write(response):
+        endpoint = request.endpoint or ""
+        if request.method == "POST" and endpoint in ranking_cache_write_endpoints:
+            _invalidate_ranking_cache_for_current_user()
+        return response
+
     @app.context_processor
     def _inject_user_context():
         auth_active = not app.testing and _is_auth_enabled()
@@ -211,12 +309,19 @@ def create_app() -> Flask:
 
     @app.post("/logout")
     def logout():
+        _invalidate_ranking_cache_for_namespace(
+            _ranking_cache_namespace(session.get("username"))
+        )
         session.clear()
         return redirect(url_for("login"))
 
     @app.route("/")
     def index() -> str:
-        ctx = get_ranking_context(request.args)
+        cache_key = _ranking_cache_key()
+        ctx = _get_ranking_cache(cache_key)
+        if ctx is None:
+            ctx = get_ranking_context(request.args)
+            _set_ranking_cache(cache_key, ctx)
         return render_template("index.html", **ctx)
 
     @app.route("/covered-call")

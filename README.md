@@ -208,6 +208,7 @@ export OPCOES_DB_BACKEND=postgres
 ```
 - Fallback automático: se houver falha de conexão/query no PostgreSQL, o runtime volta para SQLite sem derrubar o fluxo.
 - Em modo web multiusuário, o schema PostgreSQL é derivado do usuário logado.
+- A home (`/`) usa cache curto por usuário para reduzir latência de ranking (TTL configurável).
 
 ## Web app
 Rode:
@@ -291,6 +292,7 @@ Ao usar `--force`, se já houver dados no destino o comando cria backup automát
 - `OPCOES_SESSION_IDLE_MINUTES`: expiração por inatividade da sessão web (default: `15` minutos).
 - `OPCOES_SESSION_COOKIE_SECURE`: envia cookie de sessão apenas em HTTPS (`1` recomendado em produção).
 - `OPCOES_SESSION_COOKIE_SAMESITE`: política SameSite do cookie (`Lax` por padrão; opções comuns: `Lax`/`Strict`).
+- `OPCOES_RANKING_CACHE_SECONDS`: TTL do cache da home/ranking por usuário (default: `45`; use `0` para desativar).
 
 ## Testes
 ```bash
@@ -306,6 +308,7 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
+  - Home/ranking (`/`) passou a usar cache curto por usuário com invalidação automática após ações de escrita (`POST`) nas abas financeiras/posições/DARF/configurações, reduzindo latência em banco remoto.
   - Novo comando `poetry run python -m opcoes.cli db optimize` para criar índices recomendados no schema PostgreSQL (`option_snapshots`, `underlying_snapshots`, `positions`, `ledger`) e reduzir latência no runtime web/CLI.
   - Novo comando `poetry run python -m opcoes.cli db cutover-check` com validação de prontidão para ativar runtime PostgreSQL (conectividade, consistência de contagens e smoke das camadas `portfolio/finance/darf/settings/report`).
   - Fase gradual ampliada para PostgreSQL nas camadas de `portfolio`, `finance` e `darf`, com fallback automático para SQLite.
