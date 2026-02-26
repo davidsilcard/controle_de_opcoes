@@ -1,9 +1,11 @@
 import argparse
 import asyncio
 import datetime as dt
+import getpass
 from pathlib import Path
 from typing import List, Optional
 
+from .auth import create_user, list_users
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
 from .portfolio import add_position, list_positions, close_position
@@ -259,6 +261,25 @@ def parse_args() -> argparse.Namespace:
         help="Filtra posições reais, simuladas, ou ambas (default: real).",
     )
 
+    uc = sub.add_parser("user", help="Gerencia usuários para acesso web")
+    ucs = uc.add_subparsers(dest="subcmd", required=True)
+
+    uc_create = ucs.add_parser("create", help="Cria usuário de acesso web")
+    uc_create.add_argument("--username", required=True, help="Nome do usuário (minúsculo, 3-64 chars)")
+    uc_create.add_argument("--password", default=None, help="Senha. Se omitida, solicita via prompt seguro.")
+    uc_create.add_argument(
+        "--replace",
+        action="store_true",
+        help="Se o usuário já existir, atualiza a senha.",
+    )
+
+    uc_list = ucs.add_parser("list", help="Lista usuários de acesso web")
+    uc_list.add_argument(
+        "--all",
+        action="store_true",
+        help="Inclui usuários inativos.",
+    )
+
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
     fc.add_argument("--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)")
     fc.add_argument(
@@ -494,6 +515,29 @@ def main() -> None:
         total_ir = summary.swing_ir + summary.daytrade_ir
         total_irrf = summary.swing_irrf + summary.daytrade_irrf
         print(f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})")
+    elif args.cmd == "user":
+        if args.subcmd == "create":
+            password = args.password
+            if not password:
+                password = getpass.getpass("Senha do usuário: ")
+            created = create_user(
+                username=args.username,
+                password=password,
+                replace=bool(getattr(args, "replace", False)),
+            )
+            if created:
+                print(f"Usuário '{args.username}' salvo com sucesso.")
+            else:
+                raise SystemExit(
+                    f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
+                )
+        elif args.subcmd == "list":
+            users = list_users(active_only=not bool(getattr(args, "all", False)))
+            if not users:
+                print("Nenhum usuário encontrado.")
+            else:
+                for username in users:
+                    print(username)
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:

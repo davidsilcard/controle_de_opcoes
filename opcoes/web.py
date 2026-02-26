@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import datetime
+import os
 import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, g, redirect, render_template, request, session, url_for
 
-from .config import get_db_path
+from .auth import (
+    authenticate_user,
+    ensure_bootstrap_user_from_env,
+    normalize_username,
+    user_db_path,
+)
+from .config import get_db_path, reset_db_path_override, set_db_path_override
 from .portfolio import add_position, delete_position, list_positions, update_position, close_position, get_position
 from .utils import infer_option_type, parse_ptbr_number
 from .settings import (
@@ -35,6 +42,86 @@ from . import finance, darf
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
+    app.secret_key = os.getenv("OPCOES_SECRET_KEY", "troque-esta-chave-em-producao")
+    ensure_bootstrap_user_from_env()
+
+    def _is_auth_enabled() -> bool:
+        raw = os.getenv("OPCOES_AUTH_ENABLED", "1").strip().lower()
+        return raw not in {"0", "false", "no", "off", "nao", "não"}
+
+    def _safe_redirect_target(value: str | None) -> str:
+        if not value:
+            return url_for("index")
+        candidate = value.strip()
+        if not candidate.startswith("/") or candidate.startswith("//"):
+            return url_for("index")
+        if candidate.startswith("/login") or candidate.startswith("/logout"):
+            return url_for("index")
+        return candidate
+
+    @app.before_request
+    def _bind_user_context():
+        g.db_path_override_token = None
+        g.current_username = None
+
+        if app.testing or not _is_auth_enabled():
+            return None
+
+        endpoint = request.endpoint or ""
+        if endpoint in {"login", "logout", "static"}:
+            return None
+
+        username = normalize_username(session.get("username") or "")
+        if not username:
+            next_url = request.full_path if request.full_path and request.full_path != "/?" else request.path
+            return redirect(url_for("login", next=next_url))
+        try:
+            db_path = user_db_path(username)
+        except ValueError:
+            session.clear()
+            return redirect(url_for("login"))
+
+        g.db_path_override_token = set_db_path_override(db_path)
+        g.current_username = username
+        return None
+
+    @app.teardown_request
+    def _clear_user_context(_exc):
+        token = getattr(g, "db_path_override_token", None)
+        if token is not None:
+            reset_db_path_override(token)
+            g.db_path_override_token = None
+
+    @app.context_processor
+    def _inject_user_context():
+        auth_active = not app.testing and _is_auth_enabled()
+        return {
+            "auth_enabled": auth_active,
+            "current_username": normalize_username(session.get("username") or "") if auth_active else "",
+        }
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login() -> str:
+        if app.testing or not _is_auth_enabled():
+            return redirect(url_for("index"))
+
+        error = None
+        next_url = _safe_redirect_target(request.values.get("next"))
+        if request.method == "POST":
+            username = normalize_username(request.form.get("username") or "")
+            password = request.form.get("password") or ""
+            if authenticate_user(username=username, password=password):
+                session.clear()
+                session["username"] = username
+                return redirect(next_url)
+            error = "Usuário ou senha inválidos."
+
+        return render_template("login.html", error=error, next_url=next_url)
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
 
     @app.route("/")
     def index() -> str:
@@ -1090,4 +1177,5 @@ def create_app() -> Flask:
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True)
+    debug_mode = os.getenv("OPCOES_WEB_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on", "sim"}
+    app.run(debug=debug_mode)

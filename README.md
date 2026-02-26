@@ -159,6 +159,24 @@ Páginas principais:
 - Auditoria: reconciliação de fluxo de caixa vs posições.
 - DARF e configurações.
 
+### Acesso multiusuário (login + isolamento por usuário)
+- A web agora pode operar em modo multiusuário com login obrigatório.
+- Cada usuário autenticado usa um banco SQLite próprio em `data/users/<usuario>/opcoes_snapshots.db`.
+- Isso evita mistura de posições, caixa, DARF e configurações entre clientes.
+
+Criar usuário:
+```bash
+poetry run python -m opcoes.cli user create --username seu_usuario
+```
+Opcionalmente informar senha por argumento:
+```bash
+poetry run python -m opcoes.cli user create --username seu_usuario --password "SuaSenhaForte"
+```
+Listar usuários:
+```bash
+poetry run python -m opcoes.cli user list
+```
+
 ## Funcionamento do ranking e scores
 - Checklist derivado: `Status_Moneyness`, `%_Alta_p_2x`, `Status_2x`, `Status_Liquidez`, `Status_Theta`.
 - Scores contínuos (moneyness, liquidez, theta, IV, cenário 2x) formam `score_total`.
@@ -185,6 +203,13 @@ Páginas principais:
 
 ## Variáveis de ambiente
 - `OPCOES_DB_PATH`: define outro caminho para o SQLite (default: `data/opcoes_snapshots.db`).
+- `OPCOES_AUTH_ENABLED`: ativa/desativa login web (`1` por padrão; use `0` para desativar).
+- `OPCOES_SECRET_KEY`: chave de sessão Flask (obrigatório definir em produção).
+- `OPCOES_AUTH_DB_PATH`: caminho do banco de autenticação (default: `data/auth.db`).
+- `OPCOES_USERS_DB_DIR`: diretório raiz dos bancos por usuário (default: `data/users`).
+- `OPCOES_ADMIN_USER` e `OPCOES_ADMIN_PASSWORD`: cria usuário inicial no startup da web.
+- `OPCOES_ADMIN_REPLACE_PASSWORD`: se `1`, atualiza senha do usuário bootstrap no startup.
+- `OPCOES_WEB_DEBUG`: habilita debug local da web (`0` por padrão).
 
 ## Testes
 ```bash
@@ -200,6 +225,7 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
+  - Base multiusuário adicionada na web: login/senha, sessão e isolamento de dados por usuário (um SQLite por conta), além de comando CLI para gestão de usuários (`user create`, `user list`).
   - Recalculo de score/IV no scraper aplicado em todos os casos (com e sem preço do ativo).
   - Segmentação de ranking por delta usando `abs(delta)` (corrige classificação de PUTs).
   - Cálculo de prêmio/DARF centralizado e DARF sempre arredondado em centavos.
