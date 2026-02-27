@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections import Counter
 import datetime as dt
+import os
 import re
 import sqlite3
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yfinance as yf
 
+from ..config import get_data_backend, get_db_path, get_postgres_schema
+from ..db_health import resolve_postgres_target
 from ..fundamentus import (
     fetch_approved_ranking,
     fetch_filter_run,
@@ -16,7 +19,6 @@ from ..fundamentus import (
     fetch_snapshot,
     latest_snapshot_date,
 )
-from ..config import get_db_path
 from ..settings import get_fundamentus_settings
 from ..utils import parse_ptbr_number
 
@@ -99,6 +101,118 @@ _REASON_LABELS = {
 }
 
 
+class _PgResult:
+    def __init__(self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = None
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(
+        self,
+        *,
+        backend: str,
+        raw_conn: Any,
+        pg_row_factory: Any = None,
+    ) -> None:
+        self.backend = backend
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        if self.backend == "sqlite":
+            return self._raw_conn.execute(query, tuple(params))
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def executemany(self, query: str, params_seq: Sequence[Sequence[object]]) -> None:
+        if self.backend == "sqlite":
+            self._raw_conn.executemany(query, params_seq)
+            return
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor() as cur:
+            cur.executemany(query_pg, params_seq)
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def rollback(self) -> None:
+        self._raw_conn.rollback()
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _sqlite_timeout_seconds() -> float:
+    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 30.0
+    if value <= 0:
+        value = 30.0
+    return value
+
+
+def _connect_sqlite() -> _DbConn:
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    timeout_seconds = _sqlite_timeout_seconds()
+    raw_conn = sqlite3.connect(db_path, timeout=timeout_seconds)
+    raw_conn.row_factory = sqlite3.Row
+    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    return _DbConn(backend="sqlite", raw_conn=raw_conn)
+
+
+def _connect_postgres() -> _DbConn:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
+    with raw_conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    return _DbConn(backend="postgres", raw_conn=raw_conn, pg_row_factory=dict_row)
+
+
+def _connect_db() -> _DbConn:
+    if get_data_backend() == "postgres":
+        try:
+            return _connect_postgres()
+        except Exception:
+            return _connect_sqlite()
+    return _connect_sqlite()
+
+
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     if value < low:
         return low
@@ -149,11 +263,15 @@ def _next_month_third_friday(base_date: dt.date) -> dt.date:
 
 
 def _latest_option_snapshot_date() -> Optional[str]:
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
         row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
-        return row[0] if row else None
-    except sqlite3.Error:
+        if not row:
+            return None
+        if isinstance(row, Mapping):
+            return row.get("d")
+        return row[0]
+    except Exception:
         return None
     finally:
         conn.close()
@@ -162,9 +280,8 @@ def _latest_option_snapshot_date() -> Optional[str]:
 def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> Dict[str, float]:
     if not snapshot_date or not underlyings:
         return {}
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
-        conn.row_factory = sqlite3.Row
         placeholders = ",".join(["?"] * len(underlyings))
         params = [snapshot_date] + [u.upper() for u in underlyings]
         query = """
@@ -181,7 +298,7 @@ def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> 
                 continue
             prices[str(row["underlying"]).upper()] = float(price)
         return prices
-    except sqlite3.Error:
+    except Exception:
         return {}
     finally:
         conn.close()
@@ -190,9 +307,8 @@ def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> 
 def _fetch_put_rows(snapshot_date: str, underlyings: Sequence[str]) -> List[Dict[str, Any]]:
     if not snapshot_date or not underlyings:
         return []
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
-        conn.row_factory = sqlite3.Row
         placeholders = ",".join(["?"] * len(underlyings))
         params = [snapshot_date] + [u.upper() for u in underlyings]
         query = """
@@ -204,7 +320,7 @@ def _fetch_put_rows(snapshot_date: str, underlyings: Sequence[str]) -> List[Dict
         """.format(placeholders=placeholders)
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
-    except sqlite3.Error:
+    except Exception:
         return []
     finally:
         conn.close()
@@ -414,9 +530,8 @@ def _liquidez_key(row: Dict[str, Any]) -> float:
 
 
 def _fetch_option_underlyings() -> set[str]:
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
-        conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
         snapshot_date = row["d"] if row else None
         if not snapshot_date:
@@ -425,8 +540,17 @@ def _fetch_option_underlyings() -> set[str]:
             "SELECT DISTINCT underlying FROM option_snapshots WHERE snapshot_date = ?",
             (snapshot_date,),
         ).fetchall()
-        return {str(r[0]).strip().upper() for r in rows if r and r[0]}
-    except sqlite3.Error:
+        values: set[str] = set()
+        for row_data in rows:
+            if isinstance(row_data, Mapping):
+                value = row_data.get("underlying")
+            else:
+                value = row_data[0] if row_data else None
+            if not value:
+                continue
+            values.add(str(value).strip().upper())
+        return values
+    except Exception:
         return set()
     finally:
         conn.close()
@@ -472,17 +596,29 @@ def _to_yahoo_symbol(symbol: str) -> Optional[str]:
     return f"{s}.SA"
 
 
-def _ensure_ticker_metadata_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ticker_metadata (
-            ticker TEXT PRIMARY KEY,
-            sector TEXT,
-            industry TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+def _ensure_ticker_metadata_table(conn: _DbConn) -> None:
+    if conn.backend == "postgres":
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticker_metadata (
+                ticker TEXT PRIMARY KEY,
+                sector TEXT,
+                industry TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticker_metadata (
+                ticker TEXT PRIMARY KEY,
+                sector TEXT,
+                industry TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     conn.commit()
 
 
@@ -498,9 +634,8 @@ def _load_cached_metadata(tickers: Sequence[str]) -> tuple[Dict[str, Dict[str, O
     if not missing:
         return cached, []
 
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
-        conn.row_factory = sqlite3.Row
         _ensure_ticker_metadata_table(conn)
         placeholders = ",".join(["?"] * len(missing))
         query = f"SELECT ticker, sector, industry FROM ticker_metadata WHERE ticker IN ({placeholders})"
@@ -509,7 +644,7 @@ def _load_cached_metadata(tickers: Sequence[str]) -> tuple[Dict[str, Dict[str, O
             meta = {"sector": row["sector"], "industry": row["industry"]}
             cached[row["ticker"]] = meta
             _TICKER_META_CACHE[row["ticker"]] = meta
-    except sqlite3.Error:
+    except Exception:
         return cached, missing
     finally:
         conn.close()
@@ -521,22 +656,35 @@ def _load_cached_metadata(tickers: Sequence[str]) -> tuple[Dict[str, Dict[str, O
 def _save_metadata(entries: Dict[str, Dict[str, Optional[str]]]) -> None:
     if not entries:
         return
-    conn = sqlite3.connect(get_db_path())
+    conn = _connect_db()
     try:
         _ensure_ticker_metadata_table(conn)
         payload = [
             (ticker, data.get("sector"), data.get("industry"))
             for ticker, data in entries.items()
         ]
-        conn.executemany(
-            """
-            INSERT OR REPLACE INTO ticker_metadata (ticker, sector, industry, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            payload,
-        )
+        if conn.backend == "postgres":
+            conn.executemany(
+                """
+                INSERT INTO ticker_metadata (ticker, sector, industry, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (ticker) DO UPDATE SET
+                    sector = EXCLUDED.sector,
+                    industry = EXCLUDED.industry,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                payload,
+            )
+        else:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO ticker_metadata (ticker, sector, industry, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                payload,
+            )
         conn.commit()
-    except sqlite3.Error:
+    except Exception:
         pass
     finally:
         conn.close()

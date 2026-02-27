@@ -5,7 +5,7 @@
 - **JavaScript** (for Playwright/Web interactions)
 
 ## Package Management
-- **Poetry**
+- **uv**
 
 ## Frameworks & Libraries
 - **Backend:** Flask

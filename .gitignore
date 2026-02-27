@@ -6,7 +6,7 @@ __pycache__/
 # Editor/OS cruft
 .DS_Store
 
-# Poetry / environment
+# Virtual environment
 .venv/
 
 # Local data artifacts

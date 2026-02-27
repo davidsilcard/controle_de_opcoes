@@ -24,7 +24,7 @@ def optimize_postgres_schema(
         import psycopg
     except Exception as exc:
         raise RuntimeError(
-            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
     schema_name = sanitize_schema_name(schema)

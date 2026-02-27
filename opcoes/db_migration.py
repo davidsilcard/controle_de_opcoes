@@ -330,7 +330,7 @@ def migrate_sqlite_sources_to_postgres(
         import psycopg
     except Exception as exc:
         raise RuntimeError(
-            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
     with psycopg.connect(target.dsn) as pg_conn:
@@ -415,7 +415,7 @@ def verify_sqlite_sources_in_postgres(
         import psycopg
     except Exception as exc:
         raise RuntimeError(
-            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
     with psycopg.connect(target.dsn) as pg_conn:

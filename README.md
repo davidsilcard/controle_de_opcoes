@@ -13,46 +13,58 @@ estratégias, posições, finanças e DARF) e mantém trilha auditável em SQLit
 
 ## Requisitos
 - Python 3.12+
-- Poetry
+- uv
+
+## Migração do gerenciador (Poetry -> uv)
+Instalar `uv`:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+Remover `poetry` (quando instalado pelo instalador oficial):
+```bash
+curl -sSL https://install.python-poetry.org | python3 - --uninstall
+```
+Se o Poetry tiver sido instalado por outro método (apt, pip, pipx etc.), remova pelo mesmo gerenciador de origem.
 
 ## Instalação
 ```bash
-poetry install
-poetry run playwright install chromium
+uv lock
+uv sync
+uv run playwright install chromium
 ```
 
 ## Uso rápido
 1) Coletar opções:
 ```bash
-poetry run python -m opcoes.cli scrape
+uv run python -m opcoes.cli scrape
 ```
 2) Ver resumo e alertas:
 ```bash
-poetry run python -m opcoes.cli report
+uv run python -m opcoes.cli report
 ```
 3) Abrir a interface web:
 ```bash
-poetry run python -m opcoes.web
+uv run python -m opcoes.web
 ```
 
 ## Comandos principais (CLI)
 Ver ajuda geral:
 ```bash
-poetry run python -m opcoes.cli --help
+uv run python -m opcoes.cli --help
 ```
 
 ### Coleta e enriquecimento
 - Coletar tudo (CALL/PUT, todos ativos, strikes e vencimentos):
 ```bash
-poetry run python -m opcoes.cli scrape
+uv run python -m opcoes.cli scrape
 ```
 - Limitar por símbolos ou quantidade:
 ```bash
-poetry run python -m opcoes.cli scrape --symbols ABEV3,BBAS3 --max-symbols 20
+uv run python -m opcoes.cli scrape --symbols ABEV3,BBAS3 --max-symbols 20
 ```
 - Definir output, headful, timeout e proxy:
 ```bash
-poetry run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful --goto-timeout 90000 --proxy-server http://proxy:3128 --proxy-username usuario --proxy-password senha
+uv run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful --goto-timeout 90000 --proxy-server http://proxy:3128 --proxy-username usuario --proxy-password senha
 ```
 - Retomar coleta interrompida (checkpoint automatico):
 O scraper agora salva progresso automaticamente e retoma na proxima execucao, sem flag.
@@ -65,91 +77,91 @@ Regras da retomada:
 - Use `--no-resume` para desativar checkpoint nesta execucao.
 - Backfill de preços (HV/IV Rank):
 ```bash
-poetry run python -m opcoes.cli scrape --backfill-days 120
+uv run python -m opcoes.cli scrape --backfill-days 120
 ```
 Para desabilitar: `--no-backfill`.
 
 ### Fundamentos (enriquecimento no CSV)
 - Usando CSV de fundamentos:
 ```bash
-poetry run python -m opcoes.cli scrape --fundamentals data/fundamentals.csv
+uv run python -m opcoes.cli scrape --fundamentals data/fundamentals.csv
 ```
 O CSV deve ter `ticker` e alguma combinação:
 `earnings_yield_ttm` (E/P) ou `pe_ttm` (P/L), ou `lpa_ttm + preco`, ou `lucro_liquido_ttm + acoes_total + preco`.
 - Usando Status Invest:
 ```bash
-poetry run python -m opcoes.cli scrape --statusinvest
+uv run python -m opcoes.cli scrape --statusinvest
 ```
 
 ### Enriquecer CSV existente
 ```bash
-poetry run python -m opcoes.cli enrich --fundamentals data/fundamentals.csv --input data/opcoes_latest.csv
-poetry run python -m opcoes.cli enrich --statusinvest --input data/opcoes_latest.csv
+uv run python -m opcoes.cli enrich --fundamentals data/fundamentals.csv --input data/opcoes_latest.csv
+uv run python -m opcoes.cli enrich --statusinvest --input data/opcoes_latest.csv
 ```
 Por padrão sobrescreve o input; para salvar em outro lugar use `--output`.
 
 ### Exportar snapshot (para Excel)
 ```bash
-poetry run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv
+uv run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv
 ```
 Opcional: `--date YYYY-MM-DD`.
 
 ### Relatórios
 - Relatório diário (ranking, alertas e posições):
 ```bash
-poetry run python -m opcoes.cli report
+uv run python -m opcoes.cli report
 ```
 Por padrão persiste ranking do dia; use `--no-persist` para pular.
 
 ### Posições
 - Adicionar posição:
 ```bash
-poetry run python -m opcoes.cli position add --ticker B3SAB150 --underlying B3SA3 --qty 100 --price 0.35 --trade-date 2025-01-01
+uv run python -m opcoes.cli position add --ticker B3SAB150 --underlying B3SA3 --qty 100 --price 0.35 --trade-date 2025-01-01
 ```
 - Listar posições:
 ```bash
-poetry run python -m opcoes.cli position list
+uv run python -m opcoes.cli position list
 ```
 - Encerrar posição:
 ```bash
-poetry run python -m opcoes.cli position close --id 10 --exit-date 2025-01-20 --price 0.05
+uv run python -m opcoes.cli position close --id 10 --exit-date 2025-01-20 --price 0.05
 ```
 
 ### Decisões e histórico
 ```bash
-poetry run python -m opcoes.cli decision add --ticker B3SAB150 --notes "Entrada por score e liquidez"
-poetry run python -m opcoes.cli decision list --limit 20
+uv run python -m opcoes.cli decision add --ticker B3SAB150 --notes "Entrada por score e liquidez"
+uv run python -m opcoes.cli decision list --limit 20
 ```
 
 ### Limpeza de histórico
 ```bash
-poetry run python -m opcoes.cli cleanup --retention-days 180 --purge-snapshots
+uv run python -m opcoes.cli cleanup --retention-days 180 --purge-snapshots
 ```
 Sem `--purge-snapshots`, remove apenas rankings.
 
 ### Fundamentus (filtro fundamentalista)
 - Coletar snapshot:
 ```bash
-poetry run python -m opcoes.cli fundamentus
+uv run python -m opcoes.cli fundamentus
 ```
 - Aplicar filtros:
 ```bash
-poetry run python -m opcoes.cli fundamentus-filter
+uv run python -m opcoes.cli fundamentus-filter
 ```
 Os parâmetros do filtro podem ser ajustados com as flags do comando.
 
 ### DARF / relatório fiscal
 ```bash
-poetry run python -m opcoes.cli tax --year 2025 --month 1
-poetry run python -m opcoes.cli tax --year 2025 --month 1 --mode simulated
-poetry run python -m opcoes.cli tax --year 2025 --month 1 --mode all
+uv run python -m opcoes.cli tax --year 2025 --month 1
+uv run python -m opcoes.cli tax --year 2025 --month 1 --mode simulated
+uv run python -m opcoes.cli tax --year 2025 --month 1 --mode all
 ```
 `--mode` aceita `real` (default), `simulated` ou `all`.
 
 ### Diagnóstico de banco (pré-migração para servidor)
 ```bash
-poetry add psycopg[binary]
-poetry run python -m opcoes.cli db check
+uv add psycopg[binary]
+uv run python -m opcoes.cli db check
 ```
 Esse comando valida variáveis de ambiente, testa host/porta e executa `SELECT 1` no PostgreSQL.
 Observação: o `db check` valida conectividade e prontidão do PostgreSQL antes de ativar/expandir o runtime nesse backend.
@@ -157,35 +169,35 @@ Observação: o `db check` valida conectividade e prontidão do PostgreSQL antes
 ### Migração SQLite -> PostgreSQL (fase de preparação)
 Criar backup de segurança antes de qualquer troca de runtime:
 ```bash
-poetry run python -m opcoes.cli db backup --username admin
+uv run python -m opcoes.cli db backup --username admin
 ```
 Simular rollback sem sobrescrever nada:
 ```bash
-poetry run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup> --dry-run
+uv run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup> --dry-run
 ```
 Executar rollback real (restaura SQLite):
 ```bash
-poetry run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup>
+uv run python -m opcoes.cli db rollback --backup-dir data/backups/sqlite/<pasta_backup>
 ```
 Dry-run (não grava no PostgreSQL):
 ```bash
-poetry run python -m opcoes.cli db migrate --username admin --dry-run
+uv run python -m opcoes.cli db migrate --username admin --dry-run
 ```
 Migração efetiva:
 ```bash
-poetry run python -m opcoes.cli db migrate --username admin --replace
+uv run python -m opcoes.cli db migrate --username admin --replace
 ```
 Validar contagens após migração:
 ```bash
-poetry run python -m opcoes.cli db verify --username admin
+uv run python -m opcoes.cli db verify --username admin
 ```
 Executar checklist completo de cutover (conectividade + contagens + smoke das camadas):
 ```bash
-poetry run python -m opcoes.cli db cutover-check --username admin
+uv run python -m opcoes.cli db cutover-check --username admin
 ```
 Aplicar índices recomendados no schema PostgreSQL (otimização de performance pós-migração):
 ```bash
-poetry run python -m opcoes.cli db optimize --username admin
+uv run python -m opcoes.cli db optimize --username admin
 ```
 Opções úteis:
 - `db backup`: aceita `--backup-root`, `--source-dir`, `--source-main`, `--source-iv`, `--source-flow`, `--no-aux`, `--dry-run`.
@@ -213,7 +225,7 @@ export OPCOES_DB_BACKEND=postgres
 ## Web app
 Rode:
 ```bash
-poetry run python -m opcoes.web
+uv run python -m opcoes.web
 ```
 Páginas principais:
 - Ranking: oportunidades com/sem bid+ask (watchlist).
@@ -231,19 +243,19 @@ Páginas principais:
 
 Criar usuário:
 ```bash
-poetry run python -m opcoes.cli user create --username seu_usuario
+uv run python -m opcoes.cli user create --username seu_usuario
 ```
 Opcionalmente informar senha por argumento:
 ```bash
-poetry run python -m opcoes.cli user create --username seu_usuario --password "SuaSenhaForte"
+uv run python -m opcoes.cli user create --username seu_usuario --password "SuaSenhaForte"
 ```
 Listar usuários:
 ```bash
-poetry run python -m opcoes.cli user list
+uv run python -m opcoes.cli user list
 ```
 Vincular dados legados (single-user) para um usuário:
 ```bash
-poetry run python -m opcoes.cli user migrate-legacy --username admin --force
+uv run python -m opcoes.cli user migrate-legacy --username admin --force
 ```
 Por padrão usa como origem:
 - `data/opcoes_snapshots.db`
@@ -296,8 +308,8 @@ Ao usar `--force`, se já houver dados no destino o comando cria backup automát
 
 ## Testes
 ```bash
-poetry install --with dev
-RUN_E2E_TESTS=1 poetry run pytest tests/test_scraper_e2e.py
+uv sync --dev
+RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 ```
 Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
 
@@ -308,17 +320,19 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
+  - Fluxos `scrape` e `fundamentus` do CLI agora respeitam o backend ativo (`OPCOES_DB_BACKEND=postgres`) para leitura/gravação em PostgreSQL, com fallback automático para SQLite em falhas.
+  - Estratégia/tela `Fundamentus` passou a consultar `option_snapshots`, `underlying_snapshots` e `ticker_metadata` no backend ativo (`postgres`/`sqlite`), mantendo isolamento por schema no PostgreSQL.
   - Home/ranking (`/`) passou a usar cache curto por usuário com invalidação automática após ações de escrita (`POST`) nas abas financeiras/posições/DARF/configurações, reduzindo latência em banco remoto.
-  - Novo comando `poetry run python -m opcoes.cli db optimize` para criar índices recomendados no schema PostgreSQL (`option_snapshots`, `underlying_snapshots`, `positions`, `ledger`) e reduzir latência no runtime web/CLI.
-  - Novo comando `poetry run python -m opcoes.cli db cutover-check` com validação de prontidão para ativar runtime PostgreSQL (conectividade, consistência de contagens e smoke das camadas `portfolio/finance/darf/settings/report`).
+  - Novo comando `uv run python -m opcoes.cli db optimize` para criar índices recomendados no schema PostgreSQL (`option_snapshots`, `underlying_snapshots`, `positions`, `ledger`) e reduzir latência no runtime web/CLI.
+  - Novo comando `uv run python -m opcoes.cli db cutover-check` com validação de prontidão para ativar runtime PostgreSQL (conectividade, consistência de contagens e smoke das camadas `portfolio/finance/darf/settings/report`).
   - Fase gradual ampliada para PostgreSQL nas camadas de `portfolio`, `finance` e `darf`, com fallback automático para SQLite.
   - Transações da camada `db` (`db_transaction`) agora respeitam o backend ativo (`postgres`/`sqlite`) para manter consistência dos fluxos de estratégia.
   - Fase gradual ampliada: módulo de `settings` passou a ler/gravar em PostgreSQL quando `OPCOES_DB_BACKEND=postgres`, com fallback automático para SQLite em falhas.
   - Fase 1 da troca de runtime iniciada: Ranking passou a suportar leitura via PostgreSQL (`OPCOES_DB_BACKEND=postgres`) com fallback automático para SQLite em falhas de conexão/query.
-  - Novos comandos `poetry run python -m opcoes.cli db backup` e `db rollback` para automação de backup/retorno dos SQLite antes da troca de runtime, com manifesto e `--dry-run`.
-  - Novo comando `poetry run python -m opcoes.cli db verify` para comparar contagens SQLite x PostgreSQL por tabela e validar integridade pós-migração.
-  - Novo comando `poetry run python -m opcoes.cli db migrate` para migrar bases SQLite por usuário (incluindo `iv_history`/`flow_history`) para PostgreSQL em schema dedicado, com modo `--dry-run` e cópia em streaming.
-  - Novo comando `poetry run python -m opcoes.cli db check` para validar prontidão de conexão com PostgreSQL (env + TCP + `SELECT 1`) antes da migração de banco.
+  - Novos comandos `uv run python -m opcoes.cli db backup` e `db rollback` para automação de backup/retorno dos SQLite antes da troca de runtime, com manifesto e `--dry-run`.
+  - Novo comando `uv run python -m opcoes.cli db verify` para comparar contagens SQLite x PostgreSQL por tabela e validar integridade pós-migração.
+  - Novo comando `uv run python -m opcoes.cli db migrate` para migrar bases SQLite por usuário (incluindo `iv_history`/`flow_history`) para PostgreSQL em schema dedicado, com modo `--dry-run` e cópia em streaming.
+  - Novo comando `uv run python -m opcoes.cli db check` para validar prontidão de conexão com PostgreSQL (env + TCP + `SELECT 1`) antes da migração de banco.
   - Runtime agora carrega automaticamente `.env` na inicialização via CLI/Web (`python -m opcoes.cli ...` e `python -m opcoes.web`), sem sobrescrever variáveis já exportadas no shell.
   - Base multiusuário adicionada na web: login/senha, sessão e isolamento de dados por usuário (um SQLite por conta), além de comando CLI para gestão de usuários (`user create`, `user list`).
   - CLI ganhou migração legada por usuário (`user migrate-legacy`) para vincular histórico anterior ao banco isolado de uma conta (com backup automático em sobrescrita).

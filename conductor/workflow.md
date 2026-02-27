@@ -6,8 +6,8 @@
     - Develop code following project patterns.
     - Update CLI or Web interface as needed.
 3. **Verification:**
-    - Run unit tests: `poetry run pytest`.
-    - Run E2E tests if scraper changes: `RUN_E2E_TESTS=1 poetry run pytest tests/test_scraper_e2e.py`.
+    - Run unit tests: `uv run pytest`.
+    - Run E2E tests if scraper changes: `RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py`.
 4. **Documentation:** Update README or AGENTS.md if significant changes are made.
 
 ## Coding Standards

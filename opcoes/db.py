@@ -44,7 +44,7 @@ def _open_postgres():
         from psycopg.rows import dict_row
     except Exception as exc:
         raise RuntimeError(
-            "Driver psycopg não encontrado. Instale com: poetry add psycopg[binary]"
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
     schema = get_postgres_schema()

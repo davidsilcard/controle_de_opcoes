@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sqlite3
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib import parse, request
 import http.cookiejar
 
-from .config import get_db_path
+from .config import get_data_backend, get_db_path, get_postgres_schema
+from .db_health import resolve_postgres_target
 from .scraper.storage import _ensure_parent
 from .utils import parse_ptbr_number
 
@@ -240,87 +242,270 @@ def fetch_fundamentus_results(
     return parse_result_table(html)
 
 
-def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
+class _PgResult:
+    def __init__(self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = None
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(
+        self,
+        *,
+        backend: str,
+        raw_conn: Any,
+        pg_row_factory: Any = None,
+    ) -> None:
+        self.backend = backend
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        if self.backend == "sqlite":
+            return self._raw_conn.execute(query, tuple(params))
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def executemany(self, query: str, params_seq: Sequence[Sequence[object]]) -> None:
+        if self.backend == "sqlite":
+            self._raw_conn.executemany(query, params_seq)
+            return
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor() as cur:
+            cur.executemany(query_pg, params_seq)
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+    def rollback(self) -> None:
+        self._raw_conn.rollback()
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _sqlite_timeout_seconds() -> float:
+    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 30.0
+    if value <= 0:
+        value = 30.0
+    return value
+
+
+def _connect_sqlite(db_path: Optional[Path] = None) -> _DbConn:
     path = db_path or get_db_path()
     _ensure_parent(path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    timeout_seconds = _sqlite_timeout_seconds()
+    raw_conn = sqlite3.connect(path, timeout=timeout_seconds)
+    raw_conn.row_factory = sqlite3.Row
+    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    conn = _DbConn(backend="sqlite", raw_conn=raw_conn)
     _ensure_tables(conn)
     return conn
 
 
-def _ensure_tables(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fundamentus_snapshots (
-            snapshot_date TEXT NOT NULL,
-            papel TEXT NOT NULL,
-            cotacao REAL,
-            pl REAL,
-            pvp REAL,
-            psr REAL,
-            div_yield REAL,
-            p_ativo REAL,
-            p_cap_giro REAL,
-            p_ebit REAL,
-            p_ativo_circ_liq REAL,
-            ev_ebit REAL,
-            ev_ebitda REAL,
-            margem_ebit REAL,
-            margem_liquida REAL,
-            liquidez_corrente REAL,
-            roic REAL,
-            roe REAL,
-            liquidez_2m REAL,
-            patrimonio_liq REAL,
-            div_bruta_patrim REAL,
-            cresc_rec_5a REAL,
-            PRIMARY KEY (snapshot_date, papel)
+def _connect_postgres() -> _DbConn:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
+    with raw_conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    conn = _DbConn(backend="postgres", raw_conn=raw_conn, pg_row_factory=dict_row)
+    _ensure_tables(conn)
+    return conn
+
+
+def _connect(db_path: Optional[Path] = None) -> _DbConn:
+    # Compatibilidade: db_path explícito força SQLite (uso em testes/rotinas locais).
+    if db_path is not None:
+        return _connect_sqlite(db_path)
+    if get_data_backend() == "postgres":
+        try:
+            return _connect_postgres()
+        except Exception:
+            return _connect_sqlite()
+    return _connect_sqlite()
+
+
+def _ensure_tables(conn: _DbConn) -> None:
+    if conn.backend == "postgres":
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_snapshots (
+                snapshot_date TEXT NOT NULL,
+                papel TEXT NOT NULL,
+                cotacao DOUBLE PRECISION,
+                pl DOUBLE PRECISION,
+                pvp DOUBLE PRECISION,
+                psr DOUBLE PRECISION,
+                div_yield DOUBLE PRECISION,
+                p_ativo DOUBLE PRECISION,
+                p_cap_giro DOUBLE PRECISION,
+                p_ebit DOUBLE PRECISION,
+                p_ativo_circ_liq DOUBLE PRECISION,
+                ev_ebit DOUBLE PRECISION,
+                ev_ebitda DOUBLE PRECISION,
+                margem_ebit DOUBLE PRECISION,
+                margem_liquida DOUBLE PRECISION,
+                liquidez_corrente DOUBLE PRECISION,
+                roic DOUBLE PRECISION,
+                roe DOUBLE PRECISION,
+                liquidez_2m DOUBLE PRECISION,
+                patrimonio_liq DOUBLE PRECISION,
+                div_bruta_patrim DOUBLE PRECISION,
+                cresc_rec_5a DOUBLE PRECISION,
+                PRIMARY KEY (snapshot_date, papel)
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fundamentus_runs (
-            snapshot_date TEXT PRIMARY KEY,
-            pl_min REAL,
-            patrim_min REAL,
-            negociada INTEGER,
-            source_url TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_runs (
+                snapshot_date TEXT PRIMARY KEY,
+                pl_min DOUBLE PRECISION,
+                patrim_min DOUBLE PRECISION,
+                negociada INTEGER,
+                source_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fundamentus_signals (
-            snapshot_date TEXT NOT NULL,
-            papel TEXT NOT NULL,
-            status TEXT NOT NULL,
-            failed_step INTEGER,
-            failed_rule TEXT,
-            failed_value REAL,
-            reason TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (snapshot_date, papel)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_signals (
+                snapshot_date TEXT NOT NULL,
+                papel TEXT NOT NULL,
+                status TEXT NOT NULL,
+                failed_step INTEGER,
+                failed_rule TEXT,
+                failed_value DOUBLE PRECISION,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (snapshot_date, papel)
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fundamentus_filter_runs (
-            snapshot_date TEXT PRIMARY KEY,
-            liq_2m_min REAL,
-            div_bruta_patrim_max REAL,
-            cresc_rec_5a_min REAL,
-            div_yield_min REAL,
-            roe_min REAL,
-            margem_liquida_min REAL,
-            margem_liquida_allow_zero INTEGER,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_filter_runs (
+                snapshot_date TEXT PRIMARY KEY,
+                liq_2m_min DOUBLE PRECISION,
+                div_bruta_patrim_max DOUBLE PRECISION,
+                cresc_rec_5a_min DOUBLE PRECISION,
+                div_yield_min DOUBLE PRECISION,
+                roe_min DOUBLE PRECISION,
+                margem_liquida_min DOUBLE PRECISION,
+                margem_liquida_allow_zero INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_snapshots (
+                snapshot_date TEXT NOT NULL,
+                papel TEXT NOT NULL,
+                cotacao REAL,
+                pl REAL,
+                pvp REAL,
+                psr REAL,
+                div_yield REAL,
+                p_ativo REAL,
+                p_cap_giro REAL,
+                p_ebit REAL,
+                p_ativo_circ_liq REAL,
+                ev_ebit REAL,
+                ev_ebitda REAL,
+                margem_ebit REAL,
+                margem_liquida REAL,
+                liquidez_corrente REAL,
+                roic REAL,
+                roe REAL,
+                liquidez_2m REAL,
+                patrimonio_liq REAL,
+                div_bruta_patrim REAL,
+                cresc_rec_5a REAL,
+                PRIMARY KEY (snapshot_date, papel)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_runs (
+                snapshot_date TEXT PRIMARY KEY,
+                pl_min REAL,
+                patrim_min REAL,
+                negociada INTEGER,
+                source_url TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_signals (
+                snapshot_date TEXT NOT NULL,
+                papel TEXT NOT NULL,
+                status TEXT NOT NULL,
+                failed_step INTEGER,
+                failed_rule TEXT,
+                failed_value REAL,
+                reason TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (snapshot_date, papel)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_filter_runs (
+                snapshot_date TEXT PRIMARY KEY,
+                liq_2m_min REAL,
+                div_bruta_patrim_max REAL,
+                cresc_rec_5a_min REAL,
+                div_yield_min REAL,
+                roe_min REAL,
+                margem_liquida_min REAL,
+                margem_liquida_allow_zero INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     conn.commit()
 
 
@@ -365,26 +550,76 @@ def save_snapshot(
 
     conn = _connect(db_path)
     try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO fundamentus_runs
-            (snapshot_date, pl_min, patrim_min, negociada, source_url)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (snapshot_date, float(pl_min), float(patrim_min), 1 if negociada else 0, RESULT_URL),
-        )
-        if payload:
-            conn.executemany(
+        if conn.backend == "postgres":
+            conn.execute(
                 """
-                INSERT OR REPLACE INTO fundamentus_snapshots (
-                    snapshot_date, papel, cotacao, pl, pvp, psr, div_yield, p_ativo, p_cap_giro,
-                    p_ebit, p_ativo_circ_liq, ev_ebit, ev_ebitda, margem_ebit, margem_liquida,
-                    liquidez_corrente, roic, roe, liquidez_2m, patrimonio_liq, div_bruta_patrim,
-                    cresc_rec_5a
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fundamentus_runs
+                (snapshot_date, pl_min, patrim_min, negociada, source_url)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date) DO UPDATE SET
+                    pl_min = EXCLUDED.pl_min,
+                    patrim_min = EXCLUDED.patrim_min,
+                    negociada = EXCLUDED.negociada,
+                    source_url = EXCLUDED.source_url,
+                    created_at = CURRENT_TIMESTAMP
                 """,
-                payload,
+                (snapshot_date, float(pl_min), float(patrim_min), 1 if negociada else 0, RESULT_URL),
             )
+        else:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO fundamentus_runs
+                (snapshot_date, pl_min, patrim_min, negociada, source_url)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (snapshot_date, float(pl_min), float(patrim_min), 1 if negociada else 0, RESULT_URL),
+            )
+        if payload:
+            if conn.backend == "postgres":
+                conn.executemany(
+                    """
+                    INSERT INTO fundamentus_snapshots (
+                        snapshot_date, papel, cotacao, pl, pvp, psr, div_yield, p_ativo, p_cap_giro,
+                        p_ebit, p_ativo_circ_liq, ev_ebit, ev_ebitda, margem_ebit, margem_liquida,
+                        liquidez_corrente, roic, roe, liquidez_2m, patrimonio_liq, div_bruta_patrim,
+                        cresc_rec_5a
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (snapshot_date, papel) DO UPDATE SET
+                        cotacao = EXCLUDED.cotacao,
+                        pl = EXCLUDED.pl,
+                        pvp = EXCLUDED.pvp,
+                        psr = EXCLUDED.psr,
+                        div_yield = EXCLUDED.div_yield,
+                        p_ativo = EXCLUDED.p_ativo,
+                        p_cap_giro = EXCLUDED.p_cap_giro,
+                        p_ebit = EXCLUDED.p_ebit,
+                        p_ativo_circ_liq = EXCLUDED.p_ativo_circ_liq,
+                        ev_ebit = EXCLUDED.ev_ebit,
+                        ev_ebitda = EXCLUDED.ev_ebitda,
+                        margem_ebit = EXCLUDED.margem_ebit,
+                        margem_liquida = EXCLUDED.margem_liquida,
+                        liquidez_corrente = EXCLUDED.liquidez_corrente,
+                        roic = EXCLUDED.roic,
+                        roe = EXCLUDED.roe,
+                        liquidez_2m = EXCLUDED.liquidez_2m,
+                        patrimonio_liq = EXCLUDED.patrimonio_liq,
+                        div_bruta_patrim = EXCLUDED.div_bruta_patrim,
+                        cresc_rec_5a = EXCLUDED.cresc_rec_5a
+                    """,
+                    payload,
+                )
+            else:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO fundamentus_snapshots (
+                        snapshot_date, papel, cotacao, pl, pvp, psr, div_yield, p_ativo, p_cap_giro,
+                        p_ebit, p_ativo_circ_liq, ev_ebit, ev_ebitda, margem_ebit, margem_liquida,
+                        liquidez_corrente, roic, roe, liquidez_2m, patrimonio_liq, div_bruta_patrim,
+                        cresc_rec_5a
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    payload,
+                )
         conn.commit()
     finally:
         conn.close()
@@ -414,33 +649,79 @@ def save_signals(
     ]
     conn = _connect(db_path)
     try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO fundamentus_filter_runs (
-                snapshot_date, liq_2m_min, div_bruta_patrim_max, cresc_rec_5a_min, div_yield_min,
-                roe_min, margem_liquida_min, margem_liquida_allow_zero
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                snapshot_date,
-                float(cfg.liq_2m_min),
-                float(cfg.div_bruta_patrim_max),
-                float(cfg.cresc_rec_5a_min),
-                float(cfg.div_yield_min),
-                float(cfg.roe_min),
-                float(cfg.margem_liquida_min),
-                1 if cfg.margem_liquida_allow_zero else 0,
-            ),
-        )
-        if payload:
-            conn.executemany(
+        if conn.backend == "postgres":
+            conn.execute(
                 """
-                INSERT OR REPLACE INTO fundamentus_signals (
-                    snapshot_date, papel, status, failed_step, failed_rule, failed_value, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fundamentus_filter_runs (
+                    snapshot_date, liq_2m_min, div_bruta_patrim_max, cresc_rec_5a_min, div_yield_min,
+                    roe_min, margem_liquida_min, margem_liquida_allow_zero
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date) DO UPDATE SET
+                    liq_2m_min = EXCLUDED.liq_2m_min,
+                    div_bruta_patrim_max = EXCLUDED.div_bruta_patrim_max,
+                    cresc_rec_5a_min = EXCLUDED.cresc_rec_5a_min,
+                    div_yield_min = EXCLUDED.div_yield_min,
+                    roe_min = EXCLUDED.roe_min,
+                    margem_liquida_min = EXCLUDED.margem_liquida_min,
+                    margem_liquida_allow_zero = EXCLUDED.margem_liquida_allow_zero,
+                    created_at = CURRENT_TIMESTAMP
                 """,
-                payload,
+                (
+                    snapshot_date,
+                    float(cfg.liq_2m_min),
+                    float(cfg.div_bruta_patrim_max),
+                    float(cfg.cresc_rec_5a_min),
+                    float(cfg.div_yield_min),
+                    float(cfg.roe_min),
+                    float(cfg.margem_liquida_min),
+                    1 if cfg.margem_liquida_allow_zero else 0,
+                ),
             )
+        else:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO fundamentus_filter_runs (
+                    snapshot_date, liq_2m_min, div_bruta_patrim_max, cresc_rec_5a_min, div_yield_min,
+                    roe_min, margem_liquida_min, margem_liquida_allow_zero
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_date,
+                    float(cfg.liq_2m_min),
+                    float(cfg.div_bruta_patrim_max),
+                    float(cfg.cresc_rec_5a_min),
+                    float(cfg.div_yield_min),
+                    float(cfg.roe_min),
+                    float(cfg.margem_liquida_min),
+                    1 if cfg.margem_liquida_allow_zero else 0,
+                ),
+            )
+        if payload:
+            if conn.backend == "postgres":
+                conn.executemany(
+                    """
+                    INSERT INTO fundamentus_signals (
+                        snapshot_date, papel, status, failed_step, failed_rule, failed_value, reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (snapshot_date, papel) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        failed_step = EXCLUDED.failed_step,
+                        failed_rule = EXCLUDED.failed_rule,
+                        failed_value = EXCLUDED.failed_value,
+                        reason = EXCLUDED.reason,
+                        created_at = CURRENT_TIMESTAMP
+                    """,
+                    payload,
+                )
+            else:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO fundamentus_signals (
+                        snapshot_date, papel, status, failed_step, failed_rule, failed_value, reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    payload,
+                )
         conn.commit()
     finally:
         conn.close()

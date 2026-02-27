@@ -265,7 +265,7 @@ async def scrape_all(
             flow_store = None
         snapshot_db: Optional[SnapshotDB] = None
         try:
-            snapshot_db = SnapshotDB(get_db_path())
+            snapshot_db = SnapshotDB()
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou snapshots DB: {exc}")
             snapshot_db = None

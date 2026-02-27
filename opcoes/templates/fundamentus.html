@@ -146,7 +146,7 @@
 
       {% if rows and not signals_available %}
         <div class="alert alert-warning" role="alert">
-          Filtros ainda nao aplicados. Rode <code>poetry run python -m opcoes.cli fundamentus-filter</code>.
+          Filtros ainda nao aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
         </div>
       {% elif rows and signals_available %}
         <div class="alert alert-success" role="alert">

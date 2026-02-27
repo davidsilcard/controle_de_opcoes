@@ -9,19 +9,21 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "playwright>=1.45,<2.0",
-    "yfinance (>=0.2.66,<0.3.0)",
-    "flask (>=3.1.2,<4.0.0)",
-    "psycopg[binary] (>=3.3.3,<4.0.0)",
+    "yfinance>=0.2.66,<0.3.0",
+    "flask>=3.1.2,<4.0.0",
+    "psycopg[binary]>=3.3.3,<4.0.0",
 ]
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
 
 
-[tool.poetry.group.dev.dependencies]
-pytest = ">=8.3,<9.0"
-pytest-asyncio = ">=0.23,<0.24"
-black = "^25.11.0"
-djlint = "^1.36.4"
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.23,<0.24",
+    "black>=25.11.0,<26.0.0",
+    "djlint>=1.36.4,<2.0.0",
+]

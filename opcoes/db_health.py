@@ -168,7 +168,7 @@ def _sql_probe(dsn: str, timeout_seconds: float) -> Tuple[bool, str]:
     except Exception:
         return (
             False,
-            "Driver não encontrado. Instale com: poetry add psycopg[binary]",
+            "Driver não encontrado. Instale com: uv add psycopg[binary]",
         )
 
     connect_timeout = max(int(timeout_seconds), 1)
