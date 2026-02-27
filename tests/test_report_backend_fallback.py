@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from opcoes.report import generate_report
 
 
@@ -132,3 +134,20 @@ def test_report_falls_back_to_sqlite_when_postgres_query_fails(
 
     assert data.snapshot_date == "2026-02-26"
     assert len(data.opportunities) == 1
+
+
+def test_report_does_not_fallback_when_postgres_strict_mode_enabled(
+    monkeypatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "report.db"
+    _setup_minimal_report_db(db_path)
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+    monkeypatch.setenv("OPCOES_DB_BACKEND", "postgres")
+    monkeypatch.setenv("OPCOES_POSTGRES_STRICT", "1")
+    monkeypatch.setattr(
+        "opcoes.report._connect_postgres",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        generate_report(min_score=8, limit=10, recurring_days=30, recurring_limit=10)

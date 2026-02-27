@@ -50,6 +50,11 @@ def get_data_backend() -> str:
     return "sqlite"
 
 
+def is_postgres_strict_mode() -> bool:
+    raw = os.getenv("OPCOES_POSTGRES_STRICT", "0").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _sanitize_pg_schema(value: str) -> str:
     text = (value or "").strip().lower()
     text = re.sub(r"[^a-z0-9_]+", "_", text)
@@ -83,6 +88,7 @@ def get_postgres_schema() -> str:
 __all__ = [
     "get_db_path",
     "get_data_backend",
+    "is_postgres_strict_mode",
     "get_postgres_schema",
     "DEFAULT_DB_PATH",
     "set_pg_schema_override",

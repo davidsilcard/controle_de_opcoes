@@ -5,7 +5,12 @@ import os
 import sqlite3
 from typing import Any
 
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 
 
@@ -60,6 +65,8 @@ def open_db() -> Any:
         try:
             return _open_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _open_sqlite()
     return _open_sqlite()
 

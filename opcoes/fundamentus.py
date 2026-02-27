@@ -10,7 +10,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib import parse, request
 import http.cookiejar
 
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 from .scraper.storage import _ensure_parent
 from .utils import parse_ptbr_number
@@ -357,6 +362,8 @@ def _connect(db_path: Optional[Path] = None) -> _DbConn:
         try:
             return _connect_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite()
     return _connect_sqlite()
 

@@ -30,8 +30,11 @@ Se o Poetry tiver sido instalado por outro método (apt, pip, pipx etc.), remova
 ```bash
 uv lock
 uv sync
-uv run playwright install chromium
+uv run python -m playwright install chromium
 ```
+
+Se o download do Playwright falhar (ex.: `404`), o scraper tenta usar automaticamente o
+Google Chrome do sistema (`/usr/bin/google-chrome`) quando disponível.
 
 ## Uso rápido
 1) Coletar opções:
@@ -289,6 +292,7 @@ Ao usar `--force`, se já houver dados no destino o comando cria backup automát
 
 ## Variáveis de ambiente
 - `OPCOES_DB_BACKEND`: backend de dados (`sqlite` padrão, `postgres` para fase gradual das camadas web/CLI).
+- `OPCOES_POSTGRES_STRICT`: quando `1`, desativa fallback para SQLite se `OPCOES_DB_BACKEND=postgres` (fail-fast para garantir runtime 100% PostgreSQL).
 - `OPCOES_PG_SCHEMA`: schema PostgreSQL padrão quando não houver contexto de usuário web (default: `public`).
 - `DATABASE_URL`: string de conexão PostgreSQL (recomendado para `db check`).
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_HOST`, `DB_PORT`: alternativa ao `DATABASE_URL` para `db check`.
@@ -320,6 +324,8 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
 - Melhorias recentes:
+  - Scraper ganhou fallback automático de navegador: se o binário do Playwright não estiver instalado, tenta abrir com `channel=chrome` (Google Chrome do sistema), reduzindo bloqueio por falha de download de browser.
+  - Novo modo estrito de banco: `OPCOES_POSTGRES_STRICT=1` desativa fallback automático para SQLite quando backend ativo for PostgreSQL, garantindo operação somente em Postgres (SQLite fica apenas para rastreio/forense manual).
   - Fluxos `scrape` e `fundamentus` do CLI agora respeitam o backend ativo (`OPCOES_DB_BACKEND=postgres`) para leitura/gravação em PostgreSQL, com fallback automático para SQLite em falhas.
   - Estratégia/tela `Fundamentus` passou a consultar `option_snapshots`, `underlying_snapshots` e `ticker_metadata` no backend ativo (`postgres`/`sqlite`), mantendo isolamento por schema no PostgreSQL.
   - Home/ranking (`/`) passou a usar cache curto por usuário com invalidação automática após ações de escrita (`POST`) nas abas financeiras/posições/DARF/configurações, reduzindo latência em banco remoto.

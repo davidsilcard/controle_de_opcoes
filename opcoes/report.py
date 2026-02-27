@@ -9,7 +9,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import quant
 from .scraper.storage import CSV_FIELDS, _ensure_parent
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 from .portfolio import list_positions
 
@@ -308,6 +313,8 @@ def _connect() -> _ReportConnection:
         try:
             return _connect_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite()
     return _connect_sqlite()
 

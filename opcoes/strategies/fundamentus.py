@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yfinance as yf
 
-from ..config import get_data_backend, get_db_path, get_postgres_schema
+from ..config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from ..db_health import resolve_postgres_target
 from ..fundamentus import (
     fetch_approved_ranking,
@@ -209,6 +214,8 @@ def _connect_db() -> _DbConn:
         try:
             return _connect_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite()
     return _connect_sqlite()
 

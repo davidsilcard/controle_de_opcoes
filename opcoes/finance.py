@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 
 
@@ -167,6 +172,8 @@ def _get_conn(*, ensure_schema: bool = False) -> _DbConn:
         try:
             return _connect_postgres(ensure_schema=ensure_schema)
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite(ensure_schema=ensure_schema)
     return _connect_sqlite(ensure_schema=ensure_schema)
 

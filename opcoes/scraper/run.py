@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import math
+import shutil
 import re
 import statistics
 import datetime as dt
@@ -11,6 +12,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import yfinance as yf
 from playwright.async_api import (
+    Browser,
     TimeoutError as PlaywrightTimeoutError,
     async_playwright,
     Locator,
@@ -159,7 +161,26 @@ async def scrape_all(
             launch_kwargs["proxy"] = proxy_settings
         # WSL/containers costumam ter /dev/shm pequeno; evita crash prematuro do Chromium.
         launch_kwargs["args"] = launch_kwargs.get("args", []) + ["--disable-dev-shm-usage"]
-        browser = await p.chromium.launch(**launch_kwargs)
+
+        async def _launch_browser() -> Browser:
+            try:
+                return await p.chromium.launch(**launch_kwargs)
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "executable doesn't exist" not in msg:
+                    raise
+                if launch_kwargs.get("channel"):
+                    raise
+                if shutil.which("google-chrome"):
+                    print(
+                        "Aviso: navegador Playwright ausente. "
+                        "Usando Google Chrome do sistema (channel=chrome)."
+                    )
+                    launch_kwargs["channel"] = "chrome"
+                    return await p.chromium.launch(**launch_kwargs)
+                raise
+
+        browser = await _launch_browser()
         context = await browser.new_context()
         page = await context.new_page()
 
@@ -167,7 +188,7 @@ async def scrape_all(
             nonlocal browser, context, page
             with contextlib.suppress(Exception):
                 await browser.close()
-            browser = await p.chromium.launch(**launch_kwargs)
+            browser = await _launch_browser()
             context = await browser.new_context()
             page = await context.new_page()
             await page.goto(

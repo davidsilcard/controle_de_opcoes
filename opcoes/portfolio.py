@@ -5,7 +5,12 @@ import re
 import sqlite3
 from typing import Any, Iterable, List, Mapping, Optional
 
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 from .scraper.storage import _ensure_parent
 from .utils import infer_option_type, parse_ptbr_number
@@ -146,6 +151,8 @@ def _connect(*, ensure_schema: bool = False) -> _DbConn:
         try:
             return _connect_postgres(ensure_schema=ensure_schema)
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite(ensure_schema=ensure_schema)
     return _connect_sqlite(ensure_schema=ensure_schema)
 

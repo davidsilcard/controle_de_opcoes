@@ -5,7 +5,12 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict
 
-from .config import get_data_backend, get_db_path, get_postgres_schema
+from .config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from .db_health import resolve_postgres_target
 
 
@@ -172,6 +177,8 @@ def _load_raw_settings() -> Dict[str, str]:
         try:
             return _load_raw_settings_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _load_raw_settings_sqlite()
     return _load_raw_settings_sqlite()
 
@@ -217,6 +224,8 @@ def _upsert_settings(params: Dict[str, object]) -> None:
             _upsert_settings_postgres(params)
             return
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             _upsert_settings_sqlite(params)
             return
     _upsert_settings_sqlite(params)

@@ -6,7 +6,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from ..config import get_data_backend, get_db_path, get_postgres_schema
+from ..config import (
+    get_data_backend,
+    get_db_path,
+    get_postgres_schema,
+    is_postgres_strict_mode,
+)
 from ..db_health import resolve_postgres_target
 from .storage import CSV_FIELDS, _ensure_parent
 from .prices import PriceIndicators
@@ -123,6 +128,8 @@ def _connect(path: Optional[Path]) -> _DbConn:
         try:
             return _connect_postgres()
         except Exception:
+            if is_postgres_strict_mode():
+                raise
             return _connect_sqlite(None)
     return _connect_sqlite(None)
 
