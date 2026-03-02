@@ -29,7 +29,7 @@ def test_cli_db_cutover_check_success(monkeypatch, capsys) -> None:
                     {
                         "source": "main",
                         "table": "positions",
-                        "sqlite_rows": 10,
+                        "source_rows": 10,
                         "postgres_rows": 10,
                         "status": "ok",
                     }
@@ -82,4 +82,3 @@ def test_cli_db_cutover_check_failure_exits(monkeypatch) -> None:
 
     with pytest.raises(SystemExit):
         cli.main()
-

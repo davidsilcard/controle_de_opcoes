@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import os
 import re
-import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -24,6 +23,7 @@ from .config import (
     set_db_path_override,
     set_pg_schema_override,
 )
+from .db import open_db
 from .runtime_env import load_dotenv_once
 from .portfolio import (
     add_position,
@@ -126,7 +126,7 @@ def create_app() -> Flask:
             (key, tuple(sorted(str(v) for v in request.args.getlist(key))))
             for key in sorted(request.args.keys())
         )
-        backend = os.getenv("OPCOES_DB_BACKEND", "sqlite").strip().lower() or "sqlite"
+        backend = "postgres"
         return ("index", backend, _current_ranking_cache_namespace(), args_signature)
 
     def _get_ranking_cache(cache_key: tuple) -> Optional[dict]:
@@ -1336,15 +1336,21 @@ def create_app() -> Flask:
         if not ticker:
             return None
         t = ticker.strip().upper()
-        db_path = get_db_path()
-        if not db_path.exists():
-            return None
-        conn = sqlite3.connect(db_path)
+        conn = open_db()
         try:
-            row = conn.execute(
-                "SELECT underlying FROM option_snapshots WHERE ticker = ? ORDER BY snapshot_date DESC LIMIT 1",
-                (t,),
-            ).fetchone()
+            module_name = conn.__class__.__module__
+            if module_name.startswith("sqlite3"):
+                row = conn.execute(
+                    "SELECT underlying FROM option_snapshots WHERE ticker = ? ORDER BY snapshot_date DESC LIMIT 1",
+                    (t,),
+                ).fetchone()
+                return row[0] if row else None
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT underlying FROM option_snapshots WHERE ticker = %s ORDER BY snapshot_date DESC LIMIT 1",
+                    (t,),
+                )
+                row = cur.fetchone()
             return row[0] if row else None
         finally:
             conn.close()
@@ -1401,25 +1407,39 @@ def create_app() -> Flask:
         if not ticker:
             return None
         t = ticker.strip().upper()
-        db_path = get_db_path()
-        if not db_path.exists():
-            return None
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = open_db()
         try:
-            row = conn.execute(
-                """
-                SELECT strike
-                FROM option_snapshots
-                WHERE ticker = ?
-                ORDER BY snapshot_date DESC
-                LIMIT 1
-                """,
-                (t,),
-            ).fetchone()
+            module_name = conn.__class__.__module__
+            if module_name.startswith("sqlite3"):
+                row = conn.execute(
+                    """
+                    SELECT strike
+                    FROM option_snapshots
+                    WHERE ticker = ?
+                    ORDER BY snapshot_date DESC
+                    LIMIT 1
+                    """,
+                    (t,),
+                ).fetchone()
+                if not row:
+                    return None
+                return float(parse_ptbr_number(row["strike"]) or 0.0)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT strike
+                    FROM option_snapshots
+                    WHERE ticker = %s
+                    ORDER BY snapshot_date DESC
+                    LIMIT 1
+                    """,
+                    (t,),
+                )
+                row = cur.fetchone()
             if not row:
                 return None
-            return float(parse_ptbr_number(row["strike"]) or 0.0)
+            return float(parse_ptbr_number(row[0]) or 0.0)
         finally:
             conn.close()
 

@@ -1,42 +1,16 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import os
-import sqlite3
 from typing import Any
 
 from .config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from .db_health import resolve_postgres_target
 
 
-def _sqlite_timeout_seconds() -> float:
-    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 30.0
-    if value <= 0:
-        value = 30.0
-    return value
-
-
 def _quote_ident(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
-
-
-def _open_sqlite() -> sqlite3.Connection:
-    path = get_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    timeout_seconds = _sqlite_timeout_seconds()
-    conn = sqlite3.connect(path, timeout=timeout_seconds)
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-    return conn
 
 
 def _open_postgres():
@@ -61,22 +35,13 @@ def _open_postgres():
 
 
 def open_db() -> Any:
-    if get_data_backend() == "postgres":
-        try:
-            return _open_postgres()
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _open_sqlite()
-    return _open_sqlite()
+    return _open_postgres()
 
 
 @contextmanager
 def db_transaction() -> Any:
     conn = open_db()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            conn.execute("BEGIN")
         yield conn
         conn.commit()
     except Exception:

@@ -84,7 +84,7 @@ def test_run_db_check_without_postgres_configuration(monkeypatch, tmp_path) -> N
 
     report = run_db_check(timeout_seconds=0.1)
 
-    assert report["runtime_backend"] == "sqlite"
+    assert report["runtime_backend"] == "postgres"
     assert report["postgres_configured"] is False
     assert report["sql_ok"] is None
     assert any(
@@ -97,7 +97,7 @@ def test_cli_db_check_success_output(monkeypatch, capsys) -> None:
         cli,
         "run_db_check",
         lambda timeout_seconds=5.0: {
-            "runtime_target": "data/opcoes_snapshots.db",
+            "runtime_target": "postgresql://user:***@host:5432/opcoes",
             "postgres_configured": True,
             "postgres_source": "DATABASE_URL",
             "postgres_target": "postgresql://user:***@host:5432/opcoes",
@@ -115,7 +115,7 @@ def test_cli_db_check_success_output(monkeypatch, capsys) -> None:
     cli.main()
     out = capsys.readouterr().out
 
-    assert "Runtime atual: SQLite" in out
+    assert "Runtime atual: PostgreSQL" in out
     assert "Teste SQL (SELECT 1): OK" in out
 
 
@@ -124,7 +124,7 @@ def test_cli_db_check_failure_exits(monkeypatch) -> None:
         cli,
         "run_db_check",
         lambda timeout_seconds=5.0: {
-            "runtime_target": "data/opcoes_snapshots.db",
+            "runtime_target": "postgresql://user:***@host:5432/opcoes",
             "postgres_configured": True,
             "postgres_source": "DATABASE_URL",
             "postgres_target": "postgresql://user:***@host:5432/opcoes",

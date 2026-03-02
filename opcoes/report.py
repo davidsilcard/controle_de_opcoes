@@ -108,20 +108,7 @@ def generate_report(
             hv_days=hv_days,
         )
     except Exception:
-        if conn.backend != "postgres":
-            raise
-        fallback = _connect_sqlite()
-        try:
-            return _generate_report_from_conn(
-                fallback,
-                min_score=min_score,
-                limit=limit,
-                recurring_days=recurring_days,
-                recurring_limit=recurring_limit,
-                hv_days=hv_days,
-            )
-        finally:
-            fallback.close()
+        raise
     finally:
         conn.close()
 

@@ -2,29 +2,49 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import sqlite3
-from pathlib import Path
 from typing import Iterable, List, Optional
 
 import yfinance as yf
 
-from .config import get_db_path
+from .db import open_db
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _list_underlyings(conn: sqlite3.Connection) -> List[str]:
+def _list_underlyings(conn) -> List[str]:
     rows = conn.execute("SELECT DISTINCT underlying FROM option_snapshots").fetchall()
-    return [str(r[0]).strip().upper() for r in rows if r and r[0]]
+    symbols: List[str] = []
+    for row in rows:
+        if not row:
+            continue
+        try:
+            value = row["underlying"]
+        except Exception:
+            value = row[0]
+        if value:
+            symbols.append(str(value).strip().upper())
+    return symbols
+
+
+def _ensure_underlyings_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS underlying_snapshots (
+            snapshot_date TEXT NOT NULL,
+            underlying TEXT NOT NULL,
+            price DOUBLE PRECISION,
+            price_date TEXT,
+            mm200 DOUBLE PRECISION,
+            return_3m DOUBLE PRECISION,
+            trend_flag INTEGER,
+            trend_reason TEXT,
+            PRIMARY KEY (snapshot_date, underlying)
+        )
+        """
+    )
+    conn.commit()
 
 
 def _insert_price(
-    conn: sqlite3.Connection,
+    conn,
     *,
     underlying: str,
     date_iso: str,
@@ -32,8 +52,11 @@ def _insert_price(
 ) -> None:
     conn.execute(
         """
-        INSERT OR REPLACE INTO underlying_snapshots (snapshot_date, underlying, price, price_date)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO underlying_snapshots (snapshot_date, underlying, price, price_date)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (snapshot_date, underlying) DO UPDATE SET
+            price = EXCLUDED.price,
+            price_date = EXCLUDED.price_date
         """,
         (date_iso, underlying, price, date_iso),
     )
@@ -45,7 +68,7 @@ def _symbol_to_yf(sym: str) -> str:
 
 
 def _backfill_prices(
-    conn: sqlite3.Connection,
+    conn,
     *,
     underlyings: Iterable[str],
     days: int,
@@ -61,7 +84,7 @@ def _backfill_prices(
             end=today.isoformat(),
             interval="1d",
             progress=False,
-            auto_adjust=False,  # evita warning da mudança de default
+            auto_adjust=False,
         )
         if hist.empty:
             print(f"  - sem dados para {yf_sym}")
@@ -69,13 +92,10 @@ def _backfill_prices(
         for idx, row in hist.iterrows():
             val = row.get("Close")
             try:
-                if hasattr(val, "item"):
-                    price = float(val.item())
-                else:
-                    price = float(val)
+                price = float(val.item() if hasattr(val, "item") else val)
             except Exception:
                 continue
-            if price is None or price <= 0:
+            if price <= 0:
                 continue
             date_iso = idx.date().isoformat() if hasattr(idx, "date") else str(idx)[:10]
             _insert_price(conn, underlying=sym, date_iso=date_iso, price=price)
@@ -85,18 +105,13 @@ def _backfill_prices(
 
 def backfill_prices(
     *,
-    db_path: Optional[Path] = None,
     days: int = 90,
     underlyings: Optional[Iterable[str]] = None,
 ) -> None:
-    """Preenche histórico de preços diários para underlyings usando yfinance.
-
-    - `underlyings`: se None, usa todos presentes em option_snapshots.
-    - `days`: quantos dias para trás baixar (default: 90).
-    """
-    resolved_db_path = Path(db_path) if db_path is not None else get_db_path()
-    conn = _connect(resolved_db_path)
+    """Preenche histórico de preços diários em PostgreSQL usando yfinance."""
+    conn = open_db()
     try:
+        _ensure_underlyings_table(conn)
         if underlyings is None:
             symbols = _list_underlyings(conn)
         else:
@@ -110,13 +125,8 @@ def backfill_prices(
 
 
 def main() -> None:
-    default_db = get_db_path()
-    parser = argparse.ArgumentParser(description="Backfill de preços diários via yfinance para underlying_snapshots.")
-    parser.add_argument(
-        "--db",
-        type=Path,
-        default=default_db,
-        help=f"Caminho do opcoes_snapshots.db (default: {default_db})",
+    parser = argparse.ArgumentParser(
+        description="Backfill de preços diários via yfinance para underlying_snapshots (PostgreSQL)."
     )
     parser.add_argument(
         "--days",
@@ -135,7 +145,7 @@ def main() -> None:
     if args.underlying:
         underlyings = {u.strip().upper() for u in args.underlying if u and u.strip()}
 
-    backfill_prices(db_path=args.db, days=max(args.days, 1), underlyings=underlyings)
+    backfill_prices(days=max(args.days, 1), underlyings=underlyings)
 
 
 if __name__ == "__main__":

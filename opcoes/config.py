@@ -44,15 +44,13 @@ def get_db_path() -> Path:
 
 
 def get_data_backend() -> str:
-    raw = os.getenv("OPCOES_DB_BACKEND", "sqlite").strip().lower()
-    if raw in {"postgres", "postgresql", "pg"}:
-        return "postgres"
-    return "sqlite"
+    # Runtime consolidado: operação oficial apenas em PostgreSQL.
+    return "postgres"
 
 
 def is_postgres_strict_mode() -> bool:
-    raw = os.getenv("OPCOES_POSTGRES_STRICT", "0").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    # Modo estrito permanente para evitar fallback e divergência de histórico.
+    return True
 
 
 def _sanitize_pg_schema(value: str) -> str:

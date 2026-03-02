@@ -9,20 +9,17 @@ from opcoes.config import (
 )
 
 
-def test_get_data_backend_defaults_to_sqlite(monkeypatch) -> None:
+def test_get_data_backend_is_postgres_only(monkeypatch) -> None:
     monkeypatch.delenv("OPCOES_DB_BACKEND", raising=False)
-    assert get_data_backend() == "sqlite"
-
-
-def test_get_data_backend_accepts_postgres_alias(monkeypatch) -> None:
-    monkeypatch.setenv("OPCOES_DB_BACKEND", "pg")
+    assert get_data_backend() == "postgres"
+    monkeypatch.setenv("OPCOES_DB_BACKEND", "sqlite")
     assert get_data_backend() == "postgres"
 
 
-def test_is_postgres_strict_mode(monkeypatch) -> None:
+def test_is_postgres_strict_mode_always_enabled(monkeypatch) -> None:
     monkeypatch.delenv("OPCOES_POSTGRES_STRICT", raising=False)
-    assert is_postgres_strict_mode() is False
-    monkeypatch.setenv("OPCOES_POSTGRES_STRICT", "1")
+    assert is_postgres_strict_mode() is True
+    monkeypatch.setenv("OPCOES_POSTGRES_STRICT", "0")
     assert is_postgres_strict_mode() is True
 
 

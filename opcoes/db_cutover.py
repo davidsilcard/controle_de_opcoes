@@ -129,7 +129,7 @@ def run_cutover_ready_check(
     result["verify"] = verify_report
     if not verify_report.get("ok"):
         result["errors"].append(
-            "Verificação SQLite x PostgreSQL encontrou divergências de contagem."
+            "Verificação de fonte legada x PostgreSQL encontrou divergências de contagem."
         )
         return result
 
@@ -151,4 +151,3 @@ __all__ = [
     "run_cutover_ready_check",
     "run_postgres_runtime_smoke",
 ]
-

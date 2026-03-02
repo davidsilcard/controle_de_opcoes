@@ -2,18 +2,81 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .config import get_db_path
+from .db import open_db
 from .scraper.storage import _ensure_parent
 
 
-def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    path = db_path or get_db_path()
-    _ensure_parent(path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
+class _PgResult:
+    def __init__(self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = None
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(self, *, backend: str, raw_conn: Any, pg_row_factory: Any = None) -> None:
+        self.backend = backend
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        if self.backend == "sqlite":
+            return self._raw_conn.execute(query, tuple(params))
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+
+def _connect(db_path: Optional[Path] = None) -> _DbConn:
+    # Compatibilidade: db_path explícito força leitura SQLite por arquivo.
+    if db_path is not None:
+        path = db_path
+    else:
+        path = None
+    if path is not None:
+        _ensure_parent(path)
+        raw = sqlite3.connect(path)
+        raw.row_factory = sqlite3.Row
+        return _DbConn(backend="sqlite", raw_conn=raw)
+
+    raw = open_db()
+    module_name = raw.__class__.__module__
+    if module_name.startswith("sqlite3"):
+        return _DbConn(backend="sqlite", raw_conn=raw)
+    try:
+        from psycopg.rows import dict_row
+
+        return _DbConn(backend="postgres", raw_conn=raw, pg_row_factory=dict_row)
+    except Exception:
+        return _DbConn(backend="postgres", raw_conn=raw)
+
+
+def _latest_snapshot_date_conn(conn: _DbConn) -> Optional[str]:
+    row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
+    if not row:
+        return None
+    if isinstance(row, Mapping):
+        return row.get("d")
+    return row[0]
 
 
 def latest_snapshot_date(db_path: Optional[Path] = None) -> Optional[str]:
@@ -21,8 +84,7 @@ def latest_snapshot_date(db_path: Optional[Path] = None) -> Optional[str]:
 
     conn = _connect(db_path)
     try:
-        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
-        return row["d"] if row else None
+        return _latest_snapshot_date_conn(conn)
     finally:
         conn.close()
 
@@ -40,7 +102,7 @@ def fetch_latest_underlying_options(
 
     conn = _connect(db_path)
     try:
-        snapshot_date = latest_snapshot_date(db_path=db_path)
+        snapshot_date = _latest_snapshot_date_conn(conn)
         if not snapshot_date:
             return []
         rows = conn.execute(
@@ -71,7 +133,7 @@ def fetch_latest_underlying_options(
             """,
             (snapshot_date, underlying),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) if isinstance(r, Mapping) else dict(zip(r.keys(), r)) for r in rows]
     finally:
         conn.close()
 
@@ -89,7 +151,7 @@ def fetch_latest_underlying_quote(
 
     conn = _connect(db_path)
     try:
-        snapshot_date = latest_snapshot_date(db_path=db_path)
+        snapshot_date = _latest_snapshot_date_conn(conn)
         if not snapshot_date:
             return None
         row = conn.execute(
@@ -104,6 +166,8 @@ def fetch_latest_underlying_quote(
         ).fetchone()
         if not row:
             return None
+        if not isinstance(row, Mapping):
+            row = dict(zip(row.keys(), row))
         return {
             "snapshot_date": row["snapshot_date"],
             "underlying": row["underlying"],

@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
-from .config import get_db_path
-
 _POSTGRES_SCHEMES = {"postgres", "postgresql"}
 _POSTGRES_ENV_KEYS = (
     "DATABASE_URL",
@@ -183,10 +181,9 @@ def _sql_probe(dsn: str, timeout_seconds: float) -> Tuple[bool, str]:
 
 
 def run_db_check(timeout_seconds: float = 5.0) -> dict:
-    runtime_path = get_db_path()
     report = {
-        "runtime_backend": "sqlite",
-        "runtime_target": str(runtime_path),
+        "runtime_backend": "postgres",
+        "runtime_target": None,
         "postgres_configured": False,
         "postgres_source": None,
         "postgres_target": None,
@@ -200,12 +197,14 @@ def run_db_check(timeout_seconds: float = 5.0) -> dict:
     target, resolve_errors = resolve_postgres_target()
     report["errors"].extend(resolve_errors)
     if target is None:
+        report["runtime_target"] = "(PostgreSQL não configurado)"
         if not has_postgres_env():
             report["errors"].append(
                 "Nenhuma configuração PostgreSQL encontrada (.env sem DATABASE_URL/POSTGRES_*)."
             )
         return report
 
+    report["runtime_target"] = target.redacted_dsn
     report["postgres_configured"] = True
     report["postgres_source"] = target.source
     report["postgres_target"] = target.redacted_dsn

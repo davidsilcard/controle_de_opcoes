@@ -5,7 +5,12 @@ import getpass
 from pathlib import Path
 from typing import List, Optional
 
-from .auth import create_user, list_users, migrate_legacy_user_data
+from .auth import (
+    create_user,
+    list_users,
+    migrate_auth_from_legacy_sqlite,
+    migrate_legacy_user_data,
+)
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
 from .portfolio import add_position, list_positions, close_position
@@ -13,15 +18,18 @@ from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
-from .db_backup import create_sqlite_backup, restore_sqlite_backup
+from .db_backup import (
+    create_sqlite_backup as create_legacy_backup,
+    restore_sqlite_backup as restore_legacy_backup,
+)
 from .db_health import is_postgres_ready, run_db_check
 from .db_cutover import run_cutover_ready_check
 from .db_optimize import optimize_postgres_schema
 from .db_migration import (
-    migrate_sqlite_sources_to_postgres,
+    migrate_sqlite_sources_to_postgres as migrate_legacy_sources_to_postgres,
     resolve_user_source_databases,
     sanitize_schema_name,
-    verify_sqlite_sources_in_postgres,
+    verify_sqlite_sources_in_postgres as verify_legacy_sources_in_postgres,
 )
 from .fundamentus import (
     FundamentusFilterConfig,
@@ -139,7 +147,7 @@ def parse_args() -> argparse.Namespace:
         "--resume-file",
         type=Path,
         default=None,
-        help="Arquivo SQLite de checkpoint da retomada (default: <output>.checkpoint.db).",
+        help="Arquivo de checkpoint da retomada (default: <output>.checkpoint.json).",
     )
 
     ec = sub.add_parser("enrich", help="Enriquece um CSV existente com E/P e P/L")
@@ -354,6 +362,22 @@ def parse_args() -> argparse.Namespace:
         help="Inclui usuários inativos.",
     )
 
+    uc_auth_migrate = ucs.add_parser(
+        "migrate-auth-sqlite",
+        help="Migra usuários do auth.db legado (SQLite) para PostgreSQL",
+    )
+    uc_auth_migrate.add_argument(
+        "--source-db",
+        type=Path,
+        default=Path("data/auth.db"),
+        help="Arquivo legado de usuários (default: data/auth.db).",
+    )
+    uc_auth_migrate.add_argument(
+        "--replace",
+        action="store_true",
+        help="Atualiza senha/status quando usuário já existir no PostgreSQL.",
+    )
+
     uc_migrate = ucs.add_parser(
         "migrate-legacy",
         help="Vincula dados legados (single-user) para um usuário específico",
@@ -396,13 +420,13 @@ def parse_args() -> argparse.Namespace:
     )
     db_migrate = dbs.add_parser(
         "migrate",
-        help="Migra dados SQLite para PostgreSQL (schema por usuário).",
+        help="Migra dados legados para PostgreSQL (schema por usuário).",
     )
     db_migrate.add_argument(
         "--username",
         type=str,
         default="admin",
-        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
     )
     db_migrate.add_argument(
         "--schema",
@@ -420,7 +444,7 @@ def parse_args() -> argparse.Namespace:
         "--source-main",
         type=Path,
         default=None,
-        help="Caminho explícito para o banco principal SQLite.",
+        help="Caminho explícito para o banco principal legado.",
     )
     db_migrate.add_argument(
         "--source-iv",
@@ -453,17 +477,17 @@ def parse_args() -> argparse.Namespace:
         "--batch-size",
         type=int,
         default=5000,
-        help="Tamanho do lote de leitura SQLite para COPY (default: 5000).",
+        help="Tamanho do lote de leitura para COPY (default: 5000).",
     )
     db_verify = dbs.add_parser(
         "verify",
-        help="Compara contagem de linhas entre SQLite e PostgreSQL para um usuário.",
+        help="Compara contagem de linhas entre fonte legada e PostgreSQL para um usuário.",
     )
     db_verify.add_argument(
         "--username",
         type=str,
         default="admin",
-        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
     )
     db_verify.add_argument(
         "--schema",
@@ -481,7 +505,7 @@ def parse_args() -> argparse.Namespace:
         "--source-main",
         type=Path,
         default=None,
-        help="Caminho explícito para o banco principal SQLite.",
+        help="Caminho explícito para o banco principal legado.",
     )
     db_verify.add_argument(
         "--source-iv",
@@ -508,7 +532,7 @@ def parse_args() -> argparse.Namespace:
         "--username",
         type=str,
         default="admin",
-        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
     )
     db_cutover.add_argument(
         "--schema",
@@ -532,7 +556,7 @@ def parse_args() -> argparse.Namespace:
         "--source-main",
         type=Path,
         default=None,
-        help="Caminho explícito para o banco principal SQLite.",
+        help="Caminho explícito para o banco principal legado.",
     )
     db_cutover.add_argument(
         "--source-iv",
@@ -574,19 +598,19 @@ def parse_args() -> argparse.Namespace:
     )
     db_backup = dbs.add_parser(
         "backup",
-        help="Cria backup dos bancos SQLite de um usuário para rollback seguro.",
+        help="Cria backup dos bancos legados de um usuário para rollback seguro.",
     )
     db_backup.add_argument(
         "--username",
         type=str,
         default="admin",
-        help="Usuário origem para localizar os SQLite em data/users/<usuario> (default: admin).",
+        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
     )
     db_backup.add_argument(
         "--backup-root",
         type=Path,
-        default=Path("data/backups/sqlite"),
-        help="Diretório raiz para armazenar backups (default: data/backups/sqlite).",
+        default=Path("data/backups/legacy"),
+        help="Diretório raiz para armazenar backups (default: data/backups/legacy).",
     )
     db_backup.add_argument(
         "--source-dir",
@@ -598,7 +622,7 @@ def parse_args() -> argparse.Namespace:
         "--source-main",
         type=Path,
         default=None,
-        help="Caminho explícito para o banco principal SQLite.",
+        help="Caminho explícito para o banco principal legado.",
     )
     db_backup.add_argument(
         "--source-iv",
@@ -625,7 +649,7 @@ def parse_args() -> argparse.Namespace:
 
     db_rollback = dbs.add_parser(
         "rollback",
-        help="Restaura bancos SQLite a partir de um backup criado pelo comando db backup.",
+        help="Restaura bancos legados a partir de um backup criado pelo comando db backup.",
     )
     db_rollback.add_argument(
         "--backup-dir",
@@ -643,7 +667,7 @@ def parse_args() -> argparse.Namespace:
         "--target-dir",
         type=Path,
         default=None,
-        help="Diretório de destino opcional para restaurar os arquivos SQLite.",
+        help="Diretório de destino opcional para restaurar os arquivos legados.",
     )
     db_rollback.add_argument(
         "--no-aux",
@@ -944,6 +968,18 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
+        elif args.subcmd == "migrate-auth-sqlite":
+            report = migrate_auth_from_legacy_sqlite(
+                source_db=args.source_db,
+                replace=bool(getattr(args, "replace", False)),
+            )
+            print(f"Migração de auth legado: {report.get('status')}")
+            print(f"  origem           : {report.get('source')}")
+            print(f"  total lidos      : {report.get('total')}")
+            print(f"  inseridos        : {report.get('inserted')}")
+            print(f"  atualizados      : {report.get('updated')}")
+            print(f"  ignorados (exist): {report.get('skipped_existing')}")
+            print(f"  ignorados (invál): {report.get('skipped_invalid')}")
         elif args.subcmd == "migrate-legacy":
             result = migrate_legacy_user_data(
                 username=args.username,
@@ -970,7 +1006,7 @@ def main() -> None:
             report = run_db_check(timeout_seconds=float(args.timeout))
             if loaded_env_path is not None:
                 print(f".env carregado: {loaded_env_path}")
-            print(f"Runtime atual: SQLite ({report['runtime_target']})")
+            print(f"Runtime atual: PostgreSQL ({report['runtime_target']})")
 
             if report.get("postgres_configured"):
                 source = report.get("postgres_source") or "desconhecida"
@@ -1000,7 +1036,7 @@ def main() -> None:
 
             print(
                 "Conectividade PostgreSQL validada. "
-                "Próximo passo: migrar schema e trocar camada de acesso (hoje ainda SQLite)."
+                "Ambiente pronto para operação em PostgreSQL."
             )
         elif args.subcmd == "migrate":
             schema_name = sanitize_schema_name(args.schema or args.username)
@@ -1014,14 +1050,14 @@ def main() -> None:
             )
 
             print(f"Schema destino: {schema_name}")
-            print("Fontes SQLite:")
+            print("Fontes legadas:")
             for src in sources:
                 marker = "OK" if src.path.exists() else "AUSENTE"
                 req = "obrigatória" if src.required else "opcional"
                 print(f"  - {src.label}: {src.path} [{marker}; {req}]")
 
             try:
-                report = migrate_sqlite_sources_to_postgres(
+                report = migrate_legacy_sources_to_postgres(
                     schema=schema_name,
                     sources=sources,
                     replace=bool(getattr(args, "replace", False)),
@@ -1067,7 +1103,7 @@ def main() -> None:
                 print(f"  - {src.label}: {src.path} [{marker}; {req}]")
 
             try:
-                report = verify_sqlite_sources_in_postgres(
+                report = verify_legacy_sources_in_postgres(
                     schema=schema_name,
                     sources=sources,
                 )
@@ -1076,17 +1112,17 @@ def main() -> None:
 
             print(f"Destino PostgreSQL: {report['postgres_target']}")
             for row in report.get("tables", []):
-                sqlite_rows = row.get("sqlite_rows")
+                source_rows = row.get("source_rows")
                 pg_rows = row.get("postgres_rows")
                 status = row.get("status")
                 print(
                     f"  - {row.get('source')}.{row.get('table')}: "
-                    f"sqlite={sqlite_rows} postgres={pg_rows} status={status}"
+                    f"fonte={source_rows} postgres={pg_rows} status={status}"
                 )
 
             if not report.get("ok"):
                 raise SystemExit(
-                    "Verificação encontrou divergências entre SQLite e PostgreSQL."
+                    "Verificação encontrou divergências entre fonte legada e PostgreSQL."
                 )
             print("Verificação concluída: contagens consistentes.")
         elif args.subcmd == "cutover-check":
@@ -1125,12 +1161,12 @@ def main() -> None:
 
             verify = result.get("verify")
             if verify:
-                print("2) Verificação de contagens SQLite x PostgreSQL")
+                print("2) Verificação de contagens fonte legada x PostgreSQL")
                 print(f"   - Destino: {verify.get('postgres_target')}")
                 for row in verify.get("tables", []):
                     print(
                         f"   - {row.get('source')}.{row.get('table')}: "
-                        f"sqlite={row.get('sqlite_rows')} postgres={row.get('postgres_rows')} "
+                        f"fonte={row.get('source_rows')} postgres={row.get('postgres_rows')} "
                         f"status={row.get('status')}"
                     )
 
@@ -1181,7 +1217,7 @@ def main() -> None:
             print("Optimize concluído.")
         elif args.subcmd == "backup":
             try:
-                report = create_sqlite_backup(
+                report = create_legacy_backup(
                     username=args.username,
                     backup_root=args.backup_root,
                     source_dir=args.source_dir,
@@ -1211,7 +1247,7 @@ def main() -> None:
                 print("Backup concluído com sucesso.")
         elif args.subcmd == "rollback":
             try:
-                report = restore_sqlite_backup(
+                report = restore_legacy_backup(
                     backup_dir=args.backup_dir,
                     username=args.username,
                     target_dir=args.target_dir,

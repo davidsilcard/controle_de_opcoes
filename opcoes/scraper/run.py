@@ -248,7 +248,10 @@ async def scrape_all(
                 "Retomando coleta: "
                 f"{len(processed_symbols)}/{len(target_symbols)} simbolos ja concluidos."
             )
-            print(f"Checkpoint SQLite ativo: {checkpoint_path}")
+            print(
+                "Checkpoint de retomada ativo "
+                f"(arquivo local de controle de progresso): {checkpoint_path}"
+            )
 
         total_written = 0
         total_symbols = len(target_symbols)
@@ -287,6 +290,10 @@ async def scrape_all(
         snapshot_db: Optional[SnapshotDB] = None
         try:
             snapshot_db = SnapshotDB()
+            if snapshot_db.conn.backend == "postgres":
+                print("Persistência de snapshots: PostgreSQL (backend principal).")
+            else:
+                print("Persistência de snapshots: banco local legado.")
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou snapshots DB: {exc}")
             snapshot_db = None

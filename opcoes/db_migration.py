@@ -314,6 +314,11 @@ def migrate_sqlite_sources_to_postgres(
             logger(f"Fonte opcional ausente: {src.path} (pulando)")
             continue
         tables = inspect_sqlite_tables(src.path)
+        if src.required and not tables:
+            raise RuntimeError(
+                f"Fonte obrigatória '{src.label}' não possui tabelas: {src.path}. "
+                "Confirme se o arquivo de origem legado é o backup correto."
+            )
         for table in tables:
             report["tables"].append(
                 {
@@ -400,12 +405,18 @@ def verify_sqlite_sources_in_postgres(
                     f"Fonte obrigatória não encontrada para '{src.label}': {src.path}"
                 )
             continue
-        for table in inspect_sqlite_tables(src.path):
+        tables = inspect_sqlite_tables(src.path)
+        if src.required and not tables:
+            raise RuntimeError(
+                f"Fonte obrigatória '{src.label}' não possui tabelas: {src.path}. "
+                "Confirme se o arquivo de origem legado é o backup correto."
+            )
+        for table in tables:
             table_rows.append(
                 {
                     "source": src.label,
                     "table": table.name,
-                    "sqlite_rows": int(table.row_count),
+                    "source_rows": int(table.row_count),
                     "postgres_rows": None,
                     "status": "pending",
                 }
@@ -433,7 +444,7 @@ def verify_sqlite_sources_in_postgres(
                 pg_count = int(pg_cur.fetchone()[0] or 0)
                 row["postgres_rows"] = pg_count
                 row["status"] = (
-                    "ok" if pg_count == int(row["sqlite_rows"]) else "count_mismatch"
+                    "ok" if pg_count == int(row["source_rows"]) else "count_mismatch"
                 )
 
     mismatches = [

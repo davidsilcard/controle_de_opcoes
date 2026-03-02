@@ -2,6 +2,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 from opcoes import cli
 from opcoes.db_health import PostgresTarget
 from opcoes.db_migration import (
@@ -10,6 +12,7 @@ from opcoes.db_migration import (
     migrate_sqlite_sources_to_postgres,
     resolve_user_source_databases,
     sanitize_schema_name,
+    verify_sqlite_sources_in_postgres,
 )
 
 
@@ -107,6 +110,61 @@ def test_migrate_sqlite_sources_to_postgres_dry_run(
     assert report["tables"][0]["rows"] == 2
 
 
+def test_migrate_sqlite_sources_to_postgres_dry_run_fails_when_required_source_has_no_tables(
+    monkeypatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "empty.db"
+    sqlite3.connect(path).close()
+
+    monkeypatch.setattr(
+        "opcoes.db_migration.resolve_postgres_target",
+        lambda: (
+            PostgresTarget(
+                dsn="postgresql://user:pwd@host:5432/db",
+                redacted_dsn="postgresql://user:***@host:5432/db",
+                source="DATABASE_URL",
+                host="host",
+                port=5432,
+            ),
+            [],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="não possui tabelas"):
+        migrate_sqlite_sources_to_postgres(
+            schema="admin",
+            sources=[SourceDatabase(label="main", path=path, required=True)],
+            dry_run=True,
+        )
+
+
+def test_verify_sqlite_sources_in_postgres_fails_when_required_source_has_no_tables(
+    monkeypatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "empty.db"
+    sqlite3.connect(path).close()
+
+    monkeypatch.setattr(
+        "opcoes.db_migration.resolve_postgres_target",
+        lambda: (
+            PostgresTarget(
+                dsn="postgresql://user:pwd@host:5432/db",
+                redacted_dsn="postgresql://user:***@host:5432/db",
+                source="DATABASE_URL",
+                host="host",
+                port=5432,
+            ),
+            [],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="não possui tabelas"):
+        verify_sqlite_sources_in_postgres(
+            schema="admin",
+            sources=[SourceDatabase(label="main", path=path, required=True)],
+        )
+
+
 def test_cli_db_migrate_dry_run(monkeypatch, capsys, tmp_path: Path) -> None:
     src = tmp_path / "opcoes_snapshots.db"
     _create_sqlite(src)
@@ -119,7 +177,7 @@ def test_cli_db_migrate_dry_run(monkeypatch, capsys, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(
         cli,
-        "migrate_sqlite_sources_to_postgres",
+        "migrate_legacy_sources_to_postgres",
         lambda **kwargs: {
             "postgres_target": "postgresql://user:***@host:5432/db",
             "dry_run": True,
@@ -151,14 +209,14 @@ def test_cli_db_verify_ok(monkeypatch, capsys, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(
         cli,
-        "verify_sqlite_sources_in_postgres",
+        "verify_legacy_sources_in_postgres",
         lambda **kwargs: {
             "postgres_target": "postgresql://user:***@host:5432/db",
             "tables": [
                 {
                     "source": "main",
                     "table": "sample",
-                    "sqlite_rows": 2,
+                    "source_rows": 2,
                     "postgres_rows": 2,
                     "status": "ok",
                 }
@@ -190,14 +248,14 @@ def test_cli_db_verify_mismatch(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(
         cli,
-        "verify_sqlite_sources_in_postgres",
+        "verify_legacy_sources_in_postgres",
         lambda **kwargs: {
             "postgres_target": "postgresql://user:***@host:5432/db",
             "tables": [
                 {
                     "source": "main",
                     "table": "sample",
-                    "sqlite_rows": 2,
+                    "source_rows": 2,
                     "postgres_rows": 1,
                     "status": "count_mismatch",
                 }

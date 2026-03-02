@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import hashlib
 import json
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from .storage import CSV_FIELDS, _ensure_parent
 
 
 def default_checkpoint_db_path(output_csv: Path) -> Path:
-    return output_csv.with_suffix(".checkpoint.db")
+    return output_csv.with_suffix(".checkpoint.json")
 
 
 @dataclass(frozen=True)
@@ -24,18 +22,16 @@ class CheckpointState:
 
 
 class ScrapeCheckpointStore:
-    """Checkpoint transacional do scraper por saída e símbolo."""
+    """Checkpoint do scraper por arquivo JSON local (sem banco adicional)."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         _ensure_parent(self.path)
-        self.conn = sqlite3.connect(self.path)
-        self.conn.row_factory = sqlite3.Row
-        self._ensure_schema()
+        self._state: Dict[str, Any] = {"sessions": {}}
+        self._load()
 
     def close(self) -> None:
-        with contextlib.suppress(Exception):
-            self.conn.close()
+        return None
 
     def prepare(
         self,
@@ -50,125 +46,93 @@ class ScrapeCheckpointStore:
         symbols = _normalize_symbols(target_symbols)
         symbols_json = json.dumps(symbols, ensure_ascii=False, separators=(",", ":"))
 
-        session = self.conn.execute(
-            "SELECT * FROM checkpoint_sessions WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        if not session:
-            self.conn.execute(
-                """
-                INSERT INTO checkpoint_sessions (
-                    session_id,
-                    output_csv,
-                    symbols_signature,
-                    symbols_json,
-                    snapshot_date,
-                    last_symbol,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    output_resolved,
-                    symbols_signature,
-                    symbols_json,
-                    None,
-                    None,
-                    now,
-                    now,
-                ),
+        sessions = self._state.setdefault("sessions", {})
+        session = sessions.get(session_id)
+        changed = False
+        if not isinstance(session, dict):
+            session = None
+
+        if session is None:
+            sessions[session_id] = {
+                "session_id": session_id,
+                "output_csv": output_resolved,
+                "symbols_signature": symbols_signature,
+                "symbols_json": symbols_json,
+                "snapshot_date": None,
+                "last_symbol": None,
+                "created_at": now,
+                "updated_at": now,
+                "symbols_state": {
+                    symbol: {
+                        "status": "pending",
+                        "attempts": 0,
+                        "row_count": 0,
+                        "last_error": None,
+                        "updated_at": now,
+                    }
+                    for symbol in symbols
+                },
+                "rows": {},
+            }
+            changed = True
+            session = sessions[session_id]
+        else:
+            if session.get("output_csv") != output_resolved:
+                raise RuntimeError("Checkpoint session inconsistente com output_csv.")
+            changed = self._reconcile_symbols(
+                session=session,
+                target_symbols=symbols,
+                symbols_signature=symbols_signature,
+                symbols_json=symbols_json,
+                updated_at=now,
             )
-            self.conn.executemany(
-                """
-                INSERT INTO checkpoint_symbols (
-                    session_id, symbol, status, attempts, row_count, last_error, updated_at
-                ) VALUES (?, ?, 'pending', 0, 0, NULL, ?)
-                """,
-                [(session_id, symbol, now) for symbol in symbols],
-            )
-            self.conn.commit()
-            return CheckpointState(processed_symbols=[], snapshot_rows=[], snapshot_date=None)
 
-        if session["output_csv"] != output_resolved:
-            # Session id é derivado do output; aqui é apenas proteção de integridade.
-            raise RuntimeError("Checkpoint session inconsistente com output_csv.")
+        if changed:
+            self._save()
 
-        self._reconcile_symbols(
-            session_id=session_id,
-            target_symbols=symbols,
-            symbols_signature=symbols_signature,
-            symbols_json=symbols_json,
-            updated_at=now,
-        )
-
-        done_rows = self.conn.execute(
-            """
-            SELECT symbol
-            FROM checkpoint_symbols
-            WHERE session_id = ? AND status = 'done'
-            """,
-            (session_id,),
-        ).fetchall()
-        done_set = {str(row["symbol"]) for row in done_rows}
-        processed_symbols = [symbol for symbol in symbols if symbol in done_set]
-        snapshot_rows = self._load_rows(session_id=session_id, target_symbols=symbols)
-        snapshot_date_row = self.conn.execute(
-            "SELECT snapshot_date FROM checkpoint_sessions WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        snapshot_date = str(snapshot_date_row["snapshot_date"]) if snapshot_date_row and snapshot_date_row["snapshot_date"] else None
+        symbols_state = session.get("symbols_state", {})
+        processed_symbols = [
+            symbol
+            for symbol in symbols
+            if str((symbols_state.get(symbol) or {}).get("status") or "").lower() == "done"
+        ]
+        snapshot_rows = self._load_rows(session=session, target_symbols=symbols)
+        snapshot_date = session.get("snapshot_date")
         return CheckpointState(
             processed_symbols=processed_symbols,
             snapshot_rows=snapshot_rows,
-            snapshot_date=snapshot_date,
+            snapshot_date=str(snapshot_date) if snapshot_date else None,
         )
 
     def mark_symbol_running(self, *, output_csv: Path, symbol: str) -> None:
-        session_id = _session_id(str(output_csv.resolve()))
+        session = self._require_session(output_csv=output_csv)
         now = _now_iso()
-        self.conn.execute(
-            """
-            UPDATE checkpoint_symbols
-            SET status = 'running',
-                attempts = attempts + 1,
-                updated_at = ?
-            WHERE session_id = ? AND symbol = ?
-            """,
-            (now, session_id, symbol),
+        symbols_state = session.setdefault("symbols_state", {})
+        item = symbols_state.setdefault(
+            symbol,
+            {"status": "pending", "attempts": 0, "row_count": 0, "last_error": None, "updated_at": now},
         )
-        self.conn.execute(
-            """
-            UPDATE checkpoint_sessions
-            SET last_symbol = ?, updated_at = ?
-            WHERE session_id = ?
-            """,
-            (symbol, now, session_id),
-        )
-        self.conn.commit()
+        item["status"] = "running"
+        item["attempts"] = int(item.get("attempts") or 0) + 1
+        item["updated_at"] = now
+        session["last_symbol"] = symbol
+        session["updated_at"] = now
+        self._save()
 
     def mark_symbol_failed(self, *, output_csv: Path, symbol: str, error: str) -> None:
-        session_id = _session_id(str(output_csv.resolve()))
+        session = self._require_session(output_csv=output_csv)
         now = _now_iso()
-        self.conn.execute(
-            """
-            UPDATE checkpoint_symbols
-            SET status = 'failed',
-                last_error = ?,
-                updated_at = ?
-            WHERE session_id = ? AND symbol = ?
-            """,
-            ((error or "").strip()[:1500], now, session_id, symbol),
+        symbols_state = session.setdefault("symbols_state", {})
+        item = symbols_state.setdefault(
+            symbol,
+            {"status": "pending", "attempts": 0, "row_count": 0, "last_error": None, "updated_at": now},
         )
-        self.conn.execute(
-            """
-            UPDATE checkpoint_sessions
-            SET last_symbol = ?, updated_at = ?
-            WHERE session_id = ?
-            """,
-            (symbol, now, session_id),
-        )
-        self.conn.commit()
+        item["status"] = "failed"
+        item["last_error"] = (error or "").strip()[:1500]
+        item["updated_at"] = now
+        session["last_symbol"] = symbol
+        session["updated_at"] = now
+        self._save()
 
     def mark_symbol_success(
         self,
@@ -178,83 +142,49 @@ class ScrapeCheckpointStore:
         rows: Sequence[Dict[str, str]],
         snapshot_date: Optional[str],
     ) -> None:
-        session_id = _session_id(str(output_csv.resolve()))
+        session = self._require_session(output_csv=output_csv)
         now = _now_iso()
         clean_rows = _normalize_rows(rows)
 
-        self.conn.execute(
-            "DELETE FROM checkpoint_rows WHERE session_id = ? AND symbol = ?",
-            (session_id, symbol),
-        )
-        payload = []
+        rows_by_symbol = session.setdefault("rows", {})
+        symbol_rows: Dict[str, Dict[str, str]] = {}
         for row in clean_rows:
             ticker = (row.get("ticker") or "").strip().upper()
             if not ticker:
                 continue
-            payload.append(
-                (
-                    session_id,
-                    symbol,
-                    ticker,
-                    json.dumps(row, ensure_ascii=False, separators=(",", ":")),
-                    now,
-                )
-            )
-        if payload:
-            self.conn.executemany(
-                """
-                INSERT OR REPLACE INTO checkpoint_rows (
-                    session_id, symbol, ticker, payload_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                payload,
-            )
+            symbol_rows[ticker] = row
+        rows_by_symbol[symbol] = symbol_rows
 
-        self.conn.execute(
-            """
-            UPDATE checkpoint_symbols
-            SET status = 'done',
-                row_count = ?,
-                last_error = NULL,
-                updated_at = ?
-            WHERE session_id = ? AND symbol = ?
-            """,
-            (len(clean_rows), now, session_id, symbol),
+        symbols_state = session.setdefault("symbols_state", {})
+        item = symbols_state.setdefault(
+            symbol,
+            {"status": "pending", "attempts": 0, "row_count": 0, "last_error": None, "updated_at": now},
         )
+        item["status"] = "done"
+        item["row_count"] = len(clean_rows)
+        item["last_error"] = None
+        item["updated_at"] = now
 
-        session = self.conn.execute(
-            "SELECT snapshot_date FROM checkpoint_sessions WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        current_snapshot = str(session["snapshot_date"]) if session and session["snapshot_date"] else None
-        merged_snapshot = _max_iso_date(current_snapshot, snapshot_date)
-        self.conn.execute(
-            """
-            UPDATE checkpoint_sessions
-            SET snapshot_date = ?, last_symbol = ?, updated_at = ?
-            WHERE session_id = ?
-            """,
-            (merged_snapshot, symbol, now, session_id),
+        current_snapshot = session.get("snapshot_date")
+        session["snapshot_date"] = _max_iso_date(
+            str(current_snapshot) if current_snapshot else None, snapshot_date
         )
-        self.conn.commit()
+        session["last_symbol"] = symbol
+        session["updated_at"] = now
+        self._save()
 
     def status_counts(self, *, output_csv: Path, target_symbols: Sequence[str]) -> Dict[str, int]:
-        session_id = _session_id(str(output_csv.resolve()))
+        session = self._require_session(output_csv=output_csv, create_if_missing=False)
         target_set = set(_normalize_symbols(target_symbols))
-        rows = self.conn.execute(
-            """
-            SELECT symbol, status
-            FROM checkpoint_symbols
-            WHERE session_id = ?
-            """,
-            (session_id,),
-        ).fetchall()
         counts = {"done": 0, "failed": 0, "running": 0, "pending": 0, "total": len(target_set)}
-        for row in rows:
-            symbol = str(row["symbol"])
-            if symbol not in target_set:
-                continue
-            status = str(row["status"] or "pending").lower()
+        if session is None:
+            counts["pending"] = counts["total"]
+            return counts
+
+        symbols_state = session.get("symbols_state", {})
+        for symbol in target_set:
+            item = symbols_state.get(symbol) or {}
+            status = str(item.get("status") or "pending").lower()
             if status not in {"done", "failed", "running", "pending"}:
                 status = "pending"
             counts[status] += 1
@@ -266,132 +196,112 @@ class ScrapeCheckpointStore:
 
     def clear(self, *, output_csv: Path) -> None:
         session_id = _session_id(str(output_csv.resolve()))
-        self.conn.execute("DELETE FROM checkpoint_rows WHERE session_id = ?", (session_id,))
-        self.conn.execute("DELETE FROM checkpoint_symbols WHERE session_id = ?", (session_id,))
-        self.conn.execute("DELETE FROM checkpoint_sessions WHERE session_id = ?", (session_id,))
-        self.conn.commit()
+        sessions = self._state.setdefault("sessions", {})
+        if session_id in sessions:
+            sessions.pop(session_id, None)
+            self._save()
 
-    def _ensure_schema(self) -> None:
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS checkpoint_sessions (
-                session_id TEXT PRIMARY KEY,
-                output_csv TEXT NOT NULL,
-                symbols_signature TEXT NOT NULL,
-                symbols_json TEXT NOT NULL,
-                snapshot_date TEXT,
-                last_symbol TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS checkpoint_symbols (
-                session_id TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempts INTEGER NOT NULL DEFAULT 0,
-                row_count INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (session_id, symbol)
-            )
-            """
-        )
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS checkpoint_rows (
-                session_id TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                ticker TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (session_id, ticker)
-            )
-            """
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_checkpoint_symbols_status ON checkpoint_symbols (session_id, status)"
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_checkpoint_rows_symbol ON checkpoint_rows (session_id, symbol)"
-        )
-        self.conn.commit()
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            parsed = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if isinstance(parsed, dict) and isinstance(parsed.get("sessions"), dict):
+            self._state = parsed
+
+    def _save(self) -> None:
+        payload = json.dumps(self._state, ensure_ascii=False, separators=(",", ":"))
+        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(self.path)
+
+    def _require_session(
+        self,
+        *,
+        output_csv: Path,
+        create_if_missing: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        session_id = _session_id(str(output_csv.resolve()))
+        sessions = self._state.setdefault("sessions", {})
+        session = sessions.get(session_id)
+        if isinstance(session, dict):
+            return session
+        if not create_if_missing:
+            return None
+        now = _now_iso()
+        session = {
+            "session_id": session_id,
+            "output_csv": str(output_csv.resolve()),
+            "symbols_signature": "",
+            "symbols_json": "[]",
+            "snapshot_date": None,
+            "last_symbol": None,
+            "created_at": now,
+            "updated_at": now,
+            "symbols_state": {},
+            "rows": {},
+        }
+        sessions[session_id] = session
+        return session
 
     def _reconcile_symbols(
         self,
         *,
-        session_id: str,
+        session: Dict[str, Any],
         target_symbols: Sequence[str],
         symbols_signature: str,
         symbols_json: str,
         updated_at: str,
-    ) -> None:
+    ) -> bool:
+        changed = False
         target_set = set(target_symbols)
-        existing_rows = self.conn.execute(
-            "SELECT symbol FROM checkpoint_symbols WHERE session_id = ?",
-            (session_id,),
-        ).fetchall()
-        existing = {str(row["symbol"]) for row in existing_rows}
+        symbols_state = session.setdefault("symbols_state", {})
+        rows_by_symbol = session.setdefault("rows", {})
 
-        to_remove = sorted(existing - target_set)
-        to_add = [sym for sym in target_symbols if sym not in existing]
-
-        if to_remove:
-            placeholders = ",".join("?" for _ in to_remove)
-            self.conn.execute(
-                f"DELETE FROM checkpoint_symbols WHERE session_id = ? AND symbol IN ({placeholders})",
-                (session_id, *to_remove),
-            )
-            self.conn.execute(
-                f"DELETE FROM checkpoint_rows WHERE session_id = ? AND symbol IN ({placeholders})",
-                (session_id, *to_remove),
-            )
-        if to_add:
-            self.conn.executemany(
-                """
-                INSERT INTO checkpoint_symbols (
-                    session_id, symbol, status, attempts, row_count, last_error, updated_at
-                ) VALUES (?, ?, 'pending', 0, 0, NULL, ?)
-                """,
-                [(session_id, symbol, updated_at) for symbol in to_add],
-            )
-        self.conn.execute(
-            """
-            UPDATE checkpoint_sessions
-            SET symbols_signature = ?, symbols_json = ?, updated_at = ?
-            WHERE session_id = ?
-            """,
-            (symbols_signature, symbols_json, updated_at, session_id),
-        )
-        self.conn.commit()
-
-    def _load_rows(self, *, session_id: str, target_symbols: Sequence[str]) -> List[Dict[str, str]]:
-        target_set = set(target_symbols)
-        payload_rows = self.conn.execute(
-            """
-            SELECT symbol, payload_json
-            FROM checkpoint_rows
-            WHERE session_id = ?
-            ORDER BY symbol, ticker
-            """,
-            (session_id,),
-        ).fetchall()
-        rows: List[Dict[str, str]] = []
-        for entry in payload_rows:
-            symbol = str(entry["symbol"])
+        for symbol in list(symbols_state.keys()):
             if symbol not in target_set:
+                symbols_state.pop(symbol, None)
+                changed = True
+        for symbol in list(rows_by_symbol.keys()):
+            if symbol not in target_set:
+                rows_by_symbol.pop(symbol, None)
+                changed = True
+        for symbol in target_symbols:
+            if symbol not in symbols_state:
+                symbols_state[symbol] = {
+                    "status": "pending",
+                    "attempts": 0,
+                    "row_count": 0,
+                    "last_error": None,
+                    "updated_at": updated_at,
+                }
+                changed = True
+
+        if session.get("symbols_signature") != symbols_signature:
+            session["symbols_signature"] = symbols_signature
+            changed = True
+        if session.get("symbols_json") != symbols_json:
+            session["symbols_json"] = symbols_json
+            changed = True
+        if changed:
+            session["updated_at"] = updated_at
+        return changed
+
+    def _load_rows(self, *, session: Dict[str, Any], target_symbols: Sequence[str]) -> List[Dict[str, str]]:
+        rows_by_symbol = session.get("rows", {})
+        rows: List[Dict[str, str]] = []
+        for symbol in target_symbols:
+            symbol_rows = rows_by_symbol.get(symbol)
+            if not isinstance(symbol_rows, dict):
                 continue
-            try:
-                parsed = json.loads(str(entry["payload_json"]))
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(parsed, dict):
-                continue
-            row = {field: str(parsed.get(field) or "") for field in CSV_FIELDS}
-            rows.append(row)
+            for ticker in sorted(symbol_rows.keys()):
+                parsed = symbol_rows.get(ticker)
+                if not isinstance(parsed, dict):
+                    continue
+                row = {field: str(parsed.get(field) or "") for field in CSV_FIELDS}
+                rows.append(row)
         return rows
 
 
