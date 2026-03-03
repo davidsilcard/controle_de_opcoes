@@ -12,7 +12,7 @@ from opcoes.config import (
 def test_get_data_backend_is_postgres_only(monkeypatch) -> None:
     monkeypatch.delenv("OPCOES_DB_BACKEND", raising=False)
     assert get_data_backend() == "postgres"
-    monkeypatch.setenv("OPCOES_DB_BACKEND", "sqlite")
+    monkeypatch.setenv("OPCOES_DB_BACKEND", "mysql")
     assert get_data_backend() == "postgres"
 
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from opcoes.settings import get_fundamentus_settings, update_fundamentus_settings
 
+pytestmark = pytest.mark.requires_postgres
 
-def test_fundamentus_settings_roundtrip(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "opcoes.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
 
+def test_fundamentus_settings_roundtrip() -> None:
     update_fundamentus_settings(
         target_yield_pct=9.5,
         put_distance_limit_pct=12.0,

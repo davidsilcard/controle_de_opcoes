@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
-import sqlite3
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -11,13 +9,9 @@ from urllib import parse, request
 import http.cookiejar
 
 from .config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from .db_health import resolve_postgres_target
-from .scraper.storage import _ensure_parent
 from .utils import parse_ptbr_number
 
 SEARCH_URL = "https://www.fundamentus.com.br/buscaavancada.php"
@@ -275,8 +269,6 @@ class _DbConn:
         self._pg_row_factory = pg_row_factory
 
     def execute(self, query: str, params: Sequence[object] = ()):
-        if self.backend == "sqlite":
-            return self._raw_conn.execute(query, tuple(params))
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
             cur.execute(query_pg, tuple(params))
@@ -287,9 +279,6 @@ class _DbConn:
             return _PgResult(rows, rowcount=rowcount)
 
     def executemany(self, query: str, params_seq: Sequence[Sequence[object]]) -> None:
-        if self.backend == "sqlite":
-            self._raw_conn.executemany(query, params_seq)
-            return
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor() as cur:
             cur.executemany(query_pg, params_seq)
@@ -306,29 +295,6 @@ class _DbConn:
 
 def _quote_ident(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
-
-
-def _sqlite_timeout_seconds() -> float:
-    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 30.0
-    if value <= 0:
-        value = 30.0
-    return value
-
-
-def _connect_sqlite(db_path: Optional[Path] = None) -> _DbConn:
-    path = db_path or get_db_path()
-    _ensure_parent(path)
-    timeout_seconds = _sqlite_timeout_seconds()
-    raw_conn = sqlite3.connect(path, timeout=timeout_seconds)
-    raw_conn.row_factory = sqlite3.Row
-    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-    conn = _DbConn(backend="sqlite", raw_conn=raw_conn)
-    _ensure_tables(conn)
-    return conn
 
 
 def _connect_postgres() -> _DbConn:
@@ -355,17 +321,9 @@ def _connect_postgres() -> _DbConn:
 
 
 def _connect(db_path: Optional[Path] = None) -> _DbConn:
-    # Compatibilidade: db_path explícito força SQLite (uso em testes/rotinas locais).
     if db_path is not None:
-        return _connect_sqlite(db_path)
-    if get_data_backend() == "postgres":
-        try:
-            return _connect_postgres()
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _connect_sqlite()
-    return _connect_sqlite()
+        raise RuntimeError("Parâmetro db_path não é suportado no backend PostgreSQL.")
+    return _connect_postgres()
 
 
 def _ensure_tables(conn: _DbConn) -> None:

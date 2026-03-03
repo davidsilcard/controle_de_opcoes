@@ -6,16 +6,15 @@ from opcoes import portfolio
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
 
+pytestmark = pytest.mark.requires_postgres
 
-def _ensure_snapshot_tables(db_path) -> None:
-    snap = SnapshotDB(db_path)
+
+def _ensure_snapshot_tables() -> None:
+    snap = SnapshotDB()
     snap.close()
 
 
-def test_positions_exit_reason_dropdown_includes_new_options(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "positions.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_positions_exit_reason_dropdown_includes_new_options() -> None:
     portfolio.add_position(
         ticker="WIZCB103",
         underlying="WICZ3",
@@ -25,7 +24,7 @@ def test_positions_exit_reason_dropdown_includes_new_options(monkeypatch, tmp_pa
         side="short",
         strategy_tag="covered_call",
     )
-    _ensure_snapshot_tables(db_path)
+    _ensure_snapshot_tables()
 
     app = create_app()
     app.testing = True
@@ -49,10 +48,7 @@ def test_positions_exit_reason_dropdown_includes_new_options(monkeypatch, tmp_pa
         ("Expiração", "vencimento_sem_valor"),
     ],
 )
-def test_positions_exit_reason_legacy_values_are_mapped(monkeypatch, tmp_path, legacy_reason: str, canonical_value: str) -> None:
-    db_path = tmp_path / f"positions_{canonical_value}.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_positions_exit_reason_legacy_values_are_mapped(legacy_reason: str, canonical_value: str) -> None:
     portfolio.add_position(
         ticker="WIZCB103",
         underlying="WICZ3",
@@ -63,7 +59,7 @@ def test_positions_exit_reason_legacy_values_are_mapped(monkeypatch, tmp_path, l
         strategy_tag="covered_call",
         exit_reason=legacy_reason,
     )
-    _ensure_snapshot_tables(db_path)
+    _ensure_snapshot_tables()
 
     app = create_app()
     app.testing = True

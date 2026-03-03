@@ -14,13 +14,9 @@ from .auth import (
     authenticate_user,
     ensure_bootstrap_user_from_env,
     normalize_username,
-    user_db_path,
 )
 from .config import (
-    get_db_path,
-    reset_db_path_override,
     reset_pg_schema_override,
-    set_db_path_override,
     set_pg_schema_override,
 )
 from .db import open_db
@@ -113,7 +109,7 @@ def create_app() -> Flask:
         normalized = normalize_username(username or "")
         if normalized:
             return f"user:{normalized}"
-        return f"db:{get_db_path()}"
+        return "global"
 
     def _current_ranking_cache_namespace() -> str:
         username = getattr(g, "current_username", None)
@@ -198,7 +194,6 @@ def create_app() -> Flask:
 
     @app.before_request
     def _bind_user_context():
-        g.db_path_override_token = None
         g.pg_schema_override_token = None
         g.current_username = None
 
@@ -245,23 +240,12 @@ def create_app() -> Flask:
         # Sliding session: renova enquanto usuário estiver ativo.
         session["last_activity_at"] = now_ts
 
-        try:
-            db_path = user_db_path(username)
-        except ValueError:
-            session.clear()
-            return redirect(url_for("login"))
-
-        g.db_path_override_token = set_db_path_override(db_path)
         g.pg_schema_override_token = set_pg_schema_override(username)
         g.current_username = username
         return None
 
     @app.teardown_request
     def _clear_user_context(_exc):
-        token = getattr(g, "db_path_override_token", None)
-        if token is not None:
-            reset_db_path_override(token)
-            g.db_path_override_token = None
         pg_token = getattr(g, "pg_schema_override_token", None)
         if pg_token is not None:
             reset_pg_schema_override(pg_token)
@@ -1338,20 +1322,13 @@ def create_app() -> Flask:
         t = ticker.strip().upper()
         conn = open_db()
         try:
-            module_name = conn.__class__.__module__
-            if module_name.startswith("sqlite3"):
-                row = conn.execute(
-                    "SELECT underlying FROM option_snapshots WHERE ticker = ? ORDER BY snapshot_date DESC LIMIT 1",
-                    (t,),
-                ).fetchone()
-                return row[0] if row else None
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT underlying FROM option_snapshots WHERE ticker = %s ORDER BY snapshot_date DESC LIMIT 1",
-                    (t,),
-                )
-                row = cur.fetchone()
-            return row[0] if row else None
+            row = conn.execute(
+                "SELECT underlying FROM option_snapshots WHERE ticker = %s ORDER BY snapshot_date DESC LIMIT 1",
+                (t,),
+            ).fetchone()
+            if not row:
+                return None
+            return row.get("underlying") if isinstance(row, dict) else row[0]
         finally:
             conn.close()
 
@@ -1409,37 +1386,20 @@ def create_app() -> Flask:
         t = ticker.strip().upper()
         conn = open_db()
         try:
-            module_name = conn.__class__.__module__
-            if module_name.startswith("sqlite3"):
-                row = conn.execute(
-                    """
-                    SELECT strike
-                    FROM option_snapshots
-                    WHERE ticker = ?
-                    ORDER BY snapshot_date DESC
-                    LIMIT 1
-                    """,
-                    (t,),
-                ).fetchone()
-                if not row:
-                    return None
-                return float(parse_ptbr_number(row["strike"]) or 0.0)
-
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT strike
-                    FROM option_snapshots
-                    WHERE ticker = %s
-                    ORDER BY snapshot_date DESC
-                    LIMIT 1
-                    """,
-                    (t,),
-                )
-                row = cur.fetchone()
+            row = conn.execute(
+                """
+                SELECT strike
+                FROM option_snapshots
+                WHERE ticker = %s
+                ORDER BY snapshot_date DESC
+                LIMIT 1
+                """,
+                (t,),
+            ).fetchone()
             if not row:
                 return None
-            return float(parse_ptbr_number(row[0]) or 0.0)
+            strike = row.get("strike") if isinstance(row, dict) else row[0]
+            return float(parse_ptbr_number(strike) or 0.0)
         finally:
             conn.close()
 

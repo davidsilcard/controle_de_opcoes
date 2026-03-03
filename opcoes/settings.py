@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import os
-import sqlite3
 from dataclasses import dataclass
 from typing import Dict
 
 from .config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from .db_health import resolve_postgres_target
 
@@ -69,30 +64,8 @@ class FundamentusSettings:
     put_min_score: float = 4.0
 
 
-def _sqlite_timeout_seconds() -> float:
-    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 30.0
-    if value <= 0:
-        value = 30.0
-    return value
-
-
 def _quote_ident(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
-
-
-def _connect_sqlite(*, ensure_table: bool = False) -> sqlite3.Connection:
-    db_path = get_db_path()
-    timeout_seconds = _sqlite_timeout_seconds()
-    conn = sqlite3.connect(db_path, timeout=timeout_seconds)
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-    if ensure_table:
-        _ensure_table_sqlite(conn)
-    return conn
 
 
 def _connect_postgres(*, ensure_table: bool = False):
@@ -117,18 +90,6 @@ def _connect_postgres(*, ensure_table: bool = False):
     return conn
 
 
-def _ensure_table_sqlite(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-        """
-    )
-    conn.commit()
-
-
 def _ensure_table_postgres(conn) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -140,20 +101,6 @@ def _ensure_table_postgres(conn) -> None:
             """
         )
     conn.commit()
-
-
-def _load_raw_settings_sqlite() -> Dict[str, str]:
-    conn = _connect_sqlite()
-    try:
-        try:
-            rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        except sqlite3.OperationalError as exc:
-            if "no such table: settings" in str(exc):
-                return {}
-            raise
-    finally:
-        conn.close()
-    return {str(r["key"]): str(r["value"]) for r in rows}
 
 
 def _load_raw_settings_postgres() -> Dict[str, str]:
@@ -173,31 +120,7 @@ def _load_raw_settings_postgres() -> Dict[str, str]:
 
 
 def _load_raw_settings() -> Dict[str, str]:
-    if get_data_backend() == "postgres":
-        try:
-            return _load_raw_settings_postgres()
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _load_raw_settings_sqlite()
-    return _load_raw_settings_sqlite()
-
-
-def _upsert_settings_sqlite(params: Dict[str, object]) -> None:
-    conn = _connect_sqlite(ensure_table=True)
-    try:
-        for key, value in params.items():
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    return _load_raw_settings_postgres()
 
 
 def _upsert_settings_postgres(params: Dict[str, object]) -> None:
@@ -219,16 +142,7 @@ def _upsert_settings_postgres(params: Dict[str, object]) -> None:
 
 
 def _upsert_settings(params: Dict[str, object]) -> None:
-    if get_data_backend() == "postgres":
-        try:
-            _upsert_settings_postgres(params)
-            return
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            _upsert_settings_sqlite(params)
-            return
-    _upsert_settings_sqlite(params)
+    _upsert_settings_postgres(params)
 
 
 def get_fee_settings() -> FeeSettings:

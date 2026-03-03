@@ -1,9 +1,13 @@
+import pytest
+
 from opcoes.fundamentus import (
     FundamentusFilterConfig,
     fetch_approved_ranking,
     fetch_filter_run,
     save_signals,
 )
+
+pytestmark = pytest.mark.requires_postgres
 
 
 def _signal(papel: str, status: str) -> dict:
@@ -17,10 +21,7 @@ def _signal(papel: str, status: str) -> dict:
     }
 
 
-def test_fetch_approved_ranking_total_and_window(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "opcoes.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_fetch_approved_ranking_total_and_window() -> None:
     cfg = FundamentusFilterConfig()
     save_signals(
         [_signal("ABEV3", "approved"), _signal("ITUB4", "rejected")],

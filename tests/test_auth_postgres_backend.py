@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
-import sqlite3
-
-from werkzeug.security import generate_password_hash
-
 from opcoes import auth
 
 
@@ -113,41 +108,3 @@ def test_create_list_and_authenticate_users(monkeypatch) -> None:
 
     assert auth.authenticate_user(username="admin", password="SenhaForte123!")
     assert not auth.authenticate_user(username="admin", password="senha-errada")
-
-
-def test_migrate_auth_from_legacy_sqlite(monkeypatch, tmp_path) -> None:
-    conn = _FakeConn()
-    monkeypatch.setattr(auth, "_connect", lambda: conn)
-
-    legacy_path = tmp_path / "auth.db"
-    legacy = sqlite3.connect(legacy_path)
-    try:
-        legacy.execute(
-            """
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
-        legacy.execute(
-            """
-            INSERT INTO users (username, password_hash, is_active, created_at, updated_at)
-            VALUES (?, ?, 1, ?, ?)
-            """,
-            ("admin", generate_password_hash("SenhaForte123!"), now, now),
-        )
-        legacy.commit()
-    finally:
-        legacy.close()
-
-    report = auth.migrate_auth_from_legacy_sqlite(source_db=legacy_path)
-    assert report["status"] == "ok"
-    assert report["inserted"] == 1
-    assert report["skipped_invalid"] == 0
-    assert auth.authenticate_user(username="admin", password="SenhaForte123!")

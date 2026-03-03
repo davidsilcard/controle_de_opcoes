@@ -2,18 +2,13 @@ from __future__ import annotations
 
 from collections import Counter
 import datetime as dt
-import os
 import re
-import sqlite3
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yfinance as yf
 
 from ..config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from ..db_health import resolve_postgres_target
 from ..fundamentus import (
@@ -134,8 +129,6 @@ class _DbConn:
         self._pg_row_factory = pg_row_factory
 
     def execute(self, query: str, params: Sequence[object] = ()):
-        if self.backend == "sqlite":
-            return self._raw_conn.execute(query, tuple(params))
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
             cur.execute(query_pg, tuple(params))
@@ -146,9 +139,6 @@ class _DbConn:
             return _PgResult(rows, rowcount=rowcount)
 
     def executemany(self, query: str, params_seq: Sequence[Sequence[object]]) -> None:
-        if self.backend == "sqlite":
-            self._raw_conn.executemany(query, params_seq)
-            return
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor() as cur:
             cur.executemany(query_pg, params_seq)
@@ -165,27 +155,6 @@ class _DbConn:
 
 def _quote_ident(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
-
-
-def _sqlite_timeout_seconds() -> float:
-    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 30.0
-    if value <= 0:
-        value = 30.0
-    return value
-
-
-def _connect_sqlite() -> _DbConn:
-    db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    timeout_seconds = _sqlite_timeout_seconds()
-    raw_conn = sqlite3.connect(db_path, timeout=timeout_seconds)
-    raw_conn.row_factory = sqlite3.Row
-    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-    return _DbConn(backend="sqlite", raw_conn=raw_conn)
 
 
 def _connect_postgres() -> _DbConn:
@@ -210,14 +179,7 @@ def _connect_postgres() -> _DbConn:
 
 
 def _connect_db() -> _DbConn:
-    if get_data_backend() == "postgres":
-        try:
-            return _connect_postgres()
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _connect_sqlite()
-    return _connect_sqlite()
+    return _connect_postgres()
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:

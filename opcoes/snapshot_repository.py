@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from .config import get_db_path
 from .db import open_db
-from .scraper.storage import _ensure_parent
 
 
 class _PgResult:
@@ -31,8 +28,6 @@ class _DbConn:
         self._pg_row_factory = pg_row_factory
 
     def execute(self, query: str, params: Sequence[object] = ()):
-        if self.backend == "sqlite":
-            return self._raw_conn.execute(query, tuple(params))
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
             cur.execute(query_pg, tuple(params))
@@ -47,21 +42,10 @@ class _DbConn:
 
 
 def _connect(db_path: Optional[Path] = None) -> _DbConn:
-    # Compatibilidade: db_path explícito força leitura SQLite por arquivo.
     if db_path is not None:
-        path = db_path
-    else:
-        path = None
-    if path is not None:
-        _ensure_parent(path)
-        raw = sqlite3.connect(path)
-        raw.row_factory = sqlite3.Row
-        return _DbConn(backend="sqlite", raw_conn=raw)
+        raise RuntimeError("Parâmetro db_path não é suportado no backend PostgreSQL.")
 
     raw = open_db()
-    module_name = raw.__class__.__module__
-    if module_name.startswith("sqlite3"):
-        return _DbConn(backend="sqlite", raw_conn=raw)
     try:
         from psycopg.rows import dict_row
 

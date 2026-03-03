@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
-import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from .db_health import resolve_postgres_target
 
@@ -61,8 +56,6 @@ class _DbConn:
         self._pg_row_factory = pg_row_factory
 
     def execute(self, query: str, params: Sequence[object] = ()):
-        if self.backend == "sqlite":
-            return self._raw_conn.execute(query, tuple(params))
         query_pg = query.replace("%", "%%").replace("?", "%s")
         with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
             cur.execute(query_pg, tuple(params))
@@ -98,28 +91,6 @@ def _first_col(row: Any) -> Any:
         return None
 
 
-def _sqlite_timeout_seconds() -> float:
-    raw = os.getenv("OPCOES_SQLITE_TIMEOUT_SECONDS", "30").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 30.0
-    if value <= 0:
-        value = 30.0
-    return value
-
-
-def _connect_sqlite(*, ensure_schema: bool = False) -> _DbConn:
-    timeout_seconds = _sqlite_timeout_seconds()
-    raw_conn = sqlite3.connect(get_db_path(), timeout=timeout_seconds)
-    raw_conn.row_factory = sqlite3.Row
-    raw_conn.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-    conn = _DbConn(backend="sqlite", raw_conn=raw_conn)
-    if ensure_schema:
-        _ensure_tables(conn, commit=True)
-    return conn
-
-
 def _connect_postgres(*, ensure_schema: bool = False) -> _DbConn:
     target, errors = resolve_postgres_target()
     if target is None:
@@ -145,26 +116,12 @@ def _connect_postgres(*, ensure_schema: bool = False) -> _DbConn:
 
 
 def _connect(*, ensure_schema: bool = False) -> _DbConn:
-    backend = get_data_backend()
-    if backend == "postgres":
-        try:
-            return _connect_postgres(ensure_schema=ensure_schema)
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _connect_sqlite(ensure_schema=ensure_schema)
-    return _connect_sqlite(ensure_schema=ensure_schema)
+    return _connect_postgres(ensure_schema=ensure_schema)
 
 
 def _table_exists(conn: _DbConn, table_name: str) -> bool:
-    if conn.backend == "postgres":
-        row = conn.execute("SELECT to_regclass(?)", (table_name,)).fetchone()
-        return _first_col(row) is not None
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-        (table_name,),
-    ).fetchone()
-    return row is not None
+    row = conn.execute("SELECT to_regclass(?)", (table_name,)).fetchone()
+    return _first_col(row) is not None
 
 
 def _ensure_tables(conn: _DbConn, *, commit: bool) -> None:

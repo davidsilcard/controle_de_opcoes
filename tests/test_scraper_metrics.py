@@ -1,103 +1,84 @@
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
-from opcoes.scraper.activity import FlowStore
-from opcoes.scraper.ivrank import IVRankStore
-from opcoes.scraper.run import _history_store_path, _recalculate_snapshot_metrics
+from opcoes.scraper.run import _history_store_target, _recalculate_snapshot_metrics
 
 
 def _ptbr_to_float(value: str) -> float:
     return float(value.replace(".", "").replace(",", "."))
 
 
-def test_history_store_path_follows_db_parent(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "custom-data" / "opcoes_snapshots.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    assert _history_store_path("iv_history.db") == db_path.parent / "iv_history.db"
-    assert _history_store_path("flow_history.db") == db_path.parent / "flow_history.db"
+class _FakeIVStore:
+    def __init__(self) -> None:
+        self.saved: dict[tuple[str, str, str], float] = {}
 
+    def record_many(self, entries):
+        for underlying, vencimento, snapshot_date, iv_value in entries:
+            self.saved[(underlying, vencimento, snapshot_date)] = float(iv_value)
 
-def test_recalculate_snapshot_metrics_records_iv_and_flow_on_snapshot_date(tmp_path: Path) -> None:
-    iv_path = tmp_path / "iv_history.db"
-    flow_path = tmp_path / "flow_history.db"
-    iv_store = IVRankStore(iv_path)
-    flow_store = FlowStore(flow_path)
-    try:
-        iv_store.record_many(
-            [
-                ("PETR4", "20/02/2026", "2026-01-29", 20.0),
-                ("PETR4", "20/02/2026", "2026-01-30", 30.0),
-                ("PETR4", "20/02/2026", "2026-02-02", 40.0),
-                ("PETR4", "20/02/2026", "2026-02-03", 50.0),
-                ("PETR4", "20/02/2026", "2026-02-04", 60.0),
-            ]
-        )
-        flow_store.record_many(
-            [
-                ("PETRA123", "2026-01-30", 1000.0, 10.0),
-                ("PETRA123", "2026-02-03", 1200.0, 12.0),
-            ]
-        )
-
-        rows = [
-            {
-                "ticker": "PETRA123",
-                "underlying": "PETR4",
-                "vencimento": "20/02/2026",
-                "vol_impl_perc": "25,0",
-                "vol_financeiro": "1500,00",
-                "num_neg": "15",
-                "moneyness_score": "2,00",
-                "prob_itm_pct": "55,0",
-                "prob_itm_delta_pct": "45,0",
-                "extrinsic_pct_spot": "2,00",
-                "liquidez_score": "2,00",
-                "theta_score": "1,00",
-                "em2x_score": "2",
-                "dobro_score": "2",
-                "Status_Remoto": "",
-                "score_total": "0,00",
-            }
+    def rank_for(self, underlying: str, vencimento: str, _snapshot_date: str, _current: float):
+        base = [
+            iv_value
+            for (u, venc, _d), iv_value in self.saved.items()
+            if u == underlying and venc == vencimento
         ]
+        if len(base) < 1:
+            return None
+        return 50.0
 
-        _recalculate_snapshot_metrics(
-            rows,
-            snapshot_date="2026-02-05",
-            iv_store=iv_store,
-            flow_store=flow_store,
-        )
 
-        row = rows[0]
-        assert row["iv_rank_180d"] != ""
-        assert row["iv_score"] != ""
-        assert row["vol_fluxo_5d"] != ""
-        assert row["num_fluxo_5d"] != ""
-        assert _ptbr_to_float(row["score_total"]) > 0.0
+class _FakeFlowStore:
+    def __init__(self) -> None:
+        self.saved: dict[tuple[str, str], tuple[float | None, float | None]] = {}
 
-        with sqlite3.connect(iv_path) as conn:
-            iv_count = conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM iv_history
-                WHERE underlying = ? AND vencimento = ? AND snapshot_date = ?
-                """,
-                ("PETR4", "20/02/2026", "2026-02-05"),
-            ).fetchone()[0]
-        assert iv_count == 1
+    def averages(self, ticker: str, _snapshot_date: str):
+        if ticker == "PETRA123":
+            return 1000.0, 10.0
+        return None, None
 
-        with sqlite3.connect(flow_path) as conn:
-            flow_count = conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM flow_history
-                WHERE ticker = ? AND snapshot_date = ?
-                """,
-                ("PETRA123", "2026-02-05"),
-            ).fetchone()[0]
-        assert flow_count == 1
-    finally:
-        iv_store.close()
-        flow_store.close()
+    def record_many(self, entries):
+        for ticker, snapshot_date, vol, num in entries:
+            self.saved[(ticker, snapshot_date)] = (vol, num)
 
+
+def test_history_store_target_returns_none_in_postgres_mode() -> None:
+    assert _history_store_target("iv_history.local") is None
+    assert _history_store_target("flow_history.local") is None
+
+
+def test_recalculate_snapshot_metrics_applies_flow_and_iv() -> None:
+    iv_store = _FakeIVStore()
+    flow_store = _FakeFlowStore()
+    rows = [
+        {
+            "ticker": "PETRA123",
+            "underlying": "PETR4",
+            "vencimento": "20/02/2026",
+            "vol_impl_perc": "25,0",
+            "vol_financeiro": "1500,00",
+            "num_neg": "15",
+            "moneyness_score": "2,00",
+            "prob_itm_pct": "55,0",
+            "prob_itm_delta_pct": "45,0",
+            "extrinsic_pct_spot": "2,00",
+            "liquidez_score": "2,00",
+            "theta_score": "1,00",
+            "em2x_score": "2",
+            "dobro_score": "2",
+            "Status_Remoto": "",
+            "score_total": "0,00",
+        }
+    ]
+
+    _recalculate_snapshot_metrics(
+        rows,
+        snapshot_date="2026-02-05",
+        iv_store=iv_store,
+        flow_store=flow_store,
+    )
+
+    row = rows[0]
+    assert row["iv_rank_180d"] != ""
+    assert row["iv_score"] != ""
+    assert row["vol_fluxo_5d"] != ""
+    assert row["num_fluxo_5d"] != ""
+    assert _ptbr_to_float(row["score_total"]) > 0.0

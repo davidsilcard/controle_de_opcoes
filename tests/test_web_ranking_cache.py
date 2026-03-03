@@ -1,8 +1,11 @@
+import pytest
+
 from opcoes import web
 
+pytestmark = pytest.mark.requires_postgres
 
-def test_index_uses_ranking_cache(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_DB_PATH", str(tmp_path / "app.db"))
+
+def test_index_uses_ranking_cache(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_RANKING_CACHE_SECONDS", "60")
 
     calls = {"count": 0}
@@ -28,8 +31,7 @@ def test_index_uses_ranking_cache(monkeypatch, tmp_path) -> None:
     assert calls["count"] == 1
 
 
-def test_index_cache_is_invalidated_after_write_post(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_DB_PATH", str(tmp_path / "app.db"))
+def test_index_cache_is_invalidated_after_write_post(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_RANKING_CACHE_SECONDS", "60")
 
     calls = {"count": 0}
@@ -56,8 +58,7 @@ def test_index_cache_is_invalidated_after_write_post(monkeypatch, tmp_path) -> N
     assert calls["count"] == 2
 
 
-def test_index_cache_is_isolated_by_user(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_DB_PATH", str(tmp_path / "app.db"))
+def test_index_cache_is_isolated_by_user(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_RANKING_CACHE_SECONDS", "60")
 
     calls = {"count": 0}
@@ -87,4 +88,3 @@ def test_index_cache_is_isolated_by_user(monkeypatch, tmp_path) -> None:
 
     # alice = 1 chamada, bob = 1 chamada, alice novamente usa cache.
     assert calls["count"] == 2
-

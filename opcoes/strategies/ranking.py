@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from typing import Any, Dict, List, Mapping
 
 from ..report import ReportData, generate_report
@@ -327,9 +326,9 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             )
         else:
             raise
-    except sqlite3.OperationalError as exc:
+    except Exception as exc:
         # Primeiro acesso: schema ainda não inicializado para snapshots.
-        if "no such table: option_snapshots" in str(exc):
+        if "option_snapshots" in str(exc).lower() and "does not exist" in str(exc).lower():
             data = _build_empty_report_data()
             empty_state_message = (
                 "Ainda não há snapshots para este usuário. "

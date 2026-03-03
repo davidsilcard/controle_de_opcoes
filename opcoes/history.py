@@ -2,25 +2,115 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from .config import get_db_path
-from .scraper.storage import _ensure_parent
+from .config import (
+    get_postgres_schema,
+)
+from .db_health import resolve_postgres_target
 from .utils import infer_option_type, parse_ptbr_number
 
 
-def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    path = Path(db_path or get_db_path())
-    _ensure_parent(path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+class _PgResult:
+    def __init__(
+        self,
+        rows: Optional[list[Mapping[str, Any]]] = None,
+        *,
+        rowcount: int = 0,
+        lastrowid: Optional[int] = None,
+    ) -> None:
+        self._rows = list(rows or [])
+        self.rowcount = int(rowcount or 0)
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _DbConn:
+    def __init__(self, *, raw_conn: Any, pg_row_factory: Any = None) -> None:
+        self.backend = "postgres"
+        self._raw_conn = raw_conn
+        self._pg_row_factory = pg_row_factory
+
+    def execute(self, query: str, params: Sequence[object] = ()):
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor(row_factory=self._pg_row_factory) as cur:
+            cur.execute(query_pg, tuple(params))
+            rowcount = int(cur.rowcount or 0)
+            if cur.description is None:
+                return _PgResult([], rowcount=rowcount)
+            rows = cur.fetchall()
+            return _PgResult(rows, rowcount=rowcount)
+
+    def executemany(self, query: str, params_seq: Sequence[Sequence[object]]) -> None:
+        query_pg = query.replace("%", "%%").replace("?", "%s")
+        with self._raw_conn.cursor() as cur:
+            cur.executemany(query_pg, params_seq)
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def close(self) -> None:
+        self._raw_conn.close()
+
+
+def _quote_ident(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _connect_postgres() -> _DbConn:
+    target, errors = resolve_postgres_target()
+    if target is None:
+        reasons = "; ".join(errors) if errors else "configuração ausente"
+        raise RuntimeError(f"PostgreSQL não configurado: {reasons}")
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except Exception as exc:
+        raise RuntimeError(
+            "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
+        ) from exc
+
+    schema = get_postgres_schema()
+    raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
+    with raw_conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        cur.execute(f"SET search_path TO {_quote_ident(schema)}")
+    conn = _DbConn(raw_conn=raw_conn, pg_row_factory=dict_row)
     _ensure_tables(conn)
     return conn
 
 
-def _ensure_tables(conn: sqlite3.Connection) -> None:
+def _connect(db_path: Optional[Path] = None) -> _DbConn:
+    if db_path is not None:
+        raise RuntimeError(
+            "SQLite legado removido: history não suporta mais db_path por arquivo."
+        )
+    return _connect_postgres()
+
+
+def _table_exists(conn: _DbConn, table: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = current_schema()
+          AND table_name = ?
+        LIMIT 1
+        """,
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_tables(conn: _DbConn) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ranking_entries (
@@ -31,14 +121,14 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             option_type TEXT,
             vencimento TEXT,
             dias_uteis INTEGER,
-            score_total REAL,
-            best_bid REAL,
-            best_ask REAL,
-            preco_teorico REAL,
-            ultimo REAL,
-            vol_impl_perc REAL,
-            iv_rank_180d REAL,
-            underlying_price REAL,
+            score_total DOUBLE PRECISION,
+            best_bid DOUBLE PRECISION,
+            best_ask DOUBLE PRECISION,
+            preco_teorico DOUBLE PRECISION,
+            ultimo DOUBLE PRECISION,
+            vol_impl_perc DOUBLE PRECISION,
+            iv_rank_180d DOUBLE PRECISION,
+            underlying_price DOUBLE PRECISION,
             extras TEXT,
             PRIMARY KEY (snapshot_date, category, ticker)
         )
@@ -49,37 +139,48 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS ranking_runs (
             snapshot_date TEXT PRIMARY KEY,
             params TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS decisions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
             snapshot_date TEXT NOT NULL,
             ticker TEXT NOT NULL,
             underlying TEXT,
             option_type TEXT,
             vencimento TEXT,
             dias_uteis INTEGER,
-            strike REAL,
-            best_bid REAL,
-            best_ask REAL,
-            ultimo REAL,
-            preco_teorico REAL,
-            score_total REAL,
-            vol_impl_perc REAL,
-            iv_rank_180d REAL,
-            underlying_price REAL,
+            strike DOUBLE PRECISION,
+            best_bid DOUBLE PRECISION,
+            best_ask DOUBLE PRECISION,
+            ultimo DOUBLE PRECISION,
+            preco_teorico DOUBLE PRECISION,
+            score_total DOUBLE PRECISION,
+            vol_impl_perc DOUBLE PRECISION,
+            iv_rank_180d DOUBLE PRECISION,
+            underlying_price DOUBLE PRECISION,
             underlying_price_date TEXT,
             raw_row TEXT,
             notes TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
     conn.commit()
+
+
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, Mapping):
+        return dict(row)
+    try:
+        return dict(row)
+    except Exception:
+        return {}
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -102,91 +203,110 @@ def record_ranking_entries(
     """Grava listas de ranking (top/racional/loteria/teórica) por data."""
 
     conn = _connect(db_path)
-    if params is not None:
-        try:
+    try:
+        if params is not None:
+            params_json = json.dumps(params, ensure_ascii=False)
             conn.execute(
-                "INSERT OR REPLACE INTO ranking_runs (snapshot_date, params) VALUES (?, ?)",
-                (snapshot_date, json.dumps(params)),
+                """
+                INSERT INTO ranking_runs (snapshot_date, params)
+                VALUES (?, ?)
+                ON CONFLICT (snapshot_date) DO UPDATE SET
+                    params = EXCLUDED.params
+                """,
+                (snapshot_date, params_json),
             )
-        except Exception:
-            pass
 
-    payload: List[Tuple] = []
-    extra_keys = [
-        "Status_Moneyness",
-        "Status_Liquidez",
-        "Status_2x",
-        "Status_Remoto",
-        "breakeven_price",
-        "breakeven_dist_pct",
-        "prob_itm_pct",
-        "prob_itm_delta_pct",
-        "prob_be_pct",
-        "custo_pct",
-        "extrinsic_value",
-        "extrinsic_pct_spot",
-        "spread_pct",
-        "iv_hv_spread",
-    ]
+        payload: List[Tuple] = []
+        extra_keys = [
+            "Status_Moneyness",
+            "Status_Liquidez",
+            "Status_2x",
+            "Status_Remoto",
+            "breakeven_price",
+            "breakeven_dist_pct",
+            "prob_itm_pct",
+            "prob_itm_delta_pct",
+            "prob_be_pct",
+            "custo_pct",
+            "extrinsic_value",
+            "extrinsic_pct_spot",
+            "spread_pct",
+            "iv_hv_spread",
+        ]
 
-    for category, rows in categories.items():
-        for r in rows:
-            ticker = str(r.get("ticker") or "").strip().upper()
-            if not ticker:
-                continue
-            underlying = (r.get("underlying") or "").strip().upper() or None
-            venc = (r.get("vencimento") or "").strip() or None
-            dias_uteis = None
-            try:
-                dias_uteis = int(r.get("dias_uteis")) if r.get("dias_uteis") is not None else None
-            except Exception:
+        for category, rows in categories.items():
+            for r in rows:
+                ticker = str(r.get("ticker") or "").strip().upper()
+                if not ticker:
+                    continue
+                underlying = (r.get("underlying") or "").strip().upper() or None
+                venc = (r.get("vencimento") or "").strip() or None
                 dias_uteis = None
-            opt_type = (r.get("option_type") or infer_option_type(ticker) or "").upper() or None
+                try:
+                    dias_uteis = int(r.get("dias_uteis")) if r.get("dias_uteis") is not None else None
+                except Exception:
+                    dias_uteis = None
+                opt_type = (r.get("option_type") or infer_option_type(ticker) or "").upper() or None
 
-            extras: Dict[str, Any] = {}
-            for key in extra_keys:
-                val = r.get(key)
-                parsed = _parse_float(val)
-                extras[key] = parsed if parsed is not None else (val if val not in ("", None) else None)
-            extras_clean = {k: v for k, v in extras.items() if v not in (None, "")}
-            extras_json = json.dumps(extras_clean, ensure_ascii=False) if extras_clean else None
+                extras: Dict[str, Any] = {}
+                for key in extra_keys:
+                    val = r.get(key)
+                    parsed = _parse_float(val)
+                    extras[key] = parsed if parsed is not None else (val if val not in ("", None) else None)
+                extras_clean = {k: v for k, v in extras.items() if v not in (None, "")}
+                extras_json = json.dumps(extras_clean, ensure_ascii=False) if extras_clean else None
 
-            payload.append(
-                (
-                    snapshot_date,
-                    category,
-                    ticker,
-                    underlying,
-                    opt_type,
-                    venc,
-                    dias_uteis,
-                    _parse_float(r.get("score_total")),
-                    _parse_float(r.get("best_bid")),
-                    _parse_float(r.get("best_ask")),
-                    _parse_float(r.get("preco_teorico")),
-                    _parse_float(r.get("ultimo")),
-                    _parse_float(r.get("vol_impl_perc")),
-                    _parse_float(r.get("iv_rank_180d")),
-                    _parse_float(r.get("underlying_price")),
-                    extras_json,
+                payload.append(
+                    (
+                        snapshot_date,
+                        category,
+                        ticker,
+                        underlying,
+                        opt_type,
+                        venc,
+                        dias_uteis,
+                        _parse_float(r.get("score_total")),
+                        _parse_float(r.get("best_bid")),
+                        _parse_float(r.get("best_ask")),
+                        _parse_float(r.get("preco_teorico")),
+                        _parse_float(r.get("ultimo")),
+                        _parse_float(r.get("vol_impl_perc")),
+                        _parse_float(r.get("iv_rank_180d")),
+                        _parse_float(r.get("underlying_price")),
+                        extras_json,
+                    )
                 )
-            )
 
-    if payload:
-        conn.executemany(
-            """
-            INSERT OR REPLACE INTO ranking_entries (
-                snapshot_date, category, ticker, underlying, option_type,
-                vencimento, dias_uteis, score_total, best_bid, best_ask,
-                preco_teorico, ultimo, vol_impl_perc, iv_rank_180d,
-                underlying_price, extras
+        if payload:
+            conn.executemany(
+                """
+                INSERT INTO ranking_entries (
+                    snapshot_date, category, ticker, underlying, option_type,
+                    vencimento, dias_uteis, score_total, best_bid, best_ask,
+                    preco_teorico, ultimo, vol_impl_perc, iv_rank_180d,
+                    underlying_price, extras
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date, category, ticker) DO UPDATE SET
+                    underlying = EXCLUDED.underlying,
+                    option_type = EXCLUDED.option_type,
+                    vencimento = EXCLUDED.vencimento,
+                    dias_uteis = EXCLUDED.dias_uteis,
+                    score_total = EXCLUDED.score_total,
+                    best_bid = EXCLUDED.best_bid,
+                    best_ask = EXCLUDED.best_ask,
+                    preco_teorico = EXCLUDED.preco_teorico,
+                    ultimo = EXCLUDED.ultimo,
+                    vol_impl_perc = EXCLUDED.vol_impl_perc,
+                    iv_rank_180d = EXCLUDED.iv_rank_180d,
+                    underlying_price = EXCLUDED.underlying_price,
+                    extras = EXCLUDED.extras
+                """,
+                payload,
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            payload,
-        )
         conn.commit()
-    conn.close()
+    finally:
+        conn.close()
 
 
 def record_decision(
@@ -200,10 +320,14 @@ def record_decision(
 
     conn = _connect(db_path)
     try:
+        if not _table_exists(conn, "option_snapshots"):
+            return None
+
+        normalized_ticker = ticker.strip().upper()
         if snapshot_date:
             row = conn.execute(
                 "SELECT * FROM option_snapshots WHERE ticker = ? AND snapshot_date = ? LIMIT 1",
-                (ticker.strip().upper(), snapshot_date),
+                (normalized_ticker, snapshot_date),
             ).fetchone()
         else:
             row = conn.execute(
@@ -214,11 +338,11 @@ def record_decision(
                 ORDER BY snapshot_date DESC
                 LIMIT 1
                 """,
-                (ticker.strip().upper(),),
+                (normalized_ticker,),
             ).fetchone()
         if not row:
             return None
-        data = dict(row)
+        data = _row_to_dict(row)
         snap_date = data.get("snapshot_date")
         venc = data.get("vencimento")
         dias_uteis = None
@@ -229,7 +353,7 @@ def record_decision(
 
         payload = (
             snap_date,
-            ticker.strip().upper(),
+            normalized_ticker,
             (data.get("underlying") or "").strip().upper() or None,
             (data.get("option_type") or infer_option_type(ticker) or "").upper() or None,
             venc,
@@ -247,8 +371,8 @@ def record_decision(
             json.dumps(data, ensure_ascii=False),
             notes,
         )
-        cur = conn.cursor()
-        cur.execute(
+
+        cur = conn.execute(
             """
             INSERT INTO decisions (
                 snapshot_date, ticker, underlying, option_type, vencimento,
@@ -256,26 +380,36 @@ def record_decision(
                 score_total, vol_impl_perc, iv_rank_180d, underlying_price,
                 underlying_price_date, raw_row, notes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             payload,
         )
+        inserted = cur.fetchone()
         conn.commit()
-        return int(cur.lastrowid)
+        if inserted is None:
+            return None
+        if isinstance(inserted, Mapping):
+            return int(inserted.get("id"))
+        return int(inserted[0])
     finally:
         conn.close()
 
 
 def list_decisions(*, limit: Optional[int] = None, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
     conn = _connect(db_path)
-    query = "SELECT * FROM decisions ORDER BY created_at DESC, id DESC"
-    if limit is not None and limit > 0:
-        query += " LIMIT ?"
-        params: Tuple[Any, ...] = (limit,)
-    else:
-        params = ()
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        if not _table_exists(conn, "decisions"):
+            return []
+        query = "SELECT * FROM decisions ORDER BY created_at DESC, id DESC"
+        if limit is not None and limit > 0:
+            query += " LIMIT ?"
+            params: Tuple[Any, ...] = (limit,)
+        else:
+            params = ()
+        rows = conn.execute(query, params).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def cleanup_history(
@@ -293,55 +427,91 @@ def cleanup_history(
     removed: Dict[str, int] = {"ranking_entries": 0, "ranking_runs": 0, "option_snapshots": 0, "underlying_snapshots": 0}
 
     conn = _connect(db_path)
-    cur = conn.cursor()
+    try:
+        if _table_exists(conn, "ranking_runs"):
+            run_del = conn.execute("DELETE FROM ranking_runs WHERE snapshot_date < ?", (cutoff_iso,))
+            removed["ranking_runs"] = int(run_del.rowcount or 0)
 
-    cur.execute("DELETE FROM ranking_runs WHERE snapshot_date < ?", (cutoff_iso,))
-    removed["ranking_runs"] = cur.rowcount if cur.rowcount is not None else 0
+        if _table_exists(conn, "ranking_entries"):
+            entry_del = conn.execute("DELETE FROM ranking_entries WHERE snapshot_date < ?", (cutoff_iso,))
+            removed["ranking_entries"] = int(entry_del.rowcount or 0)
 
-    cur.execute("DELETE FROM ranking_entries WHERE snapshot_date < ?", (cutoff_iso,))
-    removed["ranking_entries"] = cur.rowcount if cur.rowcount is not None else 0
+            rows = conn.execute(
+                "SELECT snapshot_date, category, ticker, vencimento FROM ranking_entries WHERE vencimento IS NOT NULL"
+            ).fetchall()
+            to_delete: List[Tuple[str, str, str]] = []
+            for r in rows:
+                data = _row_to_dict(r)
+                venc = str(data.get("vencimento") or "").strip()
+                try:
+                    venc_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
+                except Exception:
+                    continue
+                if venc_date < today:
+                    to_delete.append(
+                        (
+                            str(data.get("snapshot_date") or ""),
+                            str(data.get("category") or ""),
+                            str(data.get("ticker") or ""),
+                        )
+                    )
+            if to_delete:
+                conn.executemany(
+                    """
+                    DELETE FROM ranking_entries
+                    WHERE snapshot_date = ? AND category = ? AND ticker = ?
+                    """,
+                    to_delete,
+                )
+                removed["ranking_entries"] += len(to_delete)
 
-    # Remove ranking_entries vencidos (vencimento < hoje)
-    cur.execute("SELECT rowid, vencimento FROM ranking_entries WHERE vencimento IS NOT NULL")
-    rows = cur.fetchall()
-    to_delete = []
-    for r in rows:
-        venc = (r[1] or "").strip()
-        try:
-            venc_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
-        except Exception:
-            continue
-        if venc_date < today:
-            to_delete.append(r[0])
-    if to_delete:
-        cur.executemany("DELETE FROM ranking_entries WHERE rowid = ?", [(rid,) for rid in to_delete])
-        removed["ranking_entries"] += len(to_delete)
+        if purge_snapshots:
+            if _table_exists(conn, "option_snapshots"):
+                snap_del = conn.execute(
+                    "DELETE FROM option_snapshots WHERE snapshot_date < ?",
+                    (cutoff_iso,),
+                )
+                removed["option_snapshots"] = int(snap_del.rowcount or 0)
+            if _table_exists(conn, "underlying_snapshots"):
+                und_del = conn.execute(
+                    "DELETE FROM underlying_snapshots WHERE snapshot_date < ?",
+                    (cutoff_iso,),
+                )
+                removed["underlying_snapshots"] = int(und_del.rowcount or 0)
 
-    if purge_snapshots:
-        cur.execute("DELETE FROM option_snapshots WHERE snapshot_date < ?", (cutoff_iso,))
-        removed["option_snapshots"] = cur.rowcount if cur.rowcount is not None else 0
-        cur.execute("DELETE FROM underlying_snapshots WHERE snapshot_date < ?", (cutoff_iso,))
-        removed["underlying_snapshots"] = cur.rowcount if cur.rowcount is not None else 0
+            if _table_exists(conn, "option_snapshots"):
+                rows = conn.execute(
+                    "SELECT snapshot_date, ticker, vencimento FROM option_snapshots WHERE vencimento IS NOT NULL"
+                ).fetchall()
+                to_delete_snap: List[Tuple[str, str]] = []
+                for r in rows:
+                    data = _row_to_dict(r)
+                    venc = str(data.get("vencimento") or "").strip()
+                    try:
+                        venc_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
+                    except Exception:
+                        continue
+                    if venc_date < today:
+                        to_delete_snap.append(
+                            (
+                                str(data.get("snapshot_date") or ""),
+                                str(data.get("ticker") or ""),
+                            )
+                        )
+                if to_delete_snap:
+                    conn.executemany(
+                        """
+                        DELETE FROM option_snapshots
+                        WHERE snapshot_date = ? AND ticker = ?
+                        """,
+                        to_delete_snap,
+                    )
+                    removed["option_snapshots"] += len(to_delete_snap)
 
-        # Remove opções vencidas
-        cur.execute("SELECT rowid, vencimento FROM option_snapshots WHERE vencimento IS NOT NULL")
-        rows = cur.fetchall()
-        to_delete = []
-        for r in rows:
-            venc = (r[1] or "").strip()
-            try:
-                venc_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
-            except Exception:
-                continue
-            if venc_date < today:
-                to_delete.append(r[0])
-        if to_delete:
-            cur.executemany("DELETE FROM option_snapshots WHERE rowid = ?", [(rid,) for rid in to_delete])
-            removed["option_snapshots"] += len(to_delete)
-
-    conn.commit()
-    conn.close()
-    return removed
+        conn.commit()
+        return removed
+    finally:
+        conn.close()
 
 
 __all__ = [

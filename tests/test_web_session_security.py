@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from opcoes.auth import create_user
 from opcoes.web import create_app
+
+pytestmark = pytest.mark.requires_postgres
 
 
 def _login(client, username: str, password: str = "SenhaForte123!") -> None:
@@ -14,9 +18,7 @@ def _login(client, username: str, password: str = "SenhaForte123!") -> None:
     assert resp.status_code in (302, 303)
 
 
-def test_session_expires_after_inactivity(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_AUTH_DB_PATH", str(tmp_path / "auth.db"))
-    monkeypatch.setenv("OPCOES_USERS_DB_DIR", str(tmp_path / "users"))
+def test_session_expires_after_inactivity(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
     monkeypatch.setenv("OPCOES_SESSION_IDLE_MINUTES", "15")
 
@@ -38,9 +40,7 @@ def test_session_expires_after_inactivity(monkeypatch, tmp_path) -> None:
         assert "username" not in sess
 
 
-def test_session_is_renewed_while_user_is_active(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_AUTH_DB_PATH", str(tmp_path / "auth.db"))
-    monkeypatch.setenv("OPCOES_USERS_DB_DIR", str(tmp_path / "users"))
+def test_session_is_renewed_while_user_is_active(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
     monkeypatch.setenv("OPCOES_SESSION_IDLE_MINUTES", "15")
 
@@ -61,9 +61,7 @@ def test_session_is_renewed_while_user_is_active(monkeypatch, tmp_path) -> None:
     assert refreshed_ts > old_ts
 
 
-def test_new_browser_instance_requires_login_again(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPCOES_AUTH_DB_PATH", str(tmp_path / "auth.db"))
-    monkeypatch.setenv("OPCOES_USERS_DB_DIR", str(tmp_path / "users"))
+def test_new_browser_instance_requires_login_again(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
 
     create_user(username="alice", password="SenhaForte123!")

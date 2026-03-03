@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import math
-import sqlite3
 import statistics
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import quant
-from .scraper.storage import CSV_FIELDS, _ensure_parent
+from .scraper.storage import CSV_FIELDS
 from .config import (
-    get_data_backend,
-    get_db_path,
     get_postgres_schema,
-    is_postgres_strict_mode,
 )
 from .db_health import resolve_postgres_target
 from .portfolio import list_positions
@@ -39,8 +35,6 @@ class _ReportConnection:
         self._pg_row_factory = pg_row_factory
 
     def execute(self, query: str, params: Sequence[object] = ()):
-        if self.backend == "sqlite":
-            return self._conn.execute(query, tuple(params))
         query_pg = _qmark_to_pyformat(query)
         with self._conn.cursor(row_factory=self._pg_row_factory) as cur:
             cur.execute(query_pg, tuple(params))
@@ -264,15 +258,6 @@ def _generate_report_from_conn(
     )
 
 
-def _connect_sqlite() -> _ReportConnection:
-    db_path = get_db_path()
-    _ensure_parent(db_path)
-    sqlite_conn = sqlite3.connect(db_path)
-    sqlite_conn.row_factory = sqlite3.Row
-    _ensure_snapshot_columns(sqlite_conn)
-    return _ReportConnection(backend="sqlite", conn=sqlite_conn)
-
-
 def _connect_postgres() -> _ReportConnection:
     target, errors = resolve_postgres_target()
     if target is None:
@@ -295,40 +280,7 @@ def _connect_postgres() -> _ReportConnection:
 
 
 def _connect() -> _ReportConnection:
-    backend = get_data_backend()
-    if backend == "postgres":
-        try:
-            return _connect_postgres()
-        except Exception:
-            if is_postgres_strict_mode():
-                raise
-            return _connect_sqlite()
-    return _connect_sqlite()
-
-
-def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
-    """Garante compatibilidade do schema de option_snapshots com o CSV_FIELDS atual."""
-
-    try:
-        exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='option_snapshots' LIMIT 1"
-        ).fetchone()
-    except Exception:
-        return
-    if not exists:
-        return
-
-    existing = {
-        row[1]
-        for row in conn.execute('PRAGMA table_info("option_snapshots")').fetchall()
-        if row and len(row) > 1
-    }
-    missing = [col for col in CSV_FIELDS if col not in existing]
-    if not missing:
-        return
-    for col in missing:
-        conn.execute(f'ALTER TABLE "option_snapshots" ADD COLUMN "{col}" TEXT')
-    conn.commit()
+    return _connect_postgres()
 
 
 def _latest_snapshot_date(conn: _ReportConnection) -> Optional[str]:

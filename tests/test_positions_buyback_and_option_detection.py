@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import re
+import pytest
 
 from opcoes import finance, portfolio
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
 
+pytestmark = pytest.mark.requires_postgres
 
-def _ensure_snapshot_tables(db_path) -> None:
-    snap = SnapshotDB(db_path)
+
+def _ensure_snapshot_tables() -> None:
+    snap = SnapshotDB()
     snap.close()
 
 
@@ -51,10 +54,8 @@ def _buyback_txs(position_id: int):
     ]
 
 
-def test_closing_short_option_creates_buyback_tx_and_is_idempotent(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "buyback_sync.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_closing_short_option_creates_buyback_tx_and_is_idempotent() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="WIZCB103",
@@ -105,10 +106,8 @@ def test_closing_short_option_creates_buyback_tx_and_is_idempotent(monkeypatch, 
     assert _buyback_txs(pos_id) == []
 
 
-def test_stock_with_mismatched_underlying_is_not_treated_as_option(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "stock_not_option.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_stock_with_mismatched_underlying_is_not_treated_as_option() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="WICZ3",
@@ -132,10 +131,8 @@ def test_stock_with_mismatched_underlying_is_not_treated_as_option(monkeypatch, 
     assert f"/positions/recalc-premium/{pos_id}" not in html
 
 
-def test_update_position_allows_underlying_edit_and_autofill_for_stock(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "positions_underlying_update.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_update_position_allows_underlying_edit_and_autofill_for_stock() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="HYPE3",
@@ -202,10 +199,8 @@ def test_update_position_allows_underlying_edit_and_autofill_for_stock(monkeypat
     assert portfolio.get_position(pos_id)["underlying"] == "HYPE4"
 
 
-def test_migration_fills_blank_underlying_for_stock_positions(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "positions_underlying_migration.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_migration_fills_blank_underlying_for_stock_positions() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="BBSE3",
@@ -222,10 +217,8 @@ def test_migration_fills_blank_underlying_for_stock_positions(monkeypatch, tmp_p
     assert pos["underlying"] == "BBSE3"
 
 
-def test_register_premium_ignores_non_option_ticker(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "register_ignore_non_option.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_register_premium_ignores_non_option_ticker() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="WICZ3",
@@ -249,10 +242,8 @@ def test_register_premium_ignores_non_option_ticker(monkeypatch, tmp_path) -> No
     assert linked == []
 
 
-def test_audit_shows_operational_net_with_buyback(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "audit_operational_cash.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-    _ensure_snapshot_tables(db_path)
+def test_audit_shows_operational_net_with_buyback() -> None:
+    _ensure_snapshot_tables()
 
     pos_id = portfolio.add_position(
         ticker="WIZCB103",

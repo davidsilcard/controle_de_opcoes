@@ -78,9 +78,8 @@ def test_resolve_postgres_target_from_legacy_env(monkeypatch) -> None:
     assert "***" in target.redacted_dsn
 
 
-def test_run_db_check_without_postgres_configuration(monkeypatch, tmp_path) -> None:
+def test_run_db_check_without_postgres_configuration(monkeypatch) -> None:
     _clear_postgres_env(monkeypatch)
-    monkeypatch.setenv("OPCOES_DB_PATH", str(tmp_path / "app.db"))
 
     report = run_db_check(timeout_seconds=0.1)
 

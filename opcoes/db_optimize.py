@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from .db_health import resolve_postgres_target
-from .db_migration import sanitize_schema_name
 
 
 def _quote_ident(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
+
+
+def sanitize_schema_name(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9_]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text:
+        return "public"
+    if text[0].isdigit():
+        text = f"u_{text}"
+    return text[:63]
 
 
 def optimize_postgres_schema(
@@ -77,4 +88,3 @@ def optimize_postgres_schema(
 
 
 __all__ = ["optimize_postgres_schema"]
-

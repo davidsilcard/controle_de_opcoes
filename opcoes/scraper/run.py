@@ -45,7 +45,6 @@ from .far_expirations import fetch_far_expiration_quotes
 from ..utils import infer_option_type, format_decimal as _format_decimal
 from .. import quant
 from .health import check_health
-from ..config import get_db_path
 
 
 # Número de vencimentos a selecionar no filtro da tela.
@@ -54,13 +53,8 @@ MAX_VENCIMENTOS: Optional[int] = None
 PROCESSING_OVERLAY = "#tblListaOpc_processing"
 
 
-def _history_store_path(filename: str) -> Path:
-    """Resolve arquivos auxiliares ao lado do DB principal para evitar contexto misto."""
-
-    db_path = get_db_path().expanduser()
-    if not db_path.is_absolute():
-        db_path = (Path.cwd() / db_path).resolve()
-    return db_path.parent / filename
+def _history_store_target(filename: str) -> Optional[Path]:
+    return None
 
 
 def _normalize_symbol_list(symbols: Sequence[str]) -> List[str]:
@@ -276,14 +270,16 @@ async def scrape_all(
         if resume_snapshot_date:
             snapshot_date = resume_snapshot_date
         iv_store: Optional[IVRankStore] = None
+        iv_store_path = _history_store_target("iv_history.db")
         try:
-            iv_store = IVRankStore(_history_store_path("iv_history.db"))
+            iv_store = IVRankStore(iv_store_path)
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou inicializar histórico de IV: {exc}")
             iv_store = None
         flow_store: Optional[FlowStore] = None
+        flow_store_path = _history_store_target("flow_history.db")
         try:
-            flow_store = FlowStore(_history_store_path("flow_history.db"))
+            flow_store = FlowStore(flow_store_path)
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou histórico de fluxo: {exc}")
             flow_store = None

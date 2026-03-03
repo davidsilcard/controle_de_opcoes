@@ -64,7 +64,11 @@ uv run python -m opcoes.cli scrape \
 O scraper usa:
 
 - PostgreSQL para snapshots e dados funcionais.
+- PostgreSQL também para os históricos de métricas (`iv_history` e `flow_history`).
 - arquivo local de checkpoint (`.checkpoint.json`) apenas para retomada de execução.
+
+Com isso, o runtime oficial não deve mais criar `iv_history.db`/`flow_history.db`.
+Persistências de ranking/decisão e cálculo fiscal (DARF) também rodam no backend principal (PostgreSQL).
 
 ### Exportar snapshot para CSV
 
@@ -118,12 +122,6 @@ uv run python -m opcoes.cli user create --username admin
 uv run python -m opcoes.cli user list
 ```
 
-Migrar usuários legados do `auth.db` para PostgreSQL:
-
-```bash
-uv run python -m opcoes.cli user migrate-auth-sqlite --source-db data/auth.db
-```
-
 ## Variáveis de ambiente relevantes
 
 - `DATABASE_URL`
@@ -132,8 +130,6 @@ uv run python -m opcoes.cli user migrate-auth-sqlite --source-db data/auth.db
 - `OPCOES_AUTH_SCHEMA` (schema da autenticação web; default: `auth`)
 - `OPCOES_SECRET_KEY`
 - `OPCOES_AUTH_ENABLED`
-- `OPCOES_AUTH_LEGACY_DB_PATH` (somente migração do legado SQLite)
-- `OPCOES_USERS_DB_DIR`
 - `OPCOES_ADMIN_USER`
 - `OPCOES_ADMIN_PASSWORD`
 - `OPCOES_ADMIN_REPLACE_PASSWORD`
@@ -149,6 +145,8 @@ uv run python -m opcoes.cli user migrate-auth-sqlite --source-db data/auth.db
 uv run pytest -q
 ```
 
+Observação: testes marcados com `requires_postgres` são pulados automaticamente quando não há `DATABASE_URL`/`POSTGRES_*` configurado.
+
 E2E opcional:
 
 ```bash
@@ -161,5 +159,10 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - `snapshot export` usa o backend ativo da aplicação.
 - backfill pós-scrape grava no mesmo backend principal.
 - checkpoint do scraper migrado para arquivo JSON local de retomada.
+- históricos auxiliares do scraper (`iv_history` e `flow_history`) migrados para tabelas no PostgreSQL.
+- histórico de ranking/decisões (`history`) e apuração fiscal (`tax`) migrados para fluxo PostgreSQL.
+- comandos e módulos legados de migração/backup SQLite removidos da CLI.
 - mensagens de execução atualizadas para deixar claro onde os dados são persistidos.
-- autenticação web migrada para PostgreSQL (`auth.web_users`) com comando de import do `auth.db` legado.
+- autenticação web migrada para PostgreSQL (`auth.web_users`).
+- runtime sem suporte a `db_path`/`OPCOES_DB_PATH` e sem diretórios de usuário por arquivo (`OPCOES_USERS_DB_DIR`).
+- testes legados acoplados a SQLite removidos/ajustados; integração de banco agora usa marcador `requires_postgres`.

@@ -1,34 +1,49 @@
 from __future__ import annotations
 
-from opcoes import portfolio
 from opcoes.tax import compute_tax
 
 
-def _create_closed_position(*, is_simulated: bool, exit_price: float) -> int:
-    pos_id = portfolio.add_position(
-        ticker="ABCDM100",
-        underlying="ABCD3",
-        trade_date="2026-01-05",
-        qty=10,
-        entry_price=10.0,
-        fees=0.0,
-        trade_type="swing",
-        is_simulated=is_simulated,
-    )
-    portfolio.close_position(
-        position_id=pos_id,
-        exit_date="2026-01-20",
-        exit_price=exit_price,
-    )
-    return pos_id
+def test_compute_tax_filters_real_and_simulated(monkeypatch) -> None:
+    rows = [
+        {
+            "trade_type": "swing",
+            "trade_date": "2026-01-05",
+            "qty": 10,
+            "entry_price": 10.0,
+            "fees": 0.0,
+            "partial_date": None,
+            "partial_price": None,
+            "partial_qty": 0,
+            "exit_date": "2026-01-20",
+            "exit_price": 12.0,
+            "irrf": 0.0,
+            "side": "long",
+            "is_simulated": False,
+        },
+        {
+            "trade_type": "swing",
+            "trade_date": "2026-01-05",
+            "qty": 10,
+            "entry_price": 10.0,
+            "fees": 0.0,
+            "partial_date": None,
+            "partial_price": None,
+            "partial_qty": 0,
+            "exit_date": "2026-01-20",
+            "exit_price": 13.0,
+            "irrf": 0.0,
+            "side": "long",
+            "is_simulated": True,
+        },
+    ]
 
+    def _fake_list_positions(*, include_closed: bool, is_simulated=None, **_kwargs):
+        assert include_closed is True
+        if is_simulated is None:
+            return rows
+        return [r for r in rows if bool(r.get("is_simulated")) is bool(is_simulated)]
 
-def test_compute_tax_filters_real_and_simulated(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "tax.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
-    _create_closed_position(is_simulated=False, exit_price=12.0)  # +20
-    _create_closed_position(is_simulated=True, exit_price=13.0)   # +30
+    monkeypatch.setattr("opcoes.tax.list_positions", _fake_list_positions)
 
     real = compute_tax(month=1, year=2026, is_simulated=False)
     simulated = compute_tax(month=1, year=2026, is_simulated=True)

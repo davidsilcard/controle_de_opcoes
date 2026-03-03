@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from opcoes import darf, finance
 from opcoes.web import create_app
 
+pytestmark = pytest.mark.requires_postgres
 
-def test_darf_generate_and_pay_does_not_change_cash(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "darf_flow.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
 
+def test_darf_generate_and_pay_does_not_change_cash() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
@@ -69,10 +70,7 @@ def test_darf_generate_and_pay_does_not_change_cash(monkeypatch, tmp_path) -> No
     assert abs(balance_after_pay - balance_before) < 1e-6
 
 
-def test_darf_simulated_mode(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "darf_sim.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_darf_simulated_mode() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
@@ -105,4 +103,3 @@ def test_darf_simulated_mode(monkeypatch, tmp_path) -> None:
     rec = darf.get_month(period="2025-01", is_simulated=True)
     assert rec is not None
     assert abs(rec.amount - 20.0) < 1e-6
-

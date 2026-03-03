@@ -2,14 +2,13 @@ import argparse
 import asyncio
 import datetime as dt
 import getpass
+import re
 from pathlib import Path
 from typing import List, Optional
 
 from .auth import (
     create_user,
     list_users,
-    migrate_auth_from_legacy_sqlite,
-    migrate_legacy_user_data,
 )
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
@@ -18,19 +17,8 @@ from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
-from .db_backup import (
-    create_sqlite_backup as create_legacy_backup,
-    restore_sqlite_backup as restore_legacy_backup,
-)
 from .db_health import is_postgres_ready, run_db_check
-from .db_cutover import run_cutover_ready_check
 from .db_optimize import optimize_postgres_schema
-from .db_migration import (
-    migrate_sqlite_sources_to_postgres as migrate_legacy_sources_to_postgres,
-    resolve_user_source_databases,
-    sanitize_schema_name,
-    verify_sqlite_sources_in_postgres as verify_legacy_sources_in_postgres,
-)
 from .fundamentus import (
     FundamentusFilterConfig,
     apply_filters,
@@ -44,6 +32,17 @@ from .history import (
     record_ranking_entries,
 )
 from .runtime_env import load_dotenv_once
+
+
+def sanitize_schema_name(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9_]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text:
+        return "public"
+    if text[0].isdigit():
+        text = f"u_{text}"
+    return text[:63]
 
 
 def parse_args() -> argparse.Namespace:
@@ -362,51 +361,6 @@ def parse_args() -> argparse.Namespace:
         help="Inclui usuários inativos.",
     )
 
-    uc_auth_migrate = ucs.add_parser(
-        "migrate-auth-sqlite",
-        help="Migra usuários do auth.db legado (SQLite) para PostgreSQL",
-    )
-    uc_auth_migrate.add_argument(
-        "--source-db",
-        type=Path,
-        default=Path("data/auth.db"),
-        help="Arquivo legado de usuários (default: data/auth.db).",
-    )
-    uc_auth_migrate.add_argument(
-        "--replace",
-        action="store_true",
-        help="Atualiza senha/status quando usuário já existir no PostgreSQL.",
-    )
-
-    uc_migrate = ucs.add_parser(
-        "migrate-legacy",
-        help="Vincula dados legados (single-user) para um usuário específico",
-    )
-    uc_migrate.add_argument("--username", required=True, help="Usuário de destino.")
-    uc_migrate.add_argument(
-        "--source-db",
-        type=Path,
-        default=Path("data/opcoes_snapshots.db"),
-        help="Banco legado principal (default: data/opcoes_snapshots.db).",
-    )
-    uc_migrate.add_argument(
-        "--source-iv-db",
-        type=Path,
-        default=None,
-        help="Banco legado de IV (default: mesmo diretório do source-db/iv_history.db).",
-    )
-    uc_migrate.add_argument(
-        "--source-flow-db",
-        type=Path,
-        default=None,
-        help="Banco legado de fluxo (default: mesmo diretório do source-db/flow_history.db).",
-    )
-    uc_migrate.add_argument(
-        "--force",
-        action="store_true",
-        help="Sobrescreve destino se já tiver dados, criando backup automático.",
-    )
-
     dbc = sub.add_parser("db", help="Diagnóstico de banco de dados")
     dbs = dbc.add_subparsers(dest="subcmd", required=True)
     db_check = dbs.add_parser(
@@ -417,163 +371,6 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=5.0,
         help="Timeout em segundos para teste de rede/SQL (default: 5).",
-    )
-    db_migrate = dbs.add_parser(
-        "migrate",
-        help="Migra dados legados para PostgreSQL (schema por usuário).",
-    )
-    db_migrate.add_argument(
-        "--username",
-        type=str,
-        default="admin",
-        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
-    )
-    db_migrate.add_argument(
-        "--schema",
-        type=str,
-        default=None,
-        help="Schema de destino no PostgreSQL (default: username normalizado).",
-    )
-    db_migrate.add_argument(
-        "--source-dir",
-        type=Path,
-        default=None,
-        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
-    )
-    db_migrate.add_argument(
-        "--source-main",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco principal legado.",
-    )
-    db_migrate.add_argument(
-        "--source-iv",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco iv_history.db.",
-    )
-    db_migrate.add_argument(
-        "--source-flow",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco flow_history.db.",
-    )
-    db_migrate.add_argument(
-        "--no-aux",
-        action="store_true",
-        help="Migra apenas o banco principal (ignora iv_history e flow_history).",
-    )
-    db_migrate.add_argument(
-        "--replace",
-        action="store_true",
-        help="Sobrescreve tabelas existentes no schema destino.",
-    )
-    db_migrate.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Mostra plano de migração sem gravar no PostgreSQL.",
-    )
-    db_migrate.add_argument(
-        "--batch-size",
-        type=int,
-        default=5000,
-        help="Tamanho do lote de leitura para COPY (default: 5000).",
-    )
-    db_verify = dbs.add_parser(
-        "verify",
-        help="Compara contagem de linhas entre fonte legada e PostgreSQL para um usuário.",
-    )
-    db_verify.add_argument(
-        "--username",
-        type=str,
-        default="admin",
-        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
-    )
-    db_verify.add_argument(
-        "--schema",
-        type=str,
-        default=None,
-        help="Schema de destino no PostgreSQL (default: username normalizado).",
-    )
-    db_verify.add_argument(
-        "--source-dir",
-        type=Path,
-        default=None,
-        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
-    )
-    db_verify.add_argument(
-        "--source-main",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco principal legado.",
-    )
-    db_verify.add_argument(
-        "--source-iv",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco iv_history.db.",
-    )
-    db_verify.add_argument(
-        "--source-flow",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco flow_history.db.",
-    )
-    db_verify.add_argument(
-        "--no-aux",
-        action="store_true",
-        help="Compara apenas o banco principal (ignora iv_history e flow_history).",
-    )
-    db_cutover = dbs.add_parser(
-        "cutover-check",
-        help="Checklist completo de prontidão para ativar runtime PostgreSQL.",
-    )
-    db_cutover.add_argument(
-        "--username",
-        type=str,
-        default="admin",
-        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
-    )
-    db_cutover.add_argument(
-        "--schema",
-        type=str,
-        default=None,
-        help="Schema de destino no PostgreSQL (default: username normalizado).",
-    )
-    db_cutover.add_argument(
-        "--timeout",
-        type=float,
-        default=5.0,
-        help="Timeout em segundos para teste de rede/SQL (default: 5).",
-    )
-    db_cutover.add_argument(
-        "--source-dir",
-        type=Path,
-        default=None,
-        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
-    )
-    db_cutover.add_argument(
-        "--source-main",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco principal legado.",
-    )
-    db_cutover.add_argument(
-        "--source-iv",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco iv_history.db.",
-    )
-    db_cutover.add_argument(
-        "--source-flow",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco flow_history.db.",
-    )
-    db_cutover.add_argument(
-        "--no-aux",
-        action="store_true",
-        help="Executa verificação apenas com banco principal (ignora iv_history e flow_history).",
     )
     db_optimize = dbs.add_parser(
         "optimize",
@@ -595,94 +392,6 @@ def parse_args() -> argparse.Namespace:
         "--no-analyze",
         action="store_true",
         help="Não executa ANALYZE após criar índices.",
-    )
-    db_backup = dbs.add_parser(
-        "backup",
-        help="Cria backup dos bancos legados de um usuário para rollback seguro.",
-    )
-    db_backup.add_argument(
-        "--username",
-        type=str,
-        default="admin",
-        help="Usuário origem para localizar bases legadas em data/users/<usuario> (default: admin).",
-    )
-    db_backup.add_argument(
-        "--backup-root",
-        type=Path,
-        default=Path("data/backups/legacy"),
-        help="Diretório raiz para armazenar backups (default: data/backups/legacy).",
-    )
-    db_backup.add_argument(
-        "--source-dir",
-        type=Path,
-        default=None,
-        help="Diretório base opcional contendo opcoes_snapshots.db/iv_history.db/flow_history.db.",
-    )
-    db_backup.add_argument(
-        "--source-main",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco principal legado.",
-    )
-    db_backup.add_argument(
-        "--source-iv",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco iv_history.db.",
-    )
-    db_backup.add_argument(
-        "--source-flow",
-        type=Path,
-        default=None,
-        help="Caminho explícito para o banco flow_history.db.",
-    )
-    db_backup.add_argument(
-        "--no-aux",
-        action="store_true",
-        help="Inclui apenas opcoes_snapshots.db no backup.",
-    )
-    db_backup.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Mostra plano sem copiar arquivos.",
-    )
-
-    db_rollback = dbs.add_parser(
-        "rollback",
-        help="Restaura bancos legados a partir de um backup criado pelo comando db backup.",
-    )
-    db_rollback.add_argument(
-        "--backup-dir",
-        type=Path,
-        required=True,
-        help="Diretório do backup (contendo manifest.json).",
-    )
-    db_rollback.add_argument(
-        "--username",
-        type=str,
-        default="admin",
-        help="Usuário destino padrão para restauração (default: admin).",
-    )
-    db_rollback.add_argument(
-        "--target-dir",
-        type=Path,
-        default=None,
-        help="Diretório de destino opcional para restaurar os arquivos legados.",
-    )
-    db_rollback.add_argument(
-        "--no-aux",
-        action="store_true",
-        help="Restaura apenas opcoes_snapshots.db.",
-    )
-    db_rollback.add_argument(
-        "--no-restore-point",
-        action="store_true",
-        help="Desativa criação de backup local dos arquivos atuais antes de sobrescrever.",
-    )
-    db_rollback.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Mostra plano de restauração sem sobrescrever arquivos.",
     )
 
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
@@ -968,39 +677,6 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
-        elif args.subcmd == "migrate-auth-sqlite":
-            report = migrate_auth_from_legacy_sqlite(
-                source_db=args.source_db,
-                replace=bool(getattr(args, "replace", False)),
-            )
-            print(f"Migração de auth legado: {report.get('status')}")
-            print(f"  origem           : {report.get('source')}")
-            print(f"  total lidos      : {report.get('total')}")
-            print(f"  inseridos        : {report.get('inserted')}")
-            print(f"  atualizados      : {report.get('updated')}")
-            print(f"  ignorados (exist): {report.get('skipped_existing')}")
-            print(f"  ignorados (invál): {report.get('skipped_invalid')}")
-        elif args.subcmd == "migrate-legacy":
-            result = migrate_legacy_user_data(
-                username=args.username,
-                source_db=args.source_db,
-                source_iv_db=args.source_iv_db,
-                source_flow_db=args.source_flow_db,
-                force=bool(getattr(args, "force", False)),
-                keep_backup=True,
-            )
-            print(f"Migração concluída para usuário '{args.username}':")
-            for key in ("main", "iv_history", "flow_history"):
-                item = result.get(key, {})
-                status = item.get("status") or "unknown"
-                src = item.get("src") or "-"
-                dst = item.get("dst") or "-"
-                backup = item.get("backup")
-                print(f"  - {key}: {status}")
-                print(f"      origem : {src}")
-                print(f"      destino: {dst}")
-                if backup:
-                    print(f"      backup : {backup}")
     elif args.cmd == "db":
         if args.subcmd == "check":
             report = run_db_check(timeout_seconds=float(args.timeout))
@@ -1038,158 +714,6 @@ def main() -> None:
                 "Conectividade PostgreSQL validada. "
                 "Ambiente pronto para operação em PostgreSQL."
             )
-        elif args.subcmd == "migrate":
-            schema_name = sanitize_schema_name(args.schema or args.username)
-            sources = resolve_user_source_databases(
-                username=args.username,
-                source_dir=args.source_dir,
-                source_main=args.source_main,
-                source_iv=args.source_iv,
-                source_flow=args.source_flow,
-                include_aux=not bool(getattr(args, "no_aux", False)),
-            )
-
-            print(f"Schema destino: {schema_name}")
-            print("Fontes legadas:")
-            for src in sources:
-                marker = "OK" if src.path.exists() else "AUSENTE"
-                req = "obrigatória" if src.required else "opcional"
-                print(f"  - {src.label}: {src.path} [{marker}; {req}]")
-
-            try:
-                report = migrate_legacy_sources_to_postgres(
-                    schema=schema_name,
-                    sources=sources,
-                    replace=bool(getattr(args, "replace", False)),
-                    batch_size=max(int(args.batch_size or 1), 1),
-                    dry_run=bool(getattr(args, "dry_run", False)),
-                    log=print,
-                )
-            except Exception as exc:
-                raise SystemExit(f"Falha na migração: {exc}") from exc
-
-            print(f"Destino PostgreSQL: {report['postgres_target']}")
-            if report.get("dry_run"):
-                print("Dry-run concluído. Tabelas detectadas:")
-                for table in report.get("tables", []):
-                    print(
-                        f"  - {table['source']}.{table['name']}: {table['rows']} linha(s)"
-                    )
-                print(
-                    "Nenhuma escrita foi realizada. "
-                    "Rode novamente sem --dry-run para migrar de fato."
-                )
-            else:
-                print(
-                    f"Migração concluída com sucesso. "
-                    f"Linhas copiadas: {report.get('rows_copied', 0)}"
-                )
-        elif args.subcmd == "verify":
-            schema_name = sanitize_schema_name(args.schema or args.username)
-            sources = resolve_user_source_databases(
-                username=args.username,
-                source_dir=args.source_dir,
-                source_main=args.source_main,
-                source_iv=args.source_iv,
-                source_flow=args.source_flow,
-                include_aux=not bool(getattr(args, "no_aux", False)),
-            )
-
-            print(f"Schema alvo: {schema_name}")
-            print("Comparando tabelas:")
-            for src in sources:
-                marker = "OK" if src.path.exists() else "AUSENTE"
-                req = "obrigatória" if src.required else "opcional"
-                print(f"  - {src.label}: {src.path} [{marker}; {req}]")
-
-            try:
-                report = verify_legacy_sources_in_postgres(
-                    schema=schema_name,
-                    sources=sources,
-                )
-            except Exception as exc:
-                raise SystemExit(f"Falha na verificação: {exc}") from exc
-
-            print(f"Destino PostgreSQL: {report['postgres_target']}")
-            for row in report.get("tables", []):
-                source_rows = row.get("source_rows")
-                pg_rows = row.get("postgres_rows")
-                status = row.get("status")
-                print(
-                    f"  - {row.get('source')}.{row.get('table')}: "
-                    f"fonte={source_rows} postgres={pg_rows} status={status}"
-                )
-
-            if not report.get("ok"):
-                raise SystemExit(
-                    "Verificação encontrou divergências entre fonte legada e PostgreSQL."
-                )
-            print("Verificação concluída: contagens consistentes.")
-        elif args.subcmd == "cutover-check":
-            schema_name = sanitize_schema_name(args.schema or args.username)
-            if loaded_env_path is not None:
-                print(f".env carregado: {loaded_env_path}")
-            print(f"Schema alvo: {schema_name}")
-            print("Executando checklist de cutover...")
-
-            try:
-                result = run_cutover_ready_check(
-                    username=args.username,
-                    schema=args.schema,
-                    timeout_seconds=float(args.timeout),
-                    source_dir=args.source_dir,
-                    source_main=args.source_main,
-                    source_iv=args.source_iv,
-                    source_flow=args.source_flow,
-                    include_aux=not bool(getattr(args, "no_aux", False)),
-                )
-            except Exception as exc:
-                raise SystemExit(f"Falha no cutover-check: {exc}") from exc
-
-            db_check = result.get("db_check", {})
-            print("1) Conectividade PostgreSQL")
-            if db_check.get("postgres_configured"):
-                source = db_check.get("postgres_source") or "desconhecida"
-                print(f"   - Configurado via: {source}")
-                print(f"   - Destino: {db_check.get('postgres_target')}")
-                tcp_status = "OK" if db_check.get("tcp_ok") else "falhou"
-                sql_status = "OK" if db_check.get("sql_ok") else "falhou"
-                print(f"   - TCP host/porta: {tcp_status} ({db_check.get('tcp_message')})")
-                print(f"   - SQL SELECT 1: {sql_status} ({db_check.get('sql_message')})")
-            else:
-                print("   - PostgreSQL não configurado.")
-
-            verify = result.get("verify")
-            if verify:
-                print("2) Verificação de contagens fonte legada x PostgreSQL")
-                print(f"   - Destino: {verify.get('postgres_target')}")
-                for row in verify.get("tables", []):
-                    print(
-                        f"   - {row.get('source')}.{row.get('table')}: "
-                        f"fonte={row.get('source_rows')} postgres={row.get('postgres_rows')} "
-                        f"status={row.get('status')}"
-                    )
-
-            smoke = result.get("smoke") or []
-            if smoke:
-                print("3) Smoke do runtime no PostgreSQL")
-                for step in smoke:
-                    status = "OK" if step.get("ok") else "falhou"
-                    print(f"   - {step.get('name')}: {status} ({step.get('detail')})")
-
-            if not result.get("ok"):
-                for err in result.get("errors", []):
-                    print(f"- {err}")
-                raise SystemExit(
-                    "Cutover ainda não está pronto. "
-                    "Corrija os itens acima e execute novamente: opcoes db cutover-check"
-                )
-
-            print("Checklist concluído: ambiente pronto para ativar runtime PostgreSQL.")
-            print("Próximos passos sugeridos:")
-            print("  1) export OPCOES_DB_BACKEND=postgres")
-            print("  2) Reiniciar a aplicação web/serviço")
-            print("  3) Validar login, ranking, posições, auditoria e DARF no usuário principal")
         elif args.subcmd == "optimize":
             schema_name = sanitize_schema_name(args.schema or args.username)
             if loaded_env_path is not None:
@@ -1215,71 +739,6 @@ def main() -> None:
                 for table in analyzed:
                     print(f"  - {table}")
             print("Optimize concluído.")
-        elif args.subcmd == "backup":
-            try:
-                report = create_legacy_backup(
-                    username=args.username,
-                    backup_root=args.backup_root,
-                    source_dir=args.source_dir,
-                    source_main=args.source_main,
-                    source_iv=args.source_iv,
-                    source_flow=args.source_flow,
-                    include_aux=not bool(getattr(args, "no_aux", False)),
-                    dry_run=bool(getattr(args, "dry_run", False)),
-                )
-            except Exception as exc:
-                raise SystemExit(f"Falha no backup: {exc}") from exc
-
-            print(f"Backup dir: {report.get('backup_dir')}")
-            for item in report.get("files", []):
-                label = item.get("label")
-                src = item.get("source_path")
-                exists = item.get("exists")
-                copied = item.get("copied")
-                size = item.get("size_bytes")
-                status = "copiado" if copied else ("planejado" if exists else "ausente")
-                print(f"  - {label}: {src} [{status}; {size} bytes]")
-
-            if report.get("dry_run"):
-                print("Dry-run concluído. Nenhum arquivo foi copiado.")
-            else:
-                print(f"Manifesto: {report.get('manifest_path')}")
-                print("Backup concluído com sucesso.")
-        elif args.subcmd == "rollback":
-            try:
-                report = restore_legacy_backup(
-                    backup_dir=args.backup_dir,
-                    username=args.username,
-                    target_dir=args.target_dir,
-                    include_aux=not bool(getattr(args, "no_aux", False)),
-                    create_restore_point=not bool(
-                        getattr(args, "no_restore_point", False)
-                    ),
-                    dry_run=bool(getattr(args, "dry_run", False)),
-                )
-            except Exception as exc:
-                raise SystemExit(f"Falha no rollback: {exc}") from exc
-
-            print(f"Backup origem: {report.get('backup_dir')}")
-            print(f"Destino: {report.get('target_dir')}")
-            for item in report.get("files", []):
-                label = item.get("label")
-                status = item.get("status")
-                src = item.get("backup_file")
-                dst = item.get("target_file")
-                restore_point = item.get("restore_point")
-                print(f"  - {label}: {status}")
-                if src:
-                    print(f"      backup : {src}")
-                if dst:
-                    print(f"      destino: {dst}")
-                if restore_point:
-                    print(f"      segurança local: {restore_point}")
-
-            if report.get("dry_run"):
-                print("Dry-run concluído. Nenhum arquivo foi sobrescrito.")
-            else:
-                print("Rollback concluído com sucesso.")
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:

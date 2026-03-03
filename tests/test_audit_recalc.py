@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+import pytest
 
 from opcoes import finance, portfolio
+
+pytestmark = pytest.mark.requires_postgres
 
 
 def _txs_for_position(position_id: int):
@@ -12,10 +15,7 @@ def _txs_for_position(position_id: int):
     return prem, darf
 
 
-def test_recalc_premium_and_darf_overwrites(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "recalc.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_recalc_premium_and_darf_overwrites() -> None:
     pos_id = portfolio.add_position(
         ticker="PETRN312",
         underlying="PETR4",
@@ -63,10 +63,7 @@ def test_recalc_premium_and_darf_overwrites(monkeypatch, tmp_path) -> None:
     assert math.isclose(darf[0].amount, -round(premium_amount * 0.15, 2), abs_tol=1e-6)
 
 
-def test_recalc_removes_when_no_premium(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "recalc_remove.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_recalc_removes_when_no_premium() -> None:
     pos_id = portfolio.add_position(
         ticker="PETRN312",
         underlying="PETR4",
@@ -111,10 +108,7 @@ def test_recalc_removes_when_no_premium(monkeypatch, tmp_path) -> None:
     assert darf == []
 
 
-def test_get_ledger_sums_by_position(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "ledger_sums.db"
-    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
-
+def test_get_ledger_sums_by_position() -> None:
     pos_a = portfolio.add_position(
         ticker="ABCDM100",
         underlying="ABCD3",
