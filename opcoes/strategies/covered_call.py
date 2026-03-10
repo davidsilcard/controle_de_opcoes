@@ -99,6 +99,16 @@ def _is_stock_lot_position(pos: Mapping[str, Any]) -> bool:
     return False
 
 
+def _stock_reference_underlying(pos: Mapping[str, Any]) -> str:
+    if not _is_stock_lot_position(pos):
+        return ""
+    ticker = (pos.get("ticker") or "").strip().upper()
+    underlying = (pos.get("underlying") or "").strip().upper()
+    if _looks_like_equity_ticker(underlying):
+        return underlying
+    return ticker
+
+
 def _build_underlying_quick_filter(
     positions_open: List[Dict],
     current_underlying: str,
@@ -125,7 +135,10 @@ def _build_underlying_quick_filter(
 
         if _is_stock_lot_position(pos):
             # Para ações em estoque, o ticker é a referência principal de navegação.
-            item = _ensure_row(ticker)
+            ref_underlying = _stock_reference_underlying(pos)
+            if not ref_underlying:
+                continue
+            item = _ensure_row(ref_underlying)
             if is_simulated:
                 item["qty_simulated"] += open_qty
             else:
@@ -160,7 +173,7 @@ def _build_underlying_quick_filter(
 def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, Any], List[Dict], List[Dict]]:
     """Replica a lógica original de _bova_coverage de web.py.
 
-    - Lotes do ativo-objeto: ticker == underlying
+    - Lotes do ativo-objeto: referencia normalizada do lote == underlying
     - Calls do ativo-objeto: underlying == underlying e ticker != underlying
     """
 
@@ -168,11 +181,11 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
     if not underlying:
         return {}, [], []
 
-    # Lotes do ativo-objeto (ticker == underlying)
+    # Lotes do ativo-objeto (referencia normalizada do lote == underlying)
     bova_lots: List[Dict] = [
         p
         for p in positions
-        if (p.get("ticker") or "").strip().upper() == underlying
+        if _stock_reference_underlying(p) == underlying
     ]
     # Calls do ativo-objeto (underlying == underlying, ticker != underlying, tipo CALL)
     call_positions: List[Dict] = [

@@ -173,7 +173,7 @@
                 </div>
                 <div class="col-md-3">
                   <label class="form-label small">Posição</label>
-                  <select name="side" class="form-select form-select-sm">
+                  <select name="side" class="form-select form-select-sm" id="positionSideInput">
                     <option value="long" selected>Comprada</option>
                     <option value="short">Vendida</option>
                   </select>
@@ -192,6 +192,16 @@
                 <div class="col-md-3">
                   <label class="form-label small">Lote pai (ID)</label>
                   <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="opcional">
+                  <div class="form-text">
+                    Em call coberta, informe aqui o ID do lote da acao que cobre a venda.
+                  </div>
+                </div>
+                <div class="col-12">
+                  <div class="alert alert-warning py-2 small mb-0" role="alert">
+                    Venda de call coberta: use <strong>Posicao = Vendida</strong>, <strong>Estrategia = Covered Call</strong>,
+                    marque <strong>Registrar premio no caixa</strong> se quiser refletir o credito liquido, e informe o
+                    <strong>Lote pai (ID)</strong> da acao em garantia.
+                  </div>
                 </div>
                 <div class="col-12">
                   <label class="form-label small">Notas</label>
@@ -423,19 +433,25 @@
       }
       const strategySelect = document.querySelector('#modalAddPosition select[name="strategy_tag"]');
       const recordPremiumInput = document.querySelector('#recordPremium');
-      const sideSelect = document.querySelector('#modalAddPosition select[name="side"]');
-      if (strategySelect && recordPremiumInput) {
-          const syncPremiumCheckbox = () => {
-              if (strategySelect.value === "cash_put") {
-                  recordPremiumInput.checked = true;
+      const sideSelect = document.querySelector('#positionSideInput');
+      const shortStrategies = new Set(["cash_put", "covered_call"]);
+      if (strategySelect && recordPremiumInput && sideSelect) {
+          const syncShortOptionDefaults = () => {
+              if (!shortStrategies.has(strategySelect.value)) {
+                  return;
               }
+              sideSelect.value = "short";
+              recordPremiumInput.checked = true;
           };
-          syncPremiumCheckbox();
-          strategySelect.addEventListener('change', syncPremiumCheckbox);
-      }
-      if (sideSelect && recordPremiumInput) {
+          syncShortOptionDefaults();
+          strategySelect.addEventListener('change', syncShortOptionDefaults);
           recordPremiumInput.addEventListener('change', () => {
               if (recordPremiumInput.checked) {
+                  sideSelect.value = "short";
+              }
+          });
+          sideSelect.addEventListener('change', () => {
+              if (recordPremiumInput.checked || shortStrategies.has(strategySelect.value)) {
                   sideSelect.value = "short";
               }
           });

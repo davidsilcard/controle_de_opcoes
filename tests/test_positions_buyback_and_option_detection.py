@@ -242,6 +242,89 @@ def test_register_premium_ignores_non_option_ticker() -> None:
     assert linked == []
 
 
+def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
+    _ensure_snapshot_tables()
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    res = client.post(
+        "/positions/add",
+        data={
+            "ticker": "TESTC123",
+            "underlying": "TEST3",
+            "qty": "300",
+            "entry_price": "0.09",
+            "fees": "0.01",
+            "trade_date": "2026-03-10",
+            "trade_type": "swing",
+            "side": "long",
+            "strategy_tag": "covered_call",
+            "parent_position_id": "27",
+            "record_premium": "1",
+            "reserve_darf": "1",
+            "is_simulated": "0",
+        },
+    )
+    assert res.status_code in (302, 303)
+
+    positions = portfolio.list_positions(include_closed=True, ticker="TESTC123")
+    assert len(positions) == 1
+    pos = positions[0]
+    assert pos["side"] == "short"
+    assert pos["strategy_tag"] == "covered_call"
+    assert pos["parent_position_id"] == 27
+
+    txs = [t for t in finance.get_transactions(limit=50) if t.position_id == pos["id"]]
+    assert len(txs) == 2
+    premium = next(t for t in txs if t.type == finance.TransactionType.PREMIUM)
+    darf = next(t for t in txs if t.type == finance.TransactionType.DARF)
+    assert abs(premium.amount - 26.99) < 1e-6
+    assert abs(darf.amount - (-4.05)) < 1e-6
+
+
+def test_covered_call_page_uses_stock_underlying_reference_for_mismatched_lot_ticker() -> None:
+    _ensure_snapshot_tables()
+
+    lot_id = portfolio.add_position(
+        ticker="WICZ3",
+        underlying="WIZC3",
+        trade_date="2026-02-05",
+        qty=300,
+        entry_price=7.16,
+        trade_type="swing",
+        side="long",
+        strategy_tag="estoque",
+    )
+    portfolio.add_position(
+        ticker="WIZCC100",
+        underlying="WIZC3",
+        trade_date="2026-03-10",
+        qty=300,
+        entry_price=0.09,
+        fees=0.01,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+        parent_position_id=lot_id,
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    resp = client.get("/covered-call?underlying=WIZC3")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert "WIZCC100" in html
+    assert "Nenhuma call real para resumir." not in html
+    assert "Nenhuma call de WIZC3 em aberto nas posi" not in html
+    assert "Cobertas (calls)" in html
+    assert ">300<" in html
+
+
 def test_audit_shows_operational_net_with_buyback() -> None:
     _ensure_snapshot_tables()
 

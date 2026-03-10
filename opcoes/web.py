@@ -1001,6 +1001,12 @@ def create_app() -> Flask:
             # Se marcou prêmio, assume venda (short). Caso contrário, default long.
             side_raw = "short" if form.get("record_premium") == "1" else "long"
         strategy_tag_raw = form.get("strategy_tag") or None
+        side_raw = _normalize_form_side(
+            ticker=ticker,
+            side=side_raw,
+            strategy_tag=strategy_tag_raw,
+            record_premium=form.get("record_premium") == "1",
+        )
         underlying = _resolve_underlying_for_position(
             ticker=ticker,
             underlying=underlying_input,
@@ -1207,6 +1213,11 @@ def create_app() -> Flask:
         ticker = (form.get("ticker") or "").strip()
         side_raw = form.get("side") or None
         strategy_tag_raw = form.get("strategy_tag") or None
+        side_raw = _normalize_form_side(
+            ticker=ticker,
+            side=side_raw,
+            strategy_tag=strategy_tag_raw,
+        )
         underlying = _resolve_underlying_for_position(
             ticker=ticker,
             underlying=form.get("underlying") or "",
@@ -1342,6 +1353,23 @@ def create_app() -> Flask:
 
     def _is_option_ticker(ticker: str | None) -> bool:
         return infer_option_type(ticker or "") in {"CALL", "PUT"}
+
+    def _normalize_form_side(
+        *,
+        ticker: str | None,
+        side: str | None,
+        strategy_tag: str | None,
+        record_premium: bool = False,
+    ) -> str:
+        side_norm = (side or "").strip().lower()
+        if side_norm in {"short", "vendida", "vendido", "v"}:
+            return "short"
+        strategy_norm = (strategy_tag or "").strip().lower()
+        if record_premium:
+            return "short"
+        if strategy_norm in {"cash_put", "covered_call"} and _is_option_ticker(ticker):
+            return "short"
+        return "long"
 
     def _looks_like_equity_ticker(ticker: str | None) -> bool:
         text = (ticker or "").strip().upper()

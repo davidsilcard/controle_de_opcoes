@@ -166,3 +166,22 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - autenticação web migrada para PostgreSQL (`auth.web_users`).
 - runtime sem suporte a `db_path`/`OPCOES_DB_PATH` e sem diretórios de usuário por arquivo (`OPCOES_USERS_DB_DIR`).
 - testes legados acoplados a SQLite removidos/ajustados; integração de banco agora usa marcador `requires_postgres`.
+
+- cadastro web de `covered_call`/`cash_put` agora normaliza a perna da opcao como `Vendida` no backend e reforca a orientacao do formulario para evitar registro incoerente.
+- painel de `covered_call` agora usa o ativo-base normalizado dos lotes em estoque, evitando sumir cobertura quando o ticker da acao foi digitado errado mas o `underlying` esta correto.
+
+## Troubleshooting Playwright (uv)
+
+Se `uv run playwright install chromium` falhar com 404 em URL `chrome-for-testing-public/...`:
+
+```bash
+uv run playwright --version
+uv add "playwright==1.57.0"
+uv run playwright install chromium
+```
+
+Smoke test rapido:
+
+```bash
+uv run python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); page=b.new_page(); page.goto('https://example.com'); print(page.title()); b.close(); p.stop()"
+```
