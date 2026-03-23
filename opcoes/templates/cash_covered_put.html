@@ -71,6 +71,32 @@
         </div>
       </form>
 
+      {% if latest_assignment_summary %}
+      <div class="alert alert-info border-info mb-4">
+        <div class="fw-semibold mb-1">Ultimo exercicio detectado para {{ underlying }}</div>
+        <div class="small">
+          A put {{ latest_assignment_summary.option_ticker }} foi encerrada em {{ latest_assignment_summary.assignment_date or '-' }}.
+          O caixa recebeu um debito de R$ {{ "%.2f"|format((latest_assignment_summary.assignment_amount or 0)|abs) }}
+          e a aplicacao criou um lote de {{ latest_assignment_summary.stock_ticker }}
+          com {{ latest_assignment_summary.stock_qty }} acoes
+          {% if latest_assignment_summary.stock_avg_price is not none %}
+            a R$ {{ "%.2f"|format(latest_assignment_summary.stock_avg_price) }}
+          {% endif %}.
+        </div>
+        <div class="small mt-2">
+          Impacto da perna da opcao ate o exercicio:
+          premio R$ {{ "%.2f"|format(latest_assignment_summary.premium_amount or 0.0) }},
+          DARF R$ {{ "%.2f"|format(latest_assignment_summary.darf_amount or 0.0) }},
+          liquido R$ {{ "%.2f"|format(latest_assignment_summary.net_option_cash or 0.0) }}.
+        </div>
+        <div class="small mt-2">
+          Proximo passo: revise o lote em <a href="/covered-call?underlying={{ underlying }}">Covered Call</a>
+          ou <a href="/positions?underlying={{ underlying }}">Posicoes</a> e confira o reflexo em
+          <a href="/audit?mode={{ 'simulated' if latest_assignment_summary.is_simulated else 'real' }}&include_closed=1">Auditoria</a>.
+        </div>
+      </div>
+      {% endif %}
+
       <div class="row mb-4">
         <!-- Dashboard Financeiro -->
         <div class="col-md-3 mb-3 mb-md-0">

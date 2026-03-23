@@ -803,11 +803,23 @@ def create_app() -> Flask:
                 p for p in positions_all if bool(p.get("is_simulated")) == is_simulated
             ]
 
+        children_by_parent: dict[int, list[dict]] = {}
+        for pos in positions_all:
+            parent_id = pos.get("parent_position_id")
+            if parent_id is None:
+                continue
+            try:
+                key = int(parent_id)
+            except (TypeError, ValueError):
+                continue
+            children_by_parent.setdefault(key, []).append(pos)
+
         ledger_sums = finance.get_ledger_sums_by_position(
             types=[
                 finance.TransactionType.PREMIUM,
                 finance.TransactionType.DARF,
                 finance.TransactionType.BUY,
+                finance.TransactionType.ASSIGNMENT,
             ],
             is_simulated=is_simulated,
         )
@@ -831,6 +843,10 @@ def create_app() -> Flask:
             "actual_net": 0.0,
             "expected_cash_net": 0.0,
             "actual_cash_net": 0.0,
+            "expected_assignment": 0.0,
+            "actual_assignment": 0.0,
+            "expected_total_cash": 0.0,
+            "actual_total_cash": 0.0,
         }
 
         for pos in positions_all:
@@ -858,6 +874,10 @@ def create_app() -> Flask:
             expected_premium = None
             expected_darf = None
             expected_buyback = None
+            expected_assignment = None
+            assignment_stock_ticker = None
+            assignment_stock_qty = 0
+            assignment_stock_price = None
             if is_option and side == "short":
                 expected_premium = finance.calculate_option_premium(
                     entry_price=entry_price,
@@ -870,6 +890,29 @@ def create_app() -> Flask:
                 )
                 if status_norm == "closed" and exit_price is not None and close_qty > 0:
                     expected_buyback = -round(float(exit_price) * int(close_qty), 2)
+                if (
+                    infer_option_type(ticker) == "PUT"
+                    and status_norm == "closed"
+                    and "exerc" in ((pos.get("exit_reason") or "").strip().lower())
+                ):
+                    child_positions = children_by_parent.get(pid, [])
+                    stock_children = [
+                        child
+                        for child in child_positions
+                        if (child.get("ticker") or "").strip().upper()
+                        == (underlying or "").strip().upper()
+                    ]
+                    if stock_children:
+                        total_stock_cost = 0.0
+                        for child in stock_children:
+                            child_qty = int(child.get("qty") or 0)
+                            child_price = float(child.get("entry_price") or 0.0)
+                            assignment_stock_qty += child_qty
+                            total_stock_cost += child_qty * child_price
+                        if assignment_stock_qty > 0:
+                            assignment_stock_ticker = (underlying or "").strip().upper()
+                            assignment_stock_price = total_stock_cost / assignment_stock_qty
+                            expected_assignment = -round(total_stock_cost, 2)
 
             actual_premium = ledger_sums.get(pid, {}).get(
                 finance.TransactionType.PREMIUM.value
@@ -880,6 +923,9 @@ def create_app() -> Flask:
             actual_buyback = ledger_sums.get(pid, {}).get(
                 finance.TransactionType.BUY.value
             )
+            actual_assignment = ledger_sums.get(pid, {}).get(
+                finance.TransactionType.ASSIGNMENT.value
+            )
 
             if (
                 expected_premium is None
@@ -887,6 +933,8 @@ def create_app() -> Flask:
                 and actual_darf is None
                 and expected_buyback is None
                 and actual_buyback is None
+                and expected_assignment is None
+                and actual_assignment is None
             ):
                 continue
 
@@ -894,14 +942,30 @@ def create_app() -> Flask:
             actual_net = None
             expected_cash_net = None
             actual_cash_net = None
-            if expected_premium is not None or expected_darf is not None:
+            expected_total_cash = None
+            actual_total_cash = None
+            if (
+                expected_premium is not None
+                or expected_darf is not None
+                or expected_buyback is not None
+                or expected_assignment is not None
+            ):
                 expected_net = float(expected_premium or 0.0) + float(
                     expected_darf or 0.0
                 )
                 expected_cash_net = expected_net + float(expected_buyback or 0.0)
-            if actual_premium is not None or actual_darf is not None:
+                expected_total_cash = expected_cash_net + float(
+                    expected_assignment or 0.0
+                )
+            if (
+                actual_premium is not None
+                or actual_darf is not None
+                or actual_buyback is not None
+                or actual_assignment is not None
+            ):
                 actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
                 actual_cash_net = actual_net + float(actual_buyback or 0.0)
+                actual_total_cash = actual_cash_net + float(actual_assignment or 0.0)
 
             rows.append(
                 {
@@ -917,18 +981,31 @@ def create_app() -> Flask:
                     "expected_premium": expected_premium,
                     "expected_darf": expected_darf,
                     "expected_buyback": expected_buyback,
+                    "expected_assignment": expected_assignment,
                     "actual_premium": actual_premium,
                     "actual_darf": actual_darf,
                     "actual_buyback": actual_buyback,
+                    "actual_assignment": actual_assignment,
                     "diff_premium": _money_diff(actual_premium, expected_premium),
                     "diff_darf": _money_diff(actual_darf, expected_darf),
                     "diff_buyback": _money_diff(actual_buyback, expected_buyback),
+                    "diff_assignment": _money_diff(
+                        actual_assignment, expected_assignment
+                    ),
                     "expected_net": expected_net,
                     "actual_net": actual_net,
                     "diff_net": _money_diff(actual_net, expected_net),
                     "expected_cash_net": expected_cash_net,
                     "actual_cash_net": actual_cash_net,
                     "diff_cash_net": _money_diff(actual_cash_net, expected_cash_net),
+                    "expected_total_cash": expected_total_cash,
+                    "actual_total_cash": actual_total_cash,
+                    "diff_total_cash": _money_diff(
+                        actual_total_cash, expected_total_cash
+                    ),
+                    "assignment_stock_ticker": assignment_stock_ticker,
+                    "assignment_stock_qty": assignment_stock_qty,
+                    "assignment_stock_price": assignment_stock_price,
                 }
             )
 
@@ -944,6 +1021,10 @@ def create_app() -> Flask:
                 totals["actual_darf"] += float(actual_darf or 0.0)
             if actual_buyback is not None:
                 totals["actual_buyback"] += float(actual_buyback or 0.0)
+            if expected_assignment is not None:
+                totals["expected_assignment"] += float(expected_assignment or 0.0)
+            if actual_assignment is not None:
+                totals["actual_assignment"] += float(actual_assignment or 0.0)
 
         totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
         totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
@@ -951,6 +1032,12 @@ def create_app() -> Flask:
             totals["expected_net"] + totals["expected_buyback"]
         )
         totals["actual_cash_net"] = totals["actual_net"] + totals["actual_buyback"]
+        totals["expected_total_cash"] = (
+            totals["expected_cash_net"] + totals["expected_assignment"]
+        )
+        totals["actual_total_cash"] = (
+            totals["actual_cash_net"] + totals["actual_assignment"]
+        )
 
         position_ids = {int(p.get("id") or 0) for p in positions_all}
         orphan_rows = [
@@ -959,6 +1046,7 @@ def create_app() -> Flask:
                 "actual_premium": sums.get(finance.TransactionType.PREMIUM.value),
                 "actual_darf": sums.get(finance.TransactionType.DARF.value),
                 "actual_buyback": sums.get(finance.TransactionType.BUY.value),
+                "actual_assignment": sums.get(finance.TransactionType.ASSIGNMENT.value),
                 "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0),
                 "actual_cash_net": (
@@ -966,6 +1054,12 @@ def create_app() -> Flask:
                 )
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0)
                 + (sums.get(finance.TransactionType.BUY.value) or 0.0),
+                "actual_total_cash": (
+                    (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
+                    + (sums.get(finance.TransactionType.DARF.value) or 0.0)
+                    + (sums.get(finance.TransactionType.BUY.value) or 0.0)
+                    + (sums.get(finance.TransactionType.ASSIGNMENT.value) or 0.0)
+                ),
             }
             for pid, sums in ledger_sums.items()
             if pid not in position_ids
@@ -973,6 +1067,7 @@ def create_app() -> Flask:
                 sums.get(finance.TransactionType.PREMIUM.value) is not None
                 or sums.get(finance.TransactionType.DARF.value) is not None
                 or sums.get(finance.TransactionType.BUY.value) is not None
+                or sums.get(finance.TransactionType.ASSIGNMENT.value) is not None
             )
         ]
 

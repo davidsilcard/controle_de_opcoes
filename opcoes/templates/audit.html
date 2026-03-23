@@ -123,7 +123,7 @@
       </div>
 
       <div class="row g-3 mb-4">
-        <div class="col-md-6">
+        <div class="col-md-3">
           <div class="card h-100">
             <div class="card-body">
               <div class="text-muted small">Recompra (caixa)</div>
@@ -148,7 +148,7 @@
             </div>
           </div>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-3">
           <div class="card h-100 border-primary">
             <div class="card-body">
               <div class="text-muted small">Líquido operação (Prêmio + DARF + Recompra)</div>
@@ -173,6 +173,56 @@
             </div>
           </div>
         </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-info">
+            <div class="card-body">
+              <div class="text-muted small">Exercicio (caixa)</div>
+              <div class="d-flex justify-content-between">
+                <span>Esperado</span>
+                <strong>R$ {{ "%.2f"|format(totals.expected_assignment) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>No caixa</span>
+                <strong>R$ {{ "%.2f"|format(totals.actual_assignment) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Diferenca</span>
+                {% set diff_a = totals.actual_assignment - totals.expected_assignment %}
+                <strong class="{% if diff_a != 0 %}text-danger{% else %}text-success{% endif %}">
+                  R$ {{ "%.2f"|format(diff_a) }}
+                </strong>
+              </div>
+              <div class="text-muted small mt-2">
+                Para PUT exercida, confere o debito do caixa com o lote de acoes gerado.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <div class="card h-100 border-info">
+            <div class="card-body">
+              <div class="text-muted small">Liquido caixa total (inclui exercicio)</div>
+              <div class="d-flex justify-content-between">
+                <span>Esperado</span>
+                <strong>R$ {{ "%.2f"|format(totals.expected_total_cash) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>No caixa</span>
+                <strong>R$ {{ "%.2f"|format(totals.actual_total_cash) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Diferenca</span>
+                {% set diff_tc = totals.actual_total_cash - totals.expected_total_cash %}
+                <strong class="{% if diff_tc != 0 %}text-danger{% else %}text-success{% endif %}">
+                  R$ {{ "%.2f"|format(diff_tc) }}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="table-responsive mb-4">
@@ -186,6 +236,7 @@
               <th class="text-end">Qtd</th>
               <th class="text-end">Entrada</th>
               <th class="text-end">Taxas</th>
+              <th>Lote gerado</th>
               <th class="text-end">Prêmio esp.</th>
               <th class="text-end">Prêmio caixa</th>
               <th class="text-end">Dif. prêmio</th>
@@ -195,24 +246,32 @@
               <th class="text-end">Recompra esp.</th>
               <th class="text-end">Recompra caixa</th>
               <th class="text-end">Dif. recompra</th>
+              <th class="text-end">Exerc. esp.</th>
+              <th class="text-end">Exerc. caixa</th>
+              <th class="text-end">Dif. exerc.</th>
               <th class="text-end">Líquido fiscal esp.</th>
               <th class="text-end">Líquido fiscal caixa</th>
               <th class="text-end">Dif. fiscal</th>
               <th class="text-end">Líquido operação esp.</th>
               <th class="text-end">Líquido operação caixa</th>
               <th class="text-end">Dif. operação</th>
+              <th class="text-end">Líquido total esp.</th>
+              <th class="text-end">Líquido total caixa</th>
+              <th class="text-end">Dif. total</th>
             </tr>
           </thead>
           <tbody>
             {% if not rows %}
-              <tr><td colspan="22" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
+              <tr><td colspan="29" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
             {% else %}
               {% for r in rows %}
                 {% set dp = r.diff_premium or 0 %}
                 {% set dd = r.diff_darf or 0 %}
                 {% set db = r.diff_buyback or 0 %}
+                {% set da = r.diff_assignment or 0 %}
                 {% set dnf = r.diff_net or 0 %}
                 {% set dnc = r.diff_cash_net or 0 %}
+                {% set dtc = r.diff_total_cash or 0 %}
                 <tr>
                   <td>{{ r.id }}</td>
                   <td>{{ r.ticker }}</td>
@@ -221,6 +280,16 @@
                   <td class="text-end">{{ r.qty }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.entry_price) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.fees) }}</td>
+                  <td>
+                    {% if r.assignment_stock_ticker and r.assignment_stock_qty %}
+                      {{ r.assignment_stock_ticker }} {{ r.assignment_stock_qty }}
+                      {% if r.assignment_stock_price is not none %}
+                        <div class="text-muted small">@ {{ "%.2f"|format(r.assignment_stock_price) }}</div>
+                      {% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
                   <td class="text-end">
                     {% if r.expected_premium is not none %}{{ "%.2f"|format(r.expected_premium) }}{% else %}-{% endif %}
                   </td>
@@ -249,6 +318,15 @@
                     {% if r.diff_buyback is not none %}{{ "%.2f"|format(r.diff_buyback) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
+                    {% if r.expected_assignment is not none %}{{ "%.2f"|format(r.expected_assignment) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.actual_assignment is not none %}{{ "%.2f"|format(r.actual_assignment) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if da != 0 %}text-danger{% else %}text-success{% endif %}">
+                    {% if r.diff_assignment is not none %}{{ "%.2f"|format(r.diff_assignment) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
                     {% if r.expected_net is not none %}{{ "%.2f"|format(r.expected_net) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
@@ -266,6 +344,15 @@
                   <td class="text-end {% if dnc != 0 %}text-danger{% else %}text-success{% endif %}">
                     {% if r.diff_cash_net is not none %}{{ "%.2f"|format(r.diff_cash_net) }}{% else %}-{% endif %}
                   </td>
+                  <td class="text-end">
+                    {% if r.expected_total_cash is not none %}{{ "%.2f"|format(r.expected_total_cash) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.actual_total_cash is not none %}{{ "%.2f"|format(r.actual_total_cash) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if dtc != 0 %}text-danger{% else %}text-success{% endif %}">
+                    {% if r.diff_total_cash is not none %}{{ "%.2f"|format(r.diff_total_cash) }}{% else %}-{% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             {% endif %}
@@ -275,7 +362,7 @@
 
       {% if orphan_rows %}
         <div class="alert alert-warning small">
-          Há lançamentos de prêmio/DARF/recompra no caixa sem posição encontrada.
+          Há lançamentos de prêmio/DARF/recompra/exercicio no caixa sem posição encontrada.
         </div>
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -285,8 +372,10 @@
                 <th class="text-end">Prêmio caixa</th>
                 <th class="text-end">DARF caixa</th>
                 <th class="text-end">Recompra caixa</th>
+                <th class="text-end">Exercicio caixa</th>
                 <th class="text-end">Líquido fiscal</th>
                 <th class="text-end">Líquido operação</th>
+                <th class="text-end">Líquido total</th>
               </tr>
             </thead>
             <tbody>
@@ -296,8 +385,10 @@
                   <td class="text-end">{{ "%.2f"|format(r.actual_premium or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_darf or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_buyback or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(r.actual_assignment or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_net or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_cash_net or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(r.actual_total_cash or 0.0) }}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -306,8 +397,8 @@
       {% endif %}
 
       <p class="text-muted small">
-        Este relatório traz duas leituras: fiscal (`Prêmio + DARF`) e caixa da operação
-        (`Prêmio + DARF + Recompra`). Exercícios e compras/vendas de ações continuam fora deste painel.
+        Este relatório traz as visões fiscal (`Prêmio + DARF`), caixa da operação
+        (`Prêmio + DARF + Recompra`) e caixa total incluindo exercicio de PUT.
       </p>
     </div>
 

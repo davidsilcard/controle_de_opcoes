@@ -120,6 +120,140 @@ def _calculate_portfolio_metrics(
     }
 
 
+def _normalize_exit_reason(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return (
+        text.replace("á", "a")
+        .replace("à", "a")
+        .replace("ã", "a")
+        .replace("â", "a")
+        .replace("é", "e")
+        .replace("ê", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("õ", "o")
+        .replace("ô", "o")
+        .replace("ú", "u")
+        .replace("ç", "c")
+    )
+
+
+def _is_assignment_exit_reason(value: Any) -> bool:
+    text = _normalize_exit_reason(value)
+    return text == "exercicio" or "exerc" in text
+
+
+def _build_latest_assignment_summary(
+    *,
+    underlying: str,
+    positions_all: List[Dict[str, Any]],
+    is_simulated: Optional[bool],
+) -> Optional[Dict[str, Any]]:
+    underlying_norm = (underlying or "").strip().upper()
+    if not underlying_norm:
+        return None
+
+    ledger_sums = finance.get_ledger_sums_by_position(
+        types=[
+            finance.TransactionType.PREMIUM,
+            finance.TransactionType.DARF,
+            finance.TransactionType.ASSIGNMENT,
+        ],
+        is_simulated=is_simulated,
+    )
+
+    children_by_parent: Dict[int, List[Dict[str, Any]]] = {}
+    for pos in positions_all:
+        parent_id = pos.get("parent_position_id")
+        if parent_id is None:
+            continue
+        try:
+            key = int(parent_id)
+        except (TypeError, ValueError):
+            continue
+        children_by_parent.setdefault(key, []).append(pos)
+
+    candidates: List[Dict[str, Any]] = []
+    for pos in positions_all:
+        if not _is_put_option_position(pos):
+            continue
+        if (pos.get("underlying") or "").strip().upper() != underlying_norm:
+            continue
+        if (pos.get("status") or "").strip().lower() != "closed":
+            continue
+        if not _is_assignment_exit_reason(pos.get("exit_reason")):
+            continue
+        if is_simulated is not None and bool(pos.get("is_simulated")) != is_simulated:
+            continue
+
+        try:
+            pos_id = int(pos.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pos_id <= 0:
+            continue
+
+        child_lots = [
+            child
+            for child in children_by_parent.get(pos_id, [])
+            if (child.get("ticker") or "").strip().upper() == underlying_norm
+        ]
+        stock_qty = 0
+        stock_cost = 0.0
+        stock_status = "aberto"
+        for child in child_lots:
+            try:
+                qty = int(child.get("qty") or 0)
+            except (TypeError, ValueError):
+                qty = 0
+            try:
+                price = float(child.get("entry_price") or 0.0)
+            except (TypeError, ValueError):
+                price = 0.0
+            stock_qty += qty
+            stock_cost += qty * price
+            if (child.get("status") or "").strip().lower() == "closed":
+                stock_status = "fechado"
+
+        avg_price = (stock_cost / stock_qty) if stock_qty > 0 else None
+        sums = ledger_sums.get(pos_id, {})
+        assignment_amount = sums.get(finance.TransactionType.ASSIGNMENT.value)
+        premium_amount = sums.get(finance.TransactionType.PREMIUM.value)
+        darf_amount = sums.get(finance.TransactionType.DARF.value)
+
+        if assignment_amount is None and stock_qty > 0 and avg_price is not None:
+            assignment_amount = -round(stock_qty * avg_price, 2)
+
+        candidates.append(
+            {
+                "position_id": pos_id,
+                "option_ticker": (pos.get("ticker") or "").strip().upper(),
+                "assignment_date": pos.get("exit_date") or pos.get("trade_date"),
+                "stock_ticker": underlying_norm,
+                "stock_qty": stock_qty,
+                "stock_avg_price": avg_price,
+                "stock_status": stock_status,
+                "assignment_amount": assignment_amount,
+                "premium_amount": premium_amount,
+                "darf_amount": darf_amount,
+                "net_option_cash": float(premium_amount or 0.0) + float(darf_amount or 0.0),
+                "is_simulated": bool(pos.get("is_simulated")),
+            }
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            str(item.get("assignment_date") or ""),
+            int(item.get("position_id") or 0),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
 def _aggregate_put_premiums_by_month(
     positions: List[Dict[str, Any]],
     *,
@@ -401,7 +535,12 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         defaults.buyback_target_pct,
     )
 
-    positions_open = list_positions(include_closed=False)
+    positions_all = list_positions(include_closed=True)
+    positions_open = [
+        pos
+        for pos in positions_all
+        if (pos.get("status") or "").strip().lower() != "closed"
+    ]
     rows = fetch_latest_underlying_options(underlying=underlying)
     quote = fetch_latest_underlying_quote(underlying)
 
@@ -493,6 +632,16 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         strategy_tag="cash_put",
         include_unlinked=True,
     )
+    summary_simulated_filter: Optional[bool]
+    if mode == "all":
+        summary_simulated_filter = None
+    else:
+        summary_simulated_filter = mode == "simulated"
+    latest_assignment_summary = _build_latest_assignment_summary(
+        underlying=underlying,
+        positions_all=positions_all,
+        is_simulated=summary_simulated_filter,
+    )
 
     return {
         **ctx,
@@ -510,6 +659,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         },
         "monthly_premiums": monthly_premiums,
         "recent_transactions": transactions,
+        "latest_assignment_summary": latest_assignment_summary,
     }
 
 
