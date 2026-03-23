@@ -687,6 +687,8 @@
         {% if sell_target.base_price is not none and sell_target.target_price is not none %}
           Preço médio livre:
           {% if sell_target.avg_free_price is not none %}R$ {{ "%.2f"|format(sell_target.avg_free_price) }}{% else %}-{% endif %}
+          | Piso seguro de strike:
+          {% if sell_target.strike_floor_price is not none %}R$ {{ "%.2f"|format(sell_target.strike_floor_price) }}{% else %}-{% endif %}
           | Spot:
           {% if sell_target.spot_price is not none %}R$ {{ "%.2f"|format(sell_target.spot_price) }}{% else %}-{% endif %}
           | Base: R$ {{ "%.2f"|format(sell_target.base_price) }}
@@ -696,6 +698,10 @@
         {% else %}
           Sem base suficiente para calcular a meta (faltam preço médio livre e spot).
         {% endif %}
+        <div class="mt-2">
+          Proteção didática: a lista oculta calls com strike abaixo do maior preço de entrada livre do estoque,
+          para não sugerir uma venda coberta que possa travar saída nominal abaixo do custo de algum lote.
+        </div>
       </div>
       {% if not suggestions %}
         <p class="text-muted small">

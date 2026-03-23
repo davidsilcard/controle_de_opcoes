@@ -477,6 +477,9 @@ def calculate_covered_call_strategy(
     target_price = None
     if base_price is not None:
         target_price = base_price * (1.0 + (float(target_upside_pct or 0.0) / 100.0))
+    strike_floor_price = stock_real.get("free_max_price")
+    if strike_floor_price is None:
+        strike_floor_price = stock_sim.get("free_max_price")
 
     call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
     call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
@@ -516,6 +519,12 @@ def calculate_covered_call_strategy(
             continue
         dist = _parse_float(r["dist_perc_strike"])
         if dist is None or dist < min_dist_strike:
+            continue
+        if (
+            strike_floor_price is not None
+            and strike is not None
+            and float(strike) < float(strike_floor_price)
+        ):
             continue
         effective_sale_price = (strike + premium) if (strike is not None and premium is not None) else None
         target_hit = bool(target_price is not None and effective_sale_price is not None and effective_sale_price >= target_price)
@@ -597,6 +606,7 @@ def calculate_covered_call_strategy(
             "upside_pct": float(target_upside_pct or 0.0),
             "spot_price": spot_price,
             "avg_free_price": avg_free_price,
+            "strike_floor_price": strike_floor_price,
             "base_price": base_price,
             "target_price": target_price,
             "hits_count": hits_count,
