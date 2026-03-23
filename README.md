@@ -103,6 +103,14 @@ uv run python -m opcoes.cli position list
 uv run python -m opcoes.cli position close --id 1 --exit-date 2026-03-10 --price 35.20
 ```
 
+Cadastro manual de venda de opcao pela nota de corretagem:
+
+```bash
+uv run python -m opcoes.cli position add --ticker BBASP226 --underlying BBAS3 --trade-date 2026-03-23 --qty 400 --price 0.20 --fees 0.19 --side short
+```
+
+Depois do cadastro, recalcule o premio/DARF na tela de posicoes e valide em `/audit` se o premio liquido bate com a nota.
+
 ### DARF
 
 ```bash
@@ -172,6 +180,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - fluxo de PUT exercida agora destaca, na tela de `cash-covered-put`, o debito do exercicio, o lote de acoes gerado e os proximos passos de conferencia.
 - auditoria agora inclui o impacto de `ASSIGN` no caixa, reconcilia o lote criado no exercicio da PUT e mostra o liquido total da operacao incluindo exercicio.
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.
+- README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
 
 ## Troubleshooting Playwright (uv)
 
