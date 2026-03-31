@@ -707,7 +707,9 @@ def sync_position_realized_pnl(
                 raise ValueError("Informe position_id ou position.")
             from .portfolio import get_position
 
-            pos = get_position(int(position_id), conn=db)
+            # `portfolio` e `finance` mantêm wrappers de conexão distintos.
+            # Buscar a posição com a própria conexão do módulo evita cruzar wrappers.
+            pos = get_position(int(position_id))
 
         if not pos:
             return {}
@@ -816,7 +818,9 @@ def sync_position_closure_effects(
     try:
         from .portfolio import get_position
 
-        pos = get_position(int(position_id), conn=db)
+        # `portfolio` e `finance` mantêm wrappers de conexão distintos.
+        # Buscar a posição com a própria conexão do módulo evita cruzar wrappers.
+        pos = get_position(int(position_id))
         if not pos:
             return {"buyback": 0.0, "realized": {}}
 
