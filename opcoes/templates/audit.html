@@ -225,6 +225,34 @@
         </div>
       </div>
 
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <div class="card h-100 border-secondary">
+            <div class="card-body">
+              <div class="text-muted small">Resultado realizado (nao caixa)</div>
+              <div class="d-flex justify-content-between">
+                <span>Esperado</span>
+                <strong>R$ {{ "%.2f"|format(totals.expected_realized) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>No ledger</span>
+                <strong>R$ {{ "%.2f"|format(totals.actual_realized) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Diferenca</span>
+                {% set diff_r = totals.actual_realized - totals.expected_realized %}
+                <strong class="{% if diff_r != 0 %}text-danger{% else %}text-success{% endif %}">
+                  R$ {{ "%.2f"|format(diff_r) }}
+                </strong>
+              </div>
+              <div class="text-muted small mt-2">
+                Confere o resultado fiscal da baixa da posicao sem misturar com o fluxo de caixa.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="table-responsive mb-4">
         <table class="table table-sm table-striped align-middle">
           <thead class="table-light">
@@ -258,11 +286,14 @@
               <th class="text-end">Líquido total esp.</th>
               <th class="text-end">Líquido total caixa</th>
               <th class="text-end">Dif. total</th>
+              <th class="text-end">Realizado esp.</th>
+              <th class="text-end">Realizado ledger</th>
+              <th class="text-end">Dif. realizado</th>
             </tr>
           </thead>
           <tbody>
             {% if not rows %}
-              <tr><td colspan="29" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
+              <tr><td colspan="32" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
             {% else %}
               {% for r in rows %}
                 {% set dp = r.diff_premium or 0 %}
@@ -272,6 +303,7 @@
                 {% set dnf = r.diff_net or 0 %}
                 {% set dnc = r.diff_cash_net or 0 %}
                 {% set dtc = r.diff_total_cash or 0 %}
+                {% set dr = r.diff_realized or 0 %}
                 <tr>
                   <td>{{ r.id }}</td>
                   <td>{{ r.ticker }}</td>
@@ -353,6 +385,15 @@
                   <td class="text-end {% if dtc != 0 %}text-danger{% else %}text-success{% endif %}">
                     {% if r.diff_total_cash is not none %}{{ "%.2f"|format(r.diff_total_cash) }}{% else %}-{% endif %}
                   </td>
+                  <td class="text-end">
+                    {% if r.expected_realized is not none %}{{ "%.2f"|format(r.expected_realized) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.actual_realized is not none %}{{ "%.2f"|format(r.actual_realized) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if dr != 0 %}text-danger{% else %}text-success{% endif %}">
+                    {% if r.diff_realized is not none %}{{ "%.2f"|format(r.diff_realized) }}{% else %}-{% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             {% endif %}
@@ -362,7 +403,7 @@
 
       {% if orphan_rows %}
         <div class="alert alert-warning small">
-          Há lançamentos de prêmio/DARF/recompra/exercicio no caixa sem posição encontrada.
+          Há lançamentos de prêmio/DARF/recompra/exercicio/resultado realizado no caixa sem posição encontrada.
         </div>
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -373,6 +414,7 @@
                 <th class="text-end">DARF caixa</th>
                 <th class="text-end">Recompra caixa</th>
                 <th class="text-end">Exercicio caixa</th>
+                <th class="text-end">Realizado ledger</th>
                 <th class="text-end">Líquido fiscal</th>
                 <th class="text-end">Líquido operação</th>
                 <th class="text-end">Líquido total</th>
@@ -386,6 +428,7 @@
                   <td class="text-end">{{ "%.2f"|format(r.actual_darf or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_buyback or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_assignment or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(r.actual_realized or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_net or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_cash_net or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_total_cash or 0.0) }}</td>
@@ -397,8 +440,8 @@
       {% endif %}
 
       <p class="text-muted small">
-        Este relatório traz as visões fiscal (`Prêmio + DARF`), caixa da operação
-        (`Prêmio + DARF + Recompra`) e caixa total incluindo exercicio de PUT.
+        Este relatório separa o caixa da operação (`Prêmio + DARF + Recompra + Exercício`)
+        do resultado realizado fiscal da baixa da posição.
       </p>
     </div>
 

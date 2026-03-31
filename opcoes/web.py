@@ -56,6 +56,12 @@ from .strategies import (
 )
 from .flows import FlowError, assign_put, callaway
 from . import finance, darf
+from .tax import (
+    build_position_tax_events,
+    compute_tax,
+    list_monthly_tax_summaries,
+    list_tax_events_for_period,
+)
 
 
 def create_app() -> Flask:
@@ -330,15 +336,42 @@ def create_app() -> Flask:
         is_simulated = mode == "simulated"
         selected_period = (request.args.get("period") or "").strip()
 
-        provisions = darf.get_monthly_darf_provisions(
-            is_simulated=is_simulated, limit=36
-        )
+        provisions = darf.get_monthly_darf_provisions(is_simulated=is_simulated, limit=36)
         records = darf.list_months(is_simulated=is_simulated, limit=36)
         record_by_period = {r.period: r for r in records}
-
-        periods = sorted(
-            set(provisions.keys()) | set(record_by_period.keys()), reverse=True
+        tax_periods = sorted(
+            {
+                f"{today.year:04d}-{today.month:02d}"
+                for today in [datetime.date.today()]
+            }
+            | set(provisions.keys())
+            | set(record_by_period.keys()),
+            reverse=True,
         )
+        if not tax_periods:
+            today = datetime.date.today()
+            tax_periods = [today.strftime("%Y-%m")]
+
+        # Garante uma janela recente para o usuário conseguir navegar mesmo sem lançamentos.
+        anchor_year = int(tax_periods[0][:4])
+        anchor_month = int(tax_periods[0][5:7])
+        recent_periods: list[str] = []
+        year = anchor_year
+        month = anchor_month
+        for _ in range(12):
+            recent_periods.append(f"{year:04d}-{month:02d}")
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+        periods = sorted(set(recent_periods) | set(tax_periods), reverse=True)
+
+        tax_summaries = list_monthly_tax_summaries(
+            periods=periods,
+            is_simulated=is_simulated,
+        )
+        tax_by_period = {summary.period: summary for summary in tax_summaries}
+
         if not selected_period:
             if periods:
                 selected_period = periods[0]
@@ -347,6 +380,11 @@ def create_app() -> Flask:
 
         summaries = []
         for p in periods:
+            tax_summary = tax_by_period.get(p) or compute_tax(
+                month=int(p[5:7]),
+                year=int(p[:4]),
+                is_simulated=is_simulated,
+            )
             prov = float(provisions.get(p, 0.0) or 0.0)
             rec = record_by_period.get(p)
             try:
@@ -357,9 +395,10 @@ def create_app() -> Flask:
             generated = rec.amount if rec else None
             paid_date = rec.paid_date if rec else None
             paid_amount = rec.paid_amount if rec else None
+            tax_due = float(tax_summary.net_ir_due or 0.0)
 
             status = "Sem movimento"
-            if prov > 0 and not rec:
+            if tax_due > 0 and not rec:
                 status = "Pendente"
             if rec and not rec.paid_date:
                 status = "Gerado"
@@ -367,12 +406,14 @@ def create_app() -> Flask:
                 status = "Pago"
 
             diff = None
-            if prov > 0 and rec:
-                diff = prov - float(rec.amount or 0.0)
+            if rec is not None:
+                diff = tax_due - float(rec.amount or 0.0)
 
             summaries.append(
                 {
                     "period": p,
+                    "tax_summary": tax_summary,
+                    "tax_due": tax_due,
                     "provisioned": prov,
                     "generated": generated,
                     "due_date": due_date,
@@ -393,11 +434,22 @@ def create_app() -> Flask:
 
         provision_entries = []
         try:
-            provision_entries = darf.list_provision_entries(
-                period=selected_period, is_simulated=is_simulated
-            )
+            provision_entries = darf.list_provision_entries(period=selected_period, is_simulated=is_simulated)
         except Exception:
             provision_entries = []
+
+        selected_tax = tax_by_period.get(selected_period)
+        if selected_tax is None:
+            selected_tax = compute_tax(
+                month=int(selected_period[5:7]),
+                year=int(selected_period[:4]),
+                is_simulated=is_simulated,
+            )
+        selected_tax_events = list_tax_events_for_period(
+            period=selected_period,
+            is_simulated=is_simulated,
+        )
+        selected_provisioned = float(provisions.get(selected_period, 0.0) or 0.0)
 
         return render_template(
             "darf.html",
@@ -405,6 +457,9 @@ def create_app() -> Flask:
             is_simulated=is_simulated,
             selected_period=selected_period,
             periods=summaries,
+            selected_tax=selected_tax,
+            selected_tax_events=selected_tax_events,
+            selected_provisioned=selected_provisioned,
             provision_entries=provision_entries,
             selected_record=selected_record,
         )
@@ -417,20 +472,27 @@ def create_app() -> Flask:
         mode = "simulated" if is_simulated else "real"
 
         try:
-            entries = darf.list_provision_entries(
-                period=period, is_simulated=is_simulated
+            summary = compute_tax(
+                month=int(period[5:7]),
+                year=int(period[:4]),
+                is_simulated=is_simulated,
             )
-            provisioned = max(0.0, -sum(float(e.get("amount") or 0.0) for e in entries))
             due_date = darf.last_business_day_next_month(period)
         except Exception:
             return redirect(url_for("darf_view", mode=mode))
 
-        if provisioned > 0:
+        if summary.net_ir_due > 0:
             darf.upsert_month(
                 period=period,
                 due_date=due_date,
-                amount=provisioned,
+                amount=summary.net_ir_due,
                 is_simulated=is_simulated,
+            )
+        else:
+            darf.delete_month(
+                period=period,
+                is_simulated=is_simulated,
+                only_unpaid=True,
             )
 
         return redirect(url_for("darf_view", mode=mode, period=period))
@@ -453,19 +515,18 @@ def create_app() -> Flask:
         try:
             rec = darf.get_month(period=period, is_simulated=is_simulated)
             if not rec:
-                entries = darf.list_provision_entries(
-                    period=period, is_simulated=is_simulated
+                summary = compute_tax(
+                    month=int(period[5:7]),
+                    year=int(period[:4]),
+                    is_simulated=is_simulated,
                 )
-                provisioned = max(
-                    0.0, -sum(float(e.get("amount") or 0.0) for e in entries)
-                )
-                if provisioned <= 0:
+                if summary.net_ir_due <= 0:
                     return redirect(url_for("darf_view", mode=mode, period=period))
                 due_date = darf.last_business_day_next_month(period)
                 darf.upsert_month(
                     period=period,
                     due_date=due_date,
-                    amount=provisioned,
+                    amount=summary.net_ir_due,
                     is_simulated=is_simulated,
                 )
             darf.mark_paid(
@@ -578,6 +639,7 @@ def create_app() -> Flask:
             exit_price=0.0,
             exit_reason="Expiração",
         )
+        finance.sync_position_closure_effects(position_id=position_id)
 
         if opt_type == "PUT":
             return redirect(
@@ -849,6 +911,7 @@ def create_app() -> Flask:
                 finance.TransactionType.DARF,
                 finance.TransactionType.BUY,
                 finance.TransactionType.ASSIGNMENT,
+                finance.TransactionType.REALIZED,
             ],
             is_simulated=is_simulated,
         )
@@ -876,6 +939,8 @@ def create_app() -> Flask:
             "actual_assignment": 0.0,
             "expected_total_cash": 0.0,
             "actual_total_cash": 0.0,
+            "expected_realized": 0.0,
+            "actual_realized": 0.0,
         }
 
         for pos in positions_all:
@@ -904,9 +969,16 @@ def create_app() -> Flask:
             expected_darf = None
             expected_buyback = None
             expected_assignment = None
+            expected_realized = None
             assignment_stock_ticker = None
             assignment_stock_qty = 0
             assignment_stock_price = None
+            realized_events = build_position_tax_events(pos)
+            if realized_events:
+                expected_realized = round(
+                    sum(float(event.amount) for event in realized_events),
+                    2,
+                )
             if is_option and side == "short":
                 expected_premium = finance.calculate_option_premium(
                     entry_price=entry_price,
@@ -955,6 +1027,9 @@ def create_app() -> Flask:
             actual_assignment = ledger_sums.get(pid, {}).get(
                 finance.TransactionType.ASSIGNMENT.value
             )
+            actual_realized = ledger_sums.get(pid, {}).get(
+                finance.TransactionType.REALIZED.value
+            )
 
             if (
                 expected_premium is None
@@ -964,6 +1039,8 @@ def create_app() -> Flask:
                 and actual_buyback is None
                 and expected_assignment is None
                 and actual_assignment is None
+                and expected_realized is None
+                and actual_realized is None
             ):
                 continue
 
@@ -1011,16 +1088,19 @@ def create_app() -> Flask:
                     "expected_darf": expected_darf,
                     "expected_buyback": expected_buyback,
                     "expected_assignment": expected_assignment,
+                    "expected_realized": expected_realized,
                     "actual_premium": actual_premium,
                     "actual_darf": actual_darf,
                     "actual_buyback": actual_buyback,
                     "actual_assignment": actual_assignment,
+                    "actual_realized": actual_realized,
                     "diff_premium": _money_diff(actual_premium, expected_premium),
                     "diff_darf": _money_diff(actual_darf, expected_darf),
                     "diff_buyback": _money_diff(actual_buyback, expected_buyback),
                     "diff_assignment": _money_diff(
                         actual_assignment, expected_assignment
                     ),
+                    "diff_realized": _money_diff(actual_realized, expected_realized),
                     "expected_net": expected_net,
                     "actual_net": actual_net,
                     "diff_net": _money_diff(actual_net, expected_net),
@@ -1054,6 +1134,10 @@ def create_app() -> Flask:
                 totals["expected_assignment"] += float(expected_assignment or 0.0)
             if actual_assignment is not None:
                 totals["actual_assignment"] += float(actual_assignment or 0.0)
+            if expected_realized is not None:
+                totals["expected_realized"] += float(expected_realized or 0.0)
+            if actual_realized is not None:
+                totals["actual_realized"] += float(actual_realized or 0.0)
 
         totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
         totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
@@ -1076,6 +1160,7 @@ def create_app() -> Flask:
                 "actual_darf": sums.get(finance.TransactionType.DARF.value),
                 "actual_buyback": sums.get(finance.TransactionType.BUY.value),
                 "actual_assignment": sums.get(finance.TransactionType.ASSIGNMENT.value),
+                "actual_realized": sums.get(finance.TransactionType.REALIZED.value),
                 "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0),
                 "actual_cash_net": (
@@ -1097,6 +1182,7 @@ def create_app() -> Flask:
                 or sums.get(finance.TransactionType.DARF.value) is not None
                 or sums.get(finance.TransactionType.BUY.value) is not None
                 or sums.get(finance.TransactionType.ASSIGNMENT.value) is not None
+                or sums.get(finance.TransactionType.REALIZED.value) is not None
             )
         ]
 
@@ -1392,28 +1478,7 @@ def create_app() -> Flask:
             parent_position_id=parent_id,
             strategy_tag=strategy_tag_raw,
         )
-        ticker = (ticker or "").strip().upper()
-        side = (side_raw or "").strip().lower()
-        if _is_option_ticker(ticker) and side == "short":
-            qty_val = int(form["qty"]) if form.get("qty") else 0
-            partial_qty_val = (
-                int(form["partial_qty"]) if form.get("partial_qty") else None
-            )
-            is_simulated_flag = form.get("is_simulated") == "1"
-            finance.sync_short_option_buyback(
-                position_id=position_id,
-                ticker=ticker,
-                qty=qty_val,
-                partial_qty=partial_qty_val,
-                status=status,
-                exit_date=form.get("exit_date") or None,
-                exit_price=(
-                    _parse_form_float(form.get("exit_price"))
-                    if form.get("exit_price")
-                    else None
-                ),
-                is_simulated=is_simulated_flag,
-            )
+        finance.sync_position_closure_effects(position_id=position_id)
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
     @app.post("/positions/delete/<int:position_id>")

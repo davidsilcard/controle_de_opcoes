@@ -122,6 +122,12 @@ Baixa e conferencia visual do resultado realizado:
 uv run python -m opcoes.cli tax --year 2026 --month 2
 ```
 
+A partir da baixa da posicao:
+
+- o resultado realizado passa a ser sincronizado no ledger para auditoria.
+- a tela `/darf` passa a separar `provisao de caixa` de `DARF oficial do mes`.
+- a geracao da DARF usa a apuracao mensal com compensacao de prejuizo e IRRF.
+
 ### Web app
 
 ```bash
@@ -188,6 +194,10 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
 - tela de `positions` agora traz um painel didatico de resultados realizados por ano e por mes, com lista das baixas do periodo e isolamento por usuario autenticado.
 - rota `/positions` agora tem teste de regressao para garantir que o template sempre receba `realized_summary` e nao quebre em tempo de execucao.
+- baixa/parcial da posicao agora sincroniza `resultado realizado` no ledger para auditoria fiscal.
+- auditoria agora separa `caixa` de `resultado realizado`, evitando misturar fluxo financeiro com lucro/prejuizo tributavel.
+- DARF agora usa apuracao mensal com compensacao de prejuizo e IRRF, mantendo a provisao de caixa apenas como apoio didatico.
+- CLI `tax` agora mostra base tributavel, prejuizo acumulado e DARF liquida do mes.
 
 ## Troubleshooting Playwright (uv)
 

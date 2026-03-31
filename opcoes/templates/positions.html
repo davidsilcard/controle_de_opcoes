@@ -114,6 +114,7 @@
                   {% if auth_enabled and current_username %}
                     Você está vendo apenas os dados do usuário <strong>{{ current_username }}</strong>.
                   {% endif %}
+                  Ao dar baixa, o resultado fiscal também passa a alimentar a <strong>Auditoria</strong> e a <strong>DARF</strong>.
                 </p>
               </div>
               <form class="row g-2 align-items-end" method="get" action="/positions">

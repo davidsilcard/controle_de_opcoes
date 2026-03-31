@@ -632,6 +632,9 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         strategy_tag="cash_put",
         include_unlinked=True,
     )
+    transactions = [
+        tx for tx in transactions if tx.type != finance.TransactionType.REALIZED
+    ]
     summary_simulated_filter: Optional[bool]
     if mode == "all":
         summary_simulated_filter = None

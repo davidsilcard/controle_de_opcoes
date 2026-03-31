@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
-    <title>Opções – DARF</title>
+    <title>Opcoes - DARF</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
@@ -12,21 +12,21 @@
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top">
       <div class="container-fluid">
-        <a class="navbar-brand" href="/">Opções</a>
+        <a class="navbar-brand" href="/">Opcoes</a>
         <div class="navbar-nav">
           <a class="nav-link" href="/">Ranking</a>
-          <a class="nav-link" href="/positions">Posições</a>
+          <a class="nav-link" href="/positions">Posicoes</a>
           <a class="nav-link" href="/covered-call">Covered Call</a>
           <a class="nav-link" href="/cash-covered-put">Cash-Covered Put</a>
           <a class="nav-link" href="/fundamentus">Fundamentus</a>
           <a class="nav-link active" href="/darf">DARF</a>
           <a class="nav-link" href="/audit">Auditoria</a>
-          <a class="nav-link" href="/settings">Configurações</a>
+          <a class="nav-link" href="/settings">Configuracoes</a>
         </div>
       </div>
     </nav>
 
-    <div class="container">
+    <div class="container-fluid">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h4 mb-0">DARF ({{ 'Simulado' if is_simulated else 'Real' }})</h1>
         <div class="btn-group btn-group-sm" role="group" aria-label="Modo">
@@ -36,31 +36,38 @@
       </div>
 
       <p class="text-muted small mb-4">
-        Esta aba consolida a <strong>provisão de DARF</strong> (saldo “limpo”) lançada no caixa.
-        Vencimento é calculado como <strong>último dia útil do mês seguinte</strong> (sem feriados).
+        Esta tela separa tres coisas: <strong>resultado fiscal do mes</strong>,
+        <strong>DARF oficial a pagar</strong> e <strong>provisao de caixa</strong>.
+        A provisao continua util para saldo "limpo", mas a DARF gerada agora segue a apuracao mensal.
       </p>
 
       <div class="table-responsive mb-4">
         <table class="table table-sm table-striped align-middle">
           <thead class="table-light">
             <tr>
-              <th>Competência</th>
-              <th class="text-end">Provisão (R$)</th>
-              <th class="text-end">DARF gerado (R$)</th>
+              <th>Competencia</th>
+              <th class="text-end">Resultado mes</th>
+              <th class="text-end">Prej. acum.</th>
+              <th class="text-end">IR devido</th>
+              <th class="text-end">IRRF</th>
+              <th class="text-end">DARF liquida</th>
+              <th class="text-end">Provisao caixa</th>
+              <th class="text-end">DARF gerado</th>
               <th>Vencimento</th>
-              <th>Pago em</th>
-              <th class="text-end">Pago (R$)</th>
               <th>Status</th>
-              <th class="text-end">Ações</th>
+              <th class="text-end">Acoes</th>
             </tr>
           </thead>
           <tbody>
             {% if not periods %}
               <tr>
-                <td colspan="8" class="text-muted text-center">Sem provisões de DARF registradas.</td>
+                <td colspan="11" class="text-muted text-center">Sem meses para apurar.</td>
               </tr>
             {% else %}
               {% for row in periods %}
+                {% set tax = row.tax_summary %}
+                {% set month_result = (tax.swing_net or 0.0) + (tax.daytrade_net or 0.0) %}
+                {% set carry_total = (tax.swing_loss_carry_out or 0.0) + (tax.daytrade_loss_carry_out or 0.0) %}
                 {% set is_selected = (row.period == selected_period) %}
                 <tr class="{% if is_selected %}table-primary{% endif %}">
                   <td>
@@ -68,10 +75,17 @@
                       {{ row.period }}
                     </a>
                     {% if row.diff is not none and row.diff|abs > 0.01 %}
-                      <div class="text-muted small">Diferença vs gerado: {{ "%.2f"|format(row.diff) }}</div>
+                      <div class="text-muted small">Diferenca vs gerado: {{ "%.2f"|format(row.diff) }}</div>
                     {% endif %}
                   </td>
-                  <td class="text-end">{{ "%.2f"|format(row.provisioned or 0) }}</td>
+                  <td class="text-end {% if month_result > 0 %}text-success{% elif month_result < 0 %}text-danger{% endif %}">
+                    {{ "%.2f"|format(month_result) }}
+                  </td>
+                  <td class="text-end">{{ "%.2f"|format(carry_total) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(tax.total_ir or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(tax.total_irrf or 0.0) }}</td>
+                  <td class="text-end fw-semibold {% if row.tax_due > 0 %}text-primary{% endif %}">{{ "%.2f"|format(row.tax_due or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(row.provisioned or 0.0) }}</td>
                   <td class="text-end">
                     {% if row.generated is not none %}
                       {{ "%.2f"|format(row.generated) }}
@@ -80,14 +94,6 @@
                     {% endif %}
                   </td>
                   <td>{{ row.due_date or '-' }}</td>
-                  <td>{{ row.paid_date or '-' }}</td>
-                  <td class="text-end">
-                    {% if row.paid_amount is not none %}
-                      {{ "%.2f"|format(row.paid_amount) }}
-                    {% else %}
-                      -
-                    {% endif %}
-                  </td>
                   <td>
                     {% if row.status == 'Pago' %}
                       <span class="badge bg-success">Pago</span>
@@ -101,7 +107,7 @@
                   </td>
                   <td class="text-end">
                     <div class="d-inline-flex gap-1">
-                      {% if row.provisioned and row.provisioned > 0 %}
+                      {% if row.tax_due and row.tax_due > 0 %}
                         <form method="post" action="/darf/generate">
                           <input type="hidden" name="period" value="{{ row.period }}">
                           <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
@@ -129,57 +135,62 @@
         </table>
       </div>
 
-      <div class="row g-3">
-        <div class="col-lg-7">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Lançamentos de provisão – {{ selected_period }}</span>
-              <small class="text-muted">{{ 'Simulado' if is_simulated else 'Real' }}</small>
-            </div>
-            <div class="card-body p-0">
-              <div class="table-responsive">
-                <table class="table table-sm table-striped mb-0 align-middle">
-                  <thead class="table-light">
-                    <tr>
-                      <th>ID</th>
-                      <th>Data</th>
-                      <th>Ticker</th>
-                      <th class="text-end">Valor (R$)</th>
-                      <th>Vínculo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% if not provision_entries %}
-                      <tr>
-                        <td colspan="5" class="text-muted text-center">Sem lançamentos neste mês.</td>
-                      </tr>
-                    {% else %}
-                      {% for e in provision_entries %}
-                        <tr>
-                          <td>{{ e.id }}</td>
-                          <td>{{ e.date }}</td>
-                          <td>{{ e.position_ticker or '-' }}</td>
-                          <td class="text-end">{{ "%.2f"|format((-1 * (e.amount or 0))|float) }}</td>
-                          <td class="text-muted small">
-                            {% if e.position_id %}
-                              posição #{{ e.position_id }}
-                            {% else %}
-                              -
-                            {% endif %}
-                          </td>
-                        </tr>
-                      {% endfor %}
-                    {% endif %}
-                  </tbody>
-                </table>
+      <div class="row g-3 mb-4">
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-header">Apuracao fiscal - {{ selected_period }}</div>
+            <div class="card-body">
+              <div class="d-flex justify-content-between">
+                <span>Swing do mes</span>
+                <strong class="{% if selected_tax.swing_net > 0 %}text-success{% elif selected_tax.swing_net < 0 %}text-danger{% endif %}">
+                  R$ {{ "%.2f"|format(selected_tax.swing_net) }}
+                </strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Day trade do mes</span>
+                <strong class="{% if selected_tax.daytrade_net > 0 %}text-success{% elif selected_tax.daytrade_net < 0 %}text-danger{% endif %}">
+                  R$ {{ "%.2f"|format(selected_tax.daytrade_net) }}
+                </strong>
+              </div>
+              <div class="d-flex justify-content-between mt-3">
+                <span>Prej. swing vindo</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.swing_loss_carry_in) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Prej. day trade vindo</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.daytrade_loss_carry_in) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between mt-3">
+                <span>Base tributavel swing</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.swing_taxable) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Base tributavel day trade</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.daytrade_taxable) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between mt-3">
+                <span>IR devido</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.total_ir) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>IRRF compensavel</span>
+                <strong>R$ {{ "%.2f"|format(selected_tax.total_irrf) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between border-top pt-3 mt-3">
+                <span>DARF liquida</span>
+                <strong class="{% if selected_tax.net_ir_due > 0 %}text-primary{% endif %}">R$ {{ "%.2f"|format(selected_tax.net_ir_due) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Prej. acumulado p/ prox.</span>
+                <strong>R$ {{ "%.2f"|format((selected_tax.swing_loss_carry_out or 0.0) + (selected_tax.daytrade_loss_carry_out or 0.0)) }}</strong>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="col-lg-5">
-          <div class="card">
-            <div class="card-header">DARF – {{ selected_period }}</div>
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-header">DARF gerada - {{ selected_period }}</div>
             <div class="card-body">
               {% if selected_record %}
                 <div class="mb-2">
@@ -187,26 +198,30 @@
                   <div class="fw-semibold">{{ selected_record.due_date }}</div>
                 </div>
                 <div class="mb-2">
-                  <div class="text-muted small">Valor gerado (R$)</div>
-                  <div class="fw-semibold">{{ "%.2f"|format(selected_record.amount) }}</div>
+                  <div class="text-muted small">Valor gerado</div>
+                  <div class="fw-semibold">R$ {{ "%.2f"|format(selected_record.amount) }}</div>
                 </div>
                 <div class="mb-3">
                   <div class="text-muted small">Status</div>
                   {% if selected_record.paid_date %}
-                    <div class="fw-semibold text-success">Pago em {{ selected_record.paid_date }} (R$ {{ "%.2f"|format(selected_record.paid_amount or selected_record.amount) }})</div>
+                    <div class="fw-semibold text-success">
+                      Pago em {{ selected_record.paid_date }} (R$ {{ "%.2f"|format(selected_record.paid_amount or selected_record.amount) }})
+                    </div>
                   {% else %}
                     <div class="fw-semibold text-primary">Gerado (a pagar)</div>
                   {% endif %}
                 </div>
               {% else %}
-                <p class="text-muted small mb-3">Nenhum DARF gerado para este mês.</p>
+                <p class="text-muted small mb-3">Nenhuma DARF gerada para este mes.</p>
               {% endif %}
 
               <div class="d-flex gap-2 flex-wrap">
                 <form method="post" action="/darf/generate" class="d-flex gap-2 align-items-end flex-wrap">
                   <input type="hidden" name="period" value="{{ selected_period }}">
                   <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
-                  <button type="submit" class="btn btn-outline-primary btn-sm">Gerar/Atualizar</button>
+                  <button type="submit" class="btn btn-outline-primary btn-sm" {% if selected_tax.net_ir_due <= 0 %}disabled{% endif %}>
+                    Gerar/Atualizar
+                  </button>
                 </form>
 
                 <form method="post" action="/darf/pay" class="d-flex gap-2 align-items-end flex-wrap">
@@ -224,6 +239,103 @@
                     Marcar pago
                   </button>
                 </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-4">
+          <div class="card h-100">
+            <div class="card-header">Caixa limpo - {{ selected_period }}</div>
+            <div class="card-body">
+              <div class="d-flex justify-content-between">
+                <span>Provisao no ledger</span>
+                <strong>R$ {{ "%.2f"|format(selected_provisioned or 0.0) }}</strong>
+              </div>
+              <div class="text-muted small mt-3">
+                Esta provisao nao substitui a DARF oficial. Ela serve como visao conservadora de caixa enquanto a posicao ainda esta aberta.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="card">
+            <div class="card-header">Eventos fiscais - {{ selected_period }}</div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped mb-0 align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Data</th>
+                      <th>Ticker</th>
+                      <th>Fase</th>
+                      <th>Tipo</th>
+                      <th class="text-end">Qtd</th>
+                      <th class="text-end">Resultado</th>
+                      <th class="text-end">IRRF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% if not selected_tax_events %}
+                      <tr>
+                        <td colspan="7" class="text-muted text-center">Sem eventos fiscais neste mes.</td>
+                      </tr>
+                    {% else %}
+                      {% for event in selected_tax_events %}
+                        <tr>
+                          <td>{{ event.date }}</td>
+                          <td>{{ event.ticker or '-' }}</td>
+                          <td>{{ 'Parcial' if event.phase == 'partial' else 'Encerramento' }}</td>
+                          <td>{{ 'Day trade' if event.trade_type == 'daytrade' else 'Swing' }}</td>
+                          <td class="text-end">{{ event.qty }}</td>
+                          <td class="text-end {% if event.amount > 0 %}text-success{% elif event.amount < 0 %}text-danger{% endif %}">
+                            {{ "%.2f"|format(event.amount) }}
+                          </td>
+                          <td class="text-end">{{ "%.2f"|format(event.irrf or 0.0) }}</td>
+                        </tr>
+                      {% endfor %}
+                    {% endif %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-5">
+          <div class="card">
+            <div class="card-header">Provisoes no caixa - {{ selected_period }}</div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped mb-0 align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>ID</th>
+                      <th>Data</th>
+                      <th>Ticker</th>
+                      <th class="text-end">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% if not provision_entries %}
+                      <tr>
+                        <td colspan="4" class="text-muted text-center">Sem provisoes neste mes.</td>
+                      </tr>
+                    {% else %}
+                      {% for e in provision_entries %}
+                        <tr>
+                          <td>{{ e.id }}</td>
+                          <td>{{ e.date }}</td>
+                          <td>{{ e.position_ticker or '-' }}</td>
+                          <td class="text-end">{{ "%.2f"|format((-1 * (e.amount or 0))|float) }}</td>
+                        </tr>
+                      {% endfor %}
+                    {% endif %}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

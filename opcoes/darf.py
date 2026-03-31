@@ -352,6 +352,28 @@ def mark_paid(
         conn.close()
 
 
+def delete_month(
+    *,
+    period: str,
+    is_simulated: bool = False,
+    only_unpaid: bool = False,
+) -> None:
+    p = _parse_period(period)
+    conn = _connect(ensure_schema=True)
+    try:
+        where = "period = ? AND COALESCE(is_simulated, 0) = ?"
+        params: list[object] = [p, 1 if is_simulated else 0]
+        if only_unpaid:
+            where += " AND paid_date IS NULL"
+        conn.execute(
+            f"DELETE FROM darf_months WHERE {where}",
+            params,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_monthly_darf_provisions(*, is_simulated: bool, limit: int = 36) -> Dict[str, float]:
     """Soma provisões de DARF (saldo limpo) por competência (YYYY-MM)."""
     conn = _connect()
@@ -431,6 +453,7 @@ def list_provision_entries(*, period: str, is_simulated: bool) -> List[dict]:
 
 __all__ = [
     "DarfMonth",
+    "delete_month",
     "get_month",
     "list_months",
     "get_monthly_darf_provisions",

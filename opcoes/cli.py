@@ -19,6 +19,7 @@ from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
 from .db_health import is_postgres_ready, run_db_check
 from .db_optimize import optimize_postgres_schema
+from . import finance
 from .fundamentus import (
     FundamentusFilterConfig,
     apply_filters,
@@ -564,6 +565,7 @@ def main() -> None:
                 close_position(
                     position_id=args.id, exit_date=exit_date, exit_price=args.price
                 )
+                finance.sync_position_closure_effects(position_id=args.id)
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
             print(f"Posição {args.id} fechada em {exit_date} a {args.price:.2f}.")
@@ -649,10 +651,17 @@ def main() -> None:
         print(
             f"  Day trade:   lucro líquido R$ {summary.daytrade_net:.2f}, IR devido R$ {summary.daytrade_ir:.2f}, IRRF R$ {summary.daytrade_irrf:.2f}"
         )
-        total_ir = summary.swing_ir + summary.daytrade_ir
-        total_irrf = summary.swing_irrf + summary.daytrade_irrf
         print(
-            f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})"
+            f"  Base tributÃ¡vel: swing R$ {summary.swing_taxable:.2f}, day trade R$ {summary.daytrade_taxable:.2f}"
+        )
+        print(
+            f"  PrejuÃ­zo acumulado: swing R$ {summary.swing_loss_carry_out:.2f}, day trade R$ {summary.daytrade_loss_carry_out:.2f}"
+        )
+        print(
+            f"  Total IR devido: R$ {summary.total_ir:.2f} (IRRF a compensar: R$ {summary.total_irrf:.2f})"
+        )
+        print(
+            f"  DARF lÃ­quida do mÃªs: R$ {summary.net_ir_due:.2f}"
         )
     elif args.cmd == "user":
         if args.subcmd == "create":

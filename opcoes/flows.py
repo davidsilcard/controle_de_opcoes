@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .db import db_transaction
-from .finance import TransactionType, add_transaction
+from .finance import TransactionType, add_transaction, sync_position_closure_effects
 from .portfolio import add_position, close_position, get_position, update_position
 from .utils import infer_option_type
 
@@ -43,6 +43,7 @@ def assign_put(
             is_simulated=is_simulated,
             conn=conn,
         )
+        sync_position_closure_effects(position_id=position_id, conn=conn)
 
         if pos:
             add_position(
@@ -162,6 +163,8 @@ def callaway(
                     conn=conn,
                 )
 
+        sync_position_closure_effects(position_id=int(lot_id), conn=conn)
+
         close_position(
             position_id=position_id,
             exit_date=date,
@@ -180,6 +183,7 @@ def callaway(
             is_simulated=is_simulated,
             conn=conn,
         )
+        sync_position_closure_effects(position_id=position_id, conn=conn)
 
     return underlying
 

@@ -7,6 +7,7 @@ from .config import (
     get_postgres_schema,
 )
 from .db_health import resolve_postgres_target
+from .utils import infer_option_type
 
 
 class TransactionType(str, Enum):
@@ -18,6 +19,7 @@ class TransactionType(str, Enum):
     SELL = "SELL"            # Venda direta de ativo
     DARF = "DARF"            # Provisão/pagamento de IR (DARF)
     DIVIDEND = "DIVIDEND"    # Dividendos recebidos
+    REALIZED = "REALIZED"    # Resultado realizado da baixa/parcial
 
 
 @dataclass
@@ -280,12 +282,13 @@ def get_balance(mode: str = "all") -> float:
     try:
         if not _has_ledger_table(conn):
             return 0.0
-        where = ""
-        params: list[object] = []
+        where_parts = ["type <> ?"]
+        params: list[object] = [TransactionType.REALIZED.value]
         if mode == "real":
-            where = "WHERE is_simulated = 0"
+            where_parts.append("is_simulated = 0")
         elif mode == "simulated":
-            where = "WHERE is_simulated = 1"
+            where_parts.append("is_simulated = 1")
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         row = conn.execute(f"SELECT SUM(amount) as total FROM ledger {where}", params).fetchone()
         if not row:
             return 0.0
@@ -683,6 +686,164 @@ def sync_short_option_buyback(
         if owns_conn:
             db.commit()
         return amount
+    finally:
+        if owns_conn:
+            db.close()
+
+
+def sync_position_realized_pnl(
+    *,
+    position_id: Optional[int] = None,
+    position: Optional[Mapping[str, Any]] = None,
+    conn: Optional[Any] = None,
+) -> Dict[str, float]:
+    """Sincroniza eventos de resultado realizado vinculados à posição."""
+
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
+    try:
+        pos = position
+        if pos is None:
+            if position_id is None:
+                raise ValueError("Informe position_id ou position.")
+            from .portfolio import get_position
+
+            pos = get_position(int(position_id), conn=db)
+
+        if not pos:
+            return {}
+
+        from .tax import build_position_tax_events
+
+        pid = int(pos.get("id") or position_id or 0)
+        ticker = str(pos.get("ticker") or "").strip().upper() or "POS"
+        expected_events = {
+            event.phase: event
+            for event in build_position_tax_events(pos)
+            if event.position_id is not None
+        }
+
+        rows = db.execute(
+            """
+            SELECT id, description
+            FROM ledger
+            WHERE position_id = ? AND type = ?
+            ORDER BY id ASC
+            """,
+            (pid, TransactionType.REALIZED.value),
+        ).fetchall()
+
+        rows_by_phase: Dict[str, List[int]] = {"partial": [], "close": [], "other": []}
+        for row in rows:
+            description = str(row.get("description") or "").strip().lower()
+            if description.startswith("resultado parcial "):
+                rows_by_phase["partial"].append(int(row["id"]))
+            elif description.startswith("resultado encerramento "):
+                rows_by_phase["close"].append(int(row["id"]))
+            else:
+                rows_by_phase["other"].append(int(row["id"]))
+
+        synced: Dict[str, float] = {}
+        for phase, phase_label in (("partial", "parcial"), ("close", "encerramento")):
+            event = expected_events.get(phase)
+            current_ids = rows_by_phase[phase]
+            if event is None:
+                if current_ids:
+                    db.execute(
+                        f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in current_ids)})",
+                        current_ids,
+                    )
+                continue
+
+            description = (
+                f"Resultado {phase_label} {ticker} ({int(event.qty)}x, {event.trade_type})"
+            )
+            if current_ids:
+                db.execute(
+                    """
+                    UPDATE ledger
+                    SET date = ?, amount = ?, description = ?, is_simulated = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        event.date,
+                        float(event.amount),
+                        description,
+                        1 if event.is_simulated else 0,
+                        current_ids[0],
+                    ),
+                )
+                extra_ids = current_ids[1:]
+                if extra_ids:
+                    db.execute(
+                        f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in extra_ids)})",
+                        extra_ids,
+                    )
+            else:
+                add_transaction(
+                    date=event.date,
+                    type=TransactionType.REALIZED,
+                    amount=float(event.amount),
+                    description=description,
+                    position_id=pid,
+                    is_simulated=event.is_simulated,
+                    conn=db,
+                )
+            synced[phase] = float(event.amount)
+
+        other_ids = rows_by_phase["other"]
+        if other_ids:
+            db.execute(
+                f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in other_ids)})",
+                other_ids,
+            )
+
+        if owns_conn:
+            db.commit()
+        return synced
+    finally:
+        if owns_conn:
+            db.close()
+
+
+def sync_position_closure_effects(
+    *,
+    position_id: int,
+    conn: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Mantém ledger alinhado após parcial, encerramento ou reabertura."""
+
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
+    try:
+        from .portfolio import get_position
+
+        pos = get_position(int(position_id), conn=db)
+        if not pos:
+            return {"buyback": 0.0, "realized": {}}
+
+        ticker = str(pos.get("ticker") or "").strip().upper()
+        side = str(pos.get("side") or "").strip().lower()
+        buyback_amount = 0.0
+        if infer_option_type(ticker) in {"CALL", "PUT"} and side == "short":
+            buyback_amount = sync_short_option_buyback(
+                position_id=int(position_id),
+                ticker=ticker,
+                qty=int(pos.get("qty") or 0),
+                partial_qty=int(pos.get("partial_qty") or 0),
+                status=str(pos.get("status") or ""),
+                exit_date=str(pos.get("exit_date") or "") or None,
+                exit_price=(
+                    float(pos.get("exit_price"))
+                    if pos.get("exit_price") is not None
+                    else None
+                ),
+                is_simulated=bool(pos.get("is_simulated") or 0),
+                conn=db,
+            )
+
+        realized = sync_position_realized_pnl(position=pos, conn=db)
+        if owns_conn:
+            db.commit()
+        return {"buyback": buyback_amount, "realized": realized}
     finally:
         if owns_conn:
             db.close()
