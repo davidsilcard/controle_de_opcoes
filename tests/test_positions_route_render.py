@@ -18,6 +18,8 @@ def test_positions_route_always_injects_realized_summary(monkeypatch) -> None:
             "selected_month": None,
             "overall_totals": {
                 "count": 0,
+                "total_gross": 0.0,
+                "total_fees": 0.0,
                 "total_net": 0.0,
                 "total_profit": 0.0,
                 "total_loss": 0.0,
@@ -27,6 +29,8 @@ def test_positions_route_always_injects_realized_summary(monkeypatch) -> None:
             },
             "period_totals": {
                 "count": 0,
+                "total_gross": 0.0,
+                "total_fees": 0.0,
                 "total_net": 0.0,
                 "total_profit": 0.0,
                 "total_loss": 0.0,
@@ -50,4 +54,3 @@ def test_positions_route_always_injects_realized_summary(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Resultados realizados" in html
     assert "Nenhuma posição registrada." in html
-

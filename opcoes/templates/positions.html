@@ -114,6 +114,7 @@
                   {% if auth_enabled and current_username %}
                     Você está vendo apenas os dados do usuário <strong>{{ current_username }}</strong>.
                   {% endif %}
+                  Aqui o <strong>resultado fiscal</strong> é mostrado líquido de taxas, no mesmo critério do <strong>Resultado mês</strong> da DARF.
                   Ao dar baixa, o resultado fiscal também passa a alimentar a <strong>Auditoria</strong> e a <strong>DARF</strong>.
                 </p>
               </div>
@@ -151,7 +152,7 @@
             <div class="row g-3 mb-3">
               <div class="col-md-3">
                 <div class="border rounded p-3 bg-light h-100">
-                  <div class="small text-muted">Resultado líquido do período</div>
+                  <div class="small text-muted">Resultado fiscal do período</div>
                   <div class="fs-4 fw-semibold {% if realized_summary.period_totals.total_net > 0 %}text-success{% elif realized_summary.period_totals.total_net < 0 %}text-danger{% endif %}">
                     R$ {{ "%.2f"|format(realized_summary.period_totals.total_net) }}
                   </div>
@@ -159,14 +160,14 @@
               </div>
               <div class="col-md-3">
                 <div class="border rounded p-3 bg-light h-100">
-                  <div class="small text-muted">Lucros somados</div>
-                  <div class="fs-5 fw-semibold text-success">R$ {{ "%.2f"|format(realized_summary.period_totals.total_profit) }}</div>
+                  <div class="small text-muted">Resultado bruto somado</div>
+                  <div class="fs-5 fw-semibold {% if realized_summary.period_totals.total_gross > 0 %}text-success{% elif realized_summary.period_totals.total_gross < 0 %}text-danger{% endif %}">R$ {{ "%.2f"|format(realized_summary.period_totals.total_gross) }}</div>
                 </div>
               </div>
               <div class="col-md-3">
                 <div class="border rounded p-3 bg-light h-100">
-                  <div class="small text-muted">Prejuízos somados</div>
-                  <div class="fs-5 fw-semibold text-danger">R$ {{ "%.2f"|format(realized_summary.period_totals.total_loss) }}</div>
+                  <div class="small text-muted">Taxas descontadas</div>
+                  <div class="fs-5 fw-semibold {% if realized_summary.period_totals.total_fees > 0 %}text-danger{% endif %}">R$ {{ "%.2f"|format(realized_summary.period_totals.total_fees) }}</div>
                 </div>
               </div>
               <div class="col-md-3">
@@ -190,9 +191,9 @@
                       <tr>
                         <th>Mês</th>
                         <th class="text-end">Encerradas</th>
-                        <th class="text-end text-success">Lucro</th>
-                        <th class="text-end text-danger">Prejuízo</th>
-                        <th class="text-end">Líquido</th>
+                        <th class="text-end">Bruto</th>
+                        <th class="text-end text-danger">Taxas</th>
+                        <th class="text-end">Fiscal</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -201,8 +202,8 @@
                           <tr {% if realized_summary.selected_year == item.year and realized_summary.selected_month == item.month %}class="table-primary"{% endif %}>
                             <td>{{ item.month_label }}</td>
                             <td class="text-end">{{ item.count }}</td>
-                            <td class="text-end text-success">{{ "%.2f"|format(item.total_profit) }}</td>
-                            <td class="text-end text-danger">{{ "%.2f"|format(item.total_loss) }}</td>
+                            <td class="text-end {% if item.total_gross > 0 %}text-success{% elif item.total_gross < 0 %}text-danger{% endif %}">{{ "%.2f"|format(item.total_gross) }}</td>
+                            <td class="text-end text-danger">{{ "%.2f"|format(item.total_fees) }}</td>
                             <td class="text-end {% if item.total_net > 0 %}text-success{% elif item.total_net < 0 %}text-danger{% endif %} fw-semibold">{{ "%.2f"|format(item.total_net) }}</td>
                           </tr>
                         {% endfor %}
@@ -220,9 +221,9 @@
                       <tr>
                         <th>Ano</th>
                         <th class="text-end">Encerradas</th>
-                        <th class="text-end text-success">Lucro</th>
-                        <th class="text-end text-danger">Prejuízo</th>
-                        <th class="text-end">Líquido</th>
+                        <th class="text-end">Bruto</th>
+                        <th class="text-end text-danger">Taxas</th>
+                        <th class="text-end">Fiscal</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -231,8 +232,8 @@
                           <tr {% if realized_summary.selected_year == item.year and not realized_summary.selected_month %}class="table-primary"{% endif %}>
                             <td>{{ item.year }}</td>
                             <td class="text-end">{{ item.count }}</td>
-                            <td class="text-end text-success">{{ "%.2f"|format(item.total_profit) }}</td>
-                            <td class="text-end text-danger">{{ "%.2f"|format(item.total_loss) }}</td>
+                            <td class="text-end {% if item.total_gross > 0 %}text-success{% elif item.total_gross < 0 %}text-danger{% endif %}">{{ "%.2f"|format(item.total_gross) }}</td>
+                            <td class="text-end text-danger">{{ "%.2f"|format(item.total_fees) }}</td>
                             <td class="text-end {% if item.total_net > 0 %}text-success{% elif item.total_net < 0 %}text-danger{% endif %} fw-semibold">{{ "%.2f"|format(item.total_net) }}</td>
                           </tr>
                         {% endfor %}
@@ -263,7 +264,9 @@
                       <th>Estratégia</th>
                       <th>Motivo</th>
                       <th class="text-end">Qtd</th>
-                      <th class="text-end">Resultado</th>
+                      <th class="text-end">Bruto</th>
+                      <th class="text-end">Taxas</th>
+                      <th class="text-end">Fiscal</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -276,13 +279,19 @@
                           <td>{{ pos.strategy_tag or '-' }}</td>
                           <td>{{ pos.exit_reason or '-' }}</td>
                           <td class="text-end">{{ pos.qty }}</td>
-                          <td class="text-end {% if pos.realized_pl > 0 %}text-success{% elif pos.realized_pl < 0 %}text-danger{% endif %} fw-semibold">
-                            {{ "%.2f"|format(pos.realized_pl) }}
+                          <td class="text-end {% if pos.gross_result > 0 %}text-success{% elif pos.gross_result < 0 %}text-danger{% endif %}">
+                            {{ "%.2f"|format(pos.gross_result) }}
+                          </td>
+                          <td class="text-end text-danger">
+                            {{ "%.2f"|format(pos.fees) }}
+                          </td>
+                          <td class="text-end {% if pos.net_result > 0 %}text-success{% elif pos.net_result < 0 %}text-danger{% endif %} fw-semibold">
+                            {{ "%.2f"|format(pos.net_result) }}
                           </td>
                         </tr>
                       {% endfor %}
                     {% else %}
-                      <tr><td colspan="7" class="text-muted">Nenhuma baixa encontrada para o período selecionado.</td></tr>
+                      <tr><td colspan="9" class="text-muted">Nenhuma baixa encontrada para o período selecionado.</td></tr>
                     {% endif %}
                   </tbody>
                 </table>

@@ -794,7 +794,9 @@ def summarize_realized_positions(
             exit_dt = dt.date.fromisoformat(exit_date)
         except ValueError:
             continue
-        value = round(float(realized_pl), 2)
+        gross_value = round(float(realized_pl), 2)
+        fees_value = round(float(pos.get("fees") or 0.0), 2)
+        net_value = round(float(pos.get("pl") if pos.get("pl") is not None else gross_value - fees_value), 2)
         closed_rows.append(
             {
                 "id": pos.get("id"),
@@ -806,7 +808,11 @@ def summarize_realized_positions(
                 "qty": int(pos.get("qty") or 0),
                 "exit_date": exit_date,
                 "exit_reason": pos.get("exit_reason"),
-                "realized_pl": value,
+                "realized_pl": gross_value,
+                "gross_result": gross_value,
+                "fees": fees_value,
+                "net_result": net_value,
+                "irrf": round(float(pos.get("irrf") or 0.0), 2),
                 "year": int(exit_dt.year),
                 "month": int(exit_dt.month),
                 "period": f"{exit_dt.year:04d}-{exit_dt.month:02d}",
@@ -829,23 +835,27 @@ def summarize_realized_positions(
     )
 
     def _build_totals(rows: list[dict]) -> dict:
-        total_net = round(sum(float(item["realized_pl"]) for item in rows), 2)
+        total_gross = round(sum(float(item["gross_result"]) for item in rows), 2)
+        total_fees = round(sum(float(item["fees"]) for item in rows), 2)
+        total_net = round(sum(float(item["net_result"]) for item in rows), 2)
         total_profit = round(
-            sum(float(item["realized_pl"]) for item in rows if float(item["realized_pl"]) > 0),
+            sum(float(item["net_result"]) for item in rows if float(item["net_result"]) > 0),
             2,
         )
         total_loss = round(
-            sum(float(item["realized_pl"]) for item in rows if float(item["realized_pl"]) < 0),
+            sum(float(item["net_result"]) for item in rows if float(item["net_result"]) < 0),
             2,
         )
         return {
             "count": len(rows),
+            "total_gross": total_gross,
+            "total_fees": total_fees,
             "total_net": total_net,
             "total_profit": total_profit,
             "total_loss": total_loss,
-            "profit_count": sum(1 for item in rows if float(item["realized_pl"]) > 0),
-            "loss_count": sum(1 for item in rows if float(item["realized_pl"]) < 0),
-            "breakeven_count": sum(1 for item in rows if float(item["realized_pl"]) == 0),
+            "profit_count": sum(1 for item in rows if float(item["net_result"]) > 0),
+            "loss_count": sum(1 for item in rows if float(item["net_result"]) < 0),
+            "breakeven_count": sum(1 for item in rows if float(item["net_result"]) == 0),
         }
 
     monthly_index: dict[tuple[int, int], list[dict]] = {}
