@@ -187,6 +187,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.
 - README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
 - tela de `positions` agora traz um painel didatico de resultados realizados por ano e por mes, com lista das baixas do periodo e isolamento por usuario autenticado.
+- rota `/positions` agora tem teste de regressao para garantir que o template sempre receba `realized_summary` e nao quebre em tempo de execucao.
 
 ## Troubleshooting Playwright (uv)
 
