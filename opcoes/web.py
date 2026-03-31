@@ -25,6 +25,7 @@ from .portfolio import (
     add_position,
     delete_position,
     list_positions,
+    summarize_realized_positions,
     update_position,
     close_position,
     get_position,
@@ -741,6 +742,8 @@ def create_app() -> Flask:
         trade_type = (request.args.get("trade_type") or "").strip().lower()
         status = (request.args.get("status") or "all").strip().lower()
         is_simulated_raw = (request.args.get("is_simulated") or "").strip()
+        result_year_raw = (request.args.get("result_year") or "").strip()
+        result_month_raw = (request.args.get("result_month") or "").strip()
 
         include_closed = True
         only_closed = False
@@ -752,6 +755,22 @@ def create_app() -> Flask:
         is_simulated = None
         if is_simulated_raw in {"0", "1"}:
             is_simulated = is_simulated_raw == "1"
+
+        result_year = None
+        if result_year_raw:
+            try:
+                result_year = int(result_year_raw)
+            except ValueError:
+                result_year = None
+
+        result_month = None
+        if result_month_raw:
+            try:
+                month_candidate = int(result_month_raw)
+            except ValueError:
+                month_candidate = None
+            if month_candidate is not None and 1 <= month_candidate <= 12:
+                result_month = month_candidate
 
         next_url = request.full_path
         if next_url.endswith("?"):
@@ -771,6 +790,15 @@ def create_app() -> Flask:
         for pos in positions:
             pos_id = pos.get("id")
             pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
+        realized_summary = summarize_realized_positions(
+            ticker_contains=ticker_contains or None,
+            underlying_contains=underlying_contains or None,
+            strategy_tag=strategy_tag or None,
+            trade_type=trade_type or None,
+            is_simulated=is_simulated,
+            selected_year=result_year,
+            selected_month=result_month,
+        )
         return render_template(
             "positions.html",
             positions=positions,
@@ -780,6 +808,7 @@ def create_app() -> Flask:
             filter_trade_type=trade_type,
             filter_status=status,
             filter_is_simulated=is_simulated_raw,
+            realized_summary=realized_summary,
             next_url=next_url,
         )
 

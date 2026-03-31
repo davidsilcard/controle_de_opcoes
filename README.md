@@ -111,6 +111,11 @@ uv run python -m opcoes.cli position add --ticker BBASP226 --underlying BBAS3 --
 
 Depois do cadastro, recalcule o premio/DARF na tela de posicoes e valide em `/audit` se o premio liquido bate com a nota.
 
+Baixa e conferencia visual do resultado realizado:
+
+- na tela `/positions`, preencha `Data saida`, `Preco saida` e `Motivo`, depois clique em `Salvar`.
+- o painel `Resultados realizados` consolida lucro/prejuizo por ano e por mes, sempre restrito ao usuario autenticado.
+
 ### DARF
 
 ```bash
@@ -181,6 +186,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - auditoria agora inclui o impacto de `ASSIGN` no caixa, reconcilia o lote criado no exercicio da PUT e mostra o liquido total da operacao incluindo exercicio.
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.
 - README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
+- tela de `positions` agora traz um painel didatico de resultados realizados por ano e por mes, com lista das baixas do periodo e isolamento por usuario autenticado.
 
 ## Troubleshooting Playwright (uv)
 

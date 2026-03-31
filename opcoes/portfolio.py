@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import re
 from typing import Any, Iterable, List, Mapping, Optional
 
@@ -761,6 +762,135 @@ def list_positions(
     return [_row_to_dict(row) for row in rows]
 
 
+def summarize_realized_positions(
+    *,
+    ticker_contains: Optional[str] = None,
+    underlying_contains: Optional[str] = None,
+    strategy_tag: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    is_simulated: Optional[bool] = None,
+    selected_year: Optional[int] = None,
+    selected_month: Optional[int] = None,
+    conn: Optional[Any] = None,
+) -> dict:
+    positions = list_positions(
+        include_closed=True,
+        only_closed=True,
+        ticker_contains=ticker_contains,
+        underlying_contains=underlying_contains,
+        strategy_tag=strategy_tag,
+        trade_type=trade_type,
+        is_simulated=is_simulated,
+        conn=conn,
+    )
+
+    closed_rows: list[dict] = []
+    for pos in positions:
+        exit_date = (pos.get("exit_date") or "").strip()
+        realized_pl = pos.get("realized_pl")
+        if not exit_date or realized_pl is None:
+            continue
+        try:
+            exit_dt = dt.date.fromisoformat(exit_date)
+        except ValueError:
+            continue
+        value = round(float(realized_pl), 2)
+        closed_rows.append(
+            {
+                "id": pos.get("id"),
+                "ticker": pos.get("ticker"),
+                "underlying": pos.get("underlying"),
+                "trade_type": pos.get("trade_type"),
+                "strategy_tag": pos.get("strategy_tag"),
+                "side": pos.get("side"),
+                "qty": int(pos.get("qty") or 0),
+                "exit_date": exit_date,
+                "exit_reason": pos.get("exit_reason"),
+                "realized_pl": value,
+                "year": int(exit_dt.year),
+                "month": int(exit_dt.month),
+                "period": f"{exit_dt.year:04d}-{exit_dt.month:02d}",
+            }
+        )
+
+    closed_rows.sort(key=lambda item: (item["exit_date"], int(item["id"] or 0)), reverse=True)
+    available_years = sorted({int(item["year"]) for item in closed_rows}, reverse=True)
+
+    normalized_year = selected_year if selected_year in available_years else None
+    if normalized_year is None and available_years:
+        normalized_year = available_years[0]
+
+    available_months = sorted(
+        {int(item["month"]) for item in closed_rows if item["year"] == normalized_year}
+    ) if normalized_year is not None else []
+
+    normalized_month = (
+        selected_month if selected_month in available_months else None
+    )
+
+    def _build_totals(rows: list[dict]) -> dict:
+        total_net = round(sum(float(item["realized_pl"]) for item in rows), 2)
+        total_profit = round(
+            sum(float(item["realized_pl"]) for item in rows if float(item["realized_pl"]) > 0),
+            2,
+        )
+        total_loss = round(
+            sum(float(item["realized_pl"]) for item in rows if float(item["realized_pl"]) < 0),
+            2,
+        )
+        return {
+            "count": len(rows),
+            "total_net": total_net,
+            "total_profit": total_profit,
+            "total_loss": total_loss,
+            "profit_count": sum(1 for item in rows if float(item["realized_pl"]) > 0),
+            "loss_count": sum(1 for item in rows if float(item["realized_pl"]) < 0),
+            "breakeven_count": sum(1 for item in rows if float(item["realized_pl"]) == 0),
+        }
+
+    monthly_index: dict[tuple[int, int], list[dict]] = {}
+    yearly_index: dict[int, list[dict]] = {}
+    for row in closed_rows:
+        yearly_index.setdefault(int(row["year"]), []).append(row)
+        monthly_index.setdefault((int(row["year"]), int(row["month"])), []).append(row)
+
+    by_year = []
+    for year in sorted(yearly_index.keys(), reverse=True):
+        totals = _build_totals(yearly_index[year])
+        by_year.append({"year": year, **totals})
+
+    by_month = []
+    for year, month in sorted(monthly_index.keys(), reverse=True):
+        totals = _build_totals(monthly_index[(year, month)])
+        by_month.append(
+            {
+                "year": year,
+                "month": month,
+                "period": f"{year:04d}-{month:02d}",
+                "month_label": f"{month:02d}/{year:04d}",
+                **totals,
+            }
+        )
+
+    filtered_rows = closed_rows
+    if normalized_year is not None:
+        filtered_rows = [row for row in filtered_rows if int(row["year"]) == normalized_year]
+    if normalized_month is not None:
+        filtered_rows = [row for row in filtered_rows if int(row["month"]) == normalized_month]
+
+    return {
+        "available_years": available_years,
+        "available_months": available_months,
+        "selected_year": normalized_year,
+        "selected_month": normalized_month,
+        "overall_totals": _build_totals(closed_rows),
+        "period_totals": _build_totals(filtered_rows),
+        "by_year": by_year,
+        "by_month": by_month,
+        "period_positions": filtered_rows,
+    }
+
+
 def _row_to_dict(row: Any) -> dict:
     def parse_decimal(value: object) -> Optional[float]:
         parsed = parse_ptbr_number(value)
@@ -897,9 +1027,10 @@ def _row_to_dict(row: Any) -> dict:
 
 __all__ = [
     "add_position",
-    "list_positions",
-    "get_position",
-    "update_position",
-    "close_position",
     "delete_position",
+    "close_position",
+    "get_position",
+    "list_positions",
+    "summarize_realized_positions",
+    "update_position",
 ]
