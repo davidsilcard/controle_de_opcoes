@@ -540,6 +540,7 @@
                   <td class="text-end">
                     {% if pos.id and pos.open_qty %}
                       <form method="post" action="/finance/expire" class="d-inline">
+                        {{ csrf_input() }}
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
                         <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                         <button
@@ -552,6 +553,7 @@
                       </form>
                       {% if pos.strike is not none and pos.parent_position_id is not none %}
                         <form method="post" action="/finance/callaway" class="d-inline">
+                          {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
                           <button
                             type="submit"
@@ -644,6 +646,7 @@
                   <td class="text-end">
                     {% if pos.id and pos.open_qty %}
                       <form method="post" action="/finance/expire" class="d-inline">
+                        {{ csrf_input() }}
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
                         <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                         <button
@@ -656,6 +659,7 @@
                       </form>
                       {% if pos.strike is not none and pos.parent_position_id is not none %}
                         <form method="post" action="/finance/callaway" class="d-inline">
+                          {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
                           <button
                             type="submit"

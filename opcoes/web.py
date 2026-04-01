@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import datetime
+import math
 import os
 import re
 import threading
 import time
 from pathlib import Path
+from secrets import compare_digest, token_urlsafe
 from typing import Optional
 
 from flask import Flask, g, redirect, render_template, request, session, url_for
+from markupsafe import Markup
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .auth import (
     authenticate_user,
@@ -63,13 +67,44 @@ from .tax import (
     list_tax_events_for_period,
 )
 
+DEFAULT_SECRET_KEY = "troque-esta-chave-em-producao"
+CSRF_FIELD_NAME = "_csrf_token"
+
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
-    app.secret_key = os.getenv("OPCOES_SECRET_KEY", "troque-esta-chave-em-producao")
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+    def _env_bool(name: str, default: bool = False) -> bool:
+        raw = os.getenv(name, "1" if default else "0").strip().lower()
+        return raw in {"1", "true", "yes", "on", "sim", "s"}
+
+    def _env_int(name: str, default: int, minimum: int) -> int:
+        raw = os.getenv(name, str(default)).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = default
+        return max(value, minimum)
+
+    def _skip_production_checks() -> bool:
+        return _env_bool("OPCOES_SKIP_PRODUCTION_CHECKS", False)
+
+    def _is_debug_mode() -> bool:
+        return _env_bool("OPCOES_WEB_DEBUG", False)
+
+    secret_key = (os.getenv("OPCOES_SECRET_KEY") or "").strip() or DEFAULT_SECRET_KEY
+    if not _is_debug_mode() and not _skip_production_checks():
+        if secret_key == DEFAULT_SECRET_KEY:
+            raise RuntimeError(
+                "Defina OPCOES_SECRET_KEY com um valor forte e unico antes de iniciar a aplicacao em producao."
+            )
+    app.secret_key = secret_key
     ensure_bootstrap_user_from_env()
     ranking_cache: dict[tuple, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
+    login_attempts: dict[str, dict[str, float | int]] = {}
+    login_attempts_lock = threading.Lock()
     ranking_cache_write_endpoints = {
         "darf_generate",
         "darf_pay",
@@ -86,10 +121,6 @@ def create_app() -> Flask:
         "update_position_view",
         "delete_position_view",
     }
-
-    def _env_bool(name: str, default: bool = False) -> bool:
-        raw = os.getenv(name, "1" if default else "0").strip().lower()
-        return raw in {"1", "true", "yes", "on", "sim", "s"}
 
     def _session_idle_timeout_seconds() -> int:
         raw = os.getenv("OPCOES_SESSION_IDLE_MINUTES", "15").strip()
@@ -175,6 +206,101 @@ def create_app() -> Flask:
     def _invalidate_ranking_cache_for_current_user() -> None:
         _invalidate_ranking_cache_for_namespace(_current_ranking_cache_namespace())
 
+    def _csrf_token_value() -> str:
+        token = session.get(CSRF_FIELD_NAME)
+        if isinstance(token, str) and token.strip():
+            return token
+        token = token_urlsafe(32)
+        session[CSRF_FIELD_NAME] = token
+        return token
+
+    def _csrf_input() -> Markup:
+        token = _csrf_token_value()
+        return Markup(
+            f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">'
+        )
+
+    def _client_ip() -> str:
+        forwarded = (request.headers.get("X-Forwarded-For") or "").strip()
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip() or "unknown"
+        return request.remote_addr or "unknown"
+
+    def _login_rate_limit_window_seconds() -> int:
+        return _env_int("OPCOES_LOGIN_WINDOW_SECONDS", 900, 60)
+
+    def _login_rate_limit_block_seconds() -> int:
+        return _env_int("OPCOES_LOGIN_BLOCK_SECONDS", 900, 60)
+
+    def _login_rate_limit_max_attempts() -> int:
+        return _env_int("OPCOES_LOGIN_MAX_ATTEMPTS", 5, 1)
+
+    def _login_rate_limit_message(blocked_for_seconds: int) -> str:
+        minutes = max(1, math.ceil(float(blocked_for_seconds) / 60.0))
+        return (
+            "Muitas tentativas de login deste IP. "
+            f"Aguarde cerca de {minutes} minuto(s) e tente novamente."
+        )
+
+    def _prune_login_attempts(now: float) -> None:
+        stale_keys = []
+        window = float(_login_rate_limit_window_seconds())
+        for key, state in login_attempts.items():
+            blocked_until = float(state.get("blocked_until") or 0.0)
+            first_failure_at = float(state.get("first_failure_at") or 0.0)
+            if blocked_until > now:
+                continue
+            if (first_failure_at + window) > now:
+                continue
+            stale_keys.append(key)
+        for key in stale_keys:
+            login_attempts.pop(key, None)
+
+    def _login_block_remaining_seconds() -> int | None:
+        key = _client_ip()
+        now = time.monotonic()
+        with login_attempts_lock:
+            _prune_login_attempts(now)
+            state = login_attempts.get(key)
+            if not state:
+                return None
+            blocked_until = float(state.get("blocked_until") or 0.0)
+            if blocked_until <= now:
+                return None
+            return max(1, math.ceil(blocked_until - now))
+
+    def _record_failed_login() -> int | None:
+        key = _client_ip()
+        now = time.monotonic()
+        window = float(_login_rate_limit_window_seconds())
+        block_seconds = float(_login_rate_limit_block_seconds())
+        max_attempts = _login_rate_limit_max_attempts()
+        with login_attempts_lock:
+            _prune_login_attempts(now)
+            state = login_attempts.get(key)
+            if not state or (float(state.get("first_failure_at") or 0.0) + window) <= now:
+                state = {
+                    "count": 0,
+                    "first_failure_at": now,
+                    "blocked_until": 0.0,
+                }
+            count = int(state.get("count") or 0) + 1
+            state["count"] = count
+            if count >= max_attempts:
+                state["count"] = 0
+                state["first_failure_at"] = now
+                state["blocked_until"] = now + block_seconds
+            login_attempts[key] = state
+            blocked_until = float(state.get("blocked_until") or 0.0)
+            if blocked_until <= now:
+                return None
+            return max(1, math.ceil(blocked_until - now))
+
+    def _clear_failed_login() -> None:
+        key = _client_ip()
+        with login_attempts_lock:
+            login_attempts.pop(key, None)
+
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SECURE"] = _env_bool(
         "OPCOES_SESSION_COOKIE_SECURE", False
@@ -198,6 +324,32 @@ def create_app() -> Flask:
         if candidate.startswith("/login") or candidate.startswith("/logout"):
             return url_for("index")
         return candidate
+
+    @app.before_request
+    def _protect_csrf():
+        if app.testing:
+            return None
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return None
+        if (request.endpoint or "") == "static":
+            return None
+        expected = session.get(CSRF_FIELD_NAME)
+        provided = (
+            request.form.get(CSRF_FIELD_NAME)
+            or request.headers.get("X-CSRF-Token")
+            or request.headers.get("X-CSRFToken")
+        )
+        if not expected or not provided:
+            return (
+                "Formulario expirado ou invalido. Recarregue a pagina e tente novamente.",
+                400,
+            )
+        if not compare_digest(str(expected), str(provided)):
+            return (
+                "Formulario expirado ou invalido. Recarregue a pagina e tente novamente.",
+                400,
+            )
+        return None
 
     @app.before_request
     def _bind_user_context():
@@ -263,6 +415,38 @@ def create_app() -> Flask:
         endpoint = request.endpoint or ""
         if request.method == "POST" and endpoint in ranking_cache_write_endpoints:
             _invalidate_ranking_cache_for_current_user()
+        if endpoint != "static":
+            response.headers.setdefault("Cache-Control", "no-store")
+            response.headers.setdefault("Pragma", "no-cache")
+            response.headers.setdefault(
+                "Referrer-Policy", "strict-origin-when-cross-origin"
+            )
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+            response.headers.setdefault(
+                "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+            )
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                (
+                    "default-src 'self'; "
+                    "base-uri 'self'; "
+                    "form-action 'self'; "
+                    "frame-ancestors 'none'; "
+                    "object-src 'none'; "
+                    "img-src 'self' data: https:; "
+                    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                    "font-src 'self' data: https://cdn.jsdelivr.net; "
+                    "connect-src 'self';"
+                ),
+            )
+            if request.is_secure:
+                response.headers.setdefault(
+                    "Strict-Transport-Security",
+                    "max-age=31536000; includeSubDomains",
+                )
         return response
 
     @app.context_processor
@@ -273,6 +457,8 @@ def create_app() -> Flask:
             "current_username": (
                 normalize_username(session.get("username") or "") if auth_active else ""
             ),
+            "csrf_token": _csrf_token_value,
+            "csrf_input": _csrf_input,
         }
 
     @app.route("/login", methods=["GET", "POST"])
@@ -285,9 +471,20 @@ def create_app() -> Flask:
             error = "Sessão expirada por inatividade. Entre novamente."
         next_url = _safe_redirect_target(request.values.get("next"))
         if request.method == "POST":
+            blocked_for = _login_block_remaining_seconds()
+            if blocked_for is not None:
+                return (
+                    render_template(
+                        "login.html",
+                        error=_login_rate_limit_message(blocked_for),
+                        next_url=next_url,
+                    ),
+                    429,
+                )
             username = normalize_username(request.form.get("username") or "")
             password = request.form.get("password") or ""
             if authenticate_user(username=username, password=password):
+                _clear_failed_login()
                 session.clear()
                 session["username"] = username
                 now_ts = _utc_now_ts()
@@ -296,6 +493,17 @@ def create_app() -> Flask:
                 return redirect(next_url)
             error = "Usuário ou senha inválidos."
 
+        if request.method == "POST" and error:
+            blocked_for = _record_failed_login()
+            if blocked_for is not None:
+                return (
+                    render_template(
+                        "login.html",
+                        error=_login_rate_limit_message(blocked_for),
+                        next_url=next_url,
+                    ),
+                    429,
+                )
         return render_template("login.html", error=error, next_url=next_url)
 
     @app.post("/logout")

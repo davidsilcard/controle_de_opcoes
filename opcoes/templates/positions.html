@@ -311,6 +311,7 @@
             </div>
             <div class="modal-body">
               <form method="post" action="/positions/add" class="row g-3">
+                {{ csrf_input() }}
                 <input type="hidden" name="next" value="{{ next_url }}">
                 <div class="col-md-3">
                   <label class="form-label small">Ticker</label>
@@ -451,6 +452,7 @@
               {% for pos in positions %}
                 <tr class="{% if pos.is_simulated %}table-warning{% endif %}">
                   <form method="post" action="/positions/update/{{ pos.id }}">
+                    {{ csrf_input() }}
                     <td>
                       {{ pos.id }}
                       <input type="hidden" name="next" value="{{ next_url }}">

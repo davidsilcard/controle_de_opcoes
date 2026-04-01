@@ -109,6 +109,7 @@
                     <div class="d-inline-flex gap-1">
                       {% if row.tax_due and row.tax_due > 0 %}
                         <form method="post" action="/darf/generate">
+                          {{ csrf_input() }}
                           <input type="hidden" name="period" value="{{ row.period }}">
                           <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
                           <button type="submit" class="btn btn-outline-primary btn-sm">
@@ -119,6 +120,7 @@
 
                       {% if row.generated is not none and (not row.paid_date) %}
                         <form method="post" action="/darf/pay">
+                          {{ csrf_input() }}
                           <input type="hidden" name="period" value="{{ row.period }}">
                           <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
                           <button type="submit" class="btn btn-outline-success btn-sm">
@@ -217,6 +219,7 @@
 
               <div class="d-flex gap-2 flex-wrap">
                 <form method="post" action="/darf/generate" class="d-flex gap-2 align-items-end flex-wrap">
+                  {{ csrf_input() }}
                   <input type="hidden" name="period" value="{{ selected_period }}">
                   <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
                   <button type="submit" class="btn btn-outline-primary btn-sm" {% if selected_tax.net_ir_due <= 0 %}disabled{% endif %}>
@@ -225,6 +228,7 @@
                 </form>
 
                 <form method="post" action="/darf/pay" class="d-flex gap-2 align-items-end flex-wrap">
+                  {{ csrf_input() }}
                   <input type="hidden" name="period" value="{{ selected_period }}">
                   <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
                   <div>

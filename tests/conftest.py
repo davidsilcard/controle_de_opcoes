@@ -12,6 +12,7 @@ def _isolated_pg_schema(monkeypatch):
     """Isola estado de banco por teste em schema PostgreSQL temporário."""
 
     monkeypatch.setenv("OPCOES_PG_SCHEMA", f"t_{uuid.uuid4().hex[:12]}")
+    monkeypatch.setenv("OPCOES_SKIP_PRODUCTION_CHECKS", "1")
 
 
 def pytest_configure(config) -> None:

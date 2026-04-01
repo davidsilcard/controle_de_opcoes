@@ -13,9 +13,19 @@ pytestmark = pytest.mark.requires_postgres
 
 
 def _login(client, username: str, password: str = "SenhaForte123!") -> None:
+    login_page = client.get("/login")
+    assert login_page.status_code == 200
+    with client.session_transaction() as sess:
+        csrf_token = str(sess.get("_csrf_token") or "")
+    assert csrf_token
     resp = client.post(
         "/login",
-        data={"username": username, "password": password, "next": "/positions"},
+        data={
+            "username": username,
+            "password": password,
+            "next": "/positions",
+            "_csrf_token": csrf_token,
+        },
     )
     assert resp.status_code in (302, 303)
 

@@ -22,8 +22,13 @@ Crie um `.env` com:
 ```bash
 DATABASE_URL=postgresql://usuario:senha@host:5432/mercado-opcoes
 OPCOES_PG_SCHEMA=admin
-OPCOES_SECRET_KEY=troque-esta-chave-em-producao
+OPCOES_SECRET_KEY=uma-chave-longa-unica-e-secreta
 ```
+
+Observacao:
+
+- em producao, a aplicacao nao sobe se `OPCOES_SECRET_KEY` estiver ausente ou no valor padrao.
+- para desenvolvimento local, defina uma chave propria mesmo em ambiente simples.
 
 Alternativa sem `DATABASE_URL`:
 
@@ -161,7 +166,7 @@ OPCOES_SECRET_KEY=troque-por-uma-chave-longa-e-unica
 OPCOES_AUTH_SCHEMA=auth
 OPCOES_AUTH_ENABLED=1
 OPCOES_WEB_DEBUG=0
-OPCOES_SESSION_COOKIE_SECURE=0
+OPCOES_SESSION_COOKIE_SECURE=1
 OPCOES_SESSION_COOKIE_SAMESITE=Lax
 ```
 
@@ -169,6 +174,15 @@ Observacao:
 
 - use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
 - troque para `1` quando colocar HTTPS com proxy reverso
+- o login aplica rate limit por IP. Ajustes opcionais:
+
+```bash
+OPCOES_LOGIN_MAX_ATTEMPTS=5
+OPCOES_LOGIN_WINDOW_SECONDS=900
+OPCOES_LOGIN_BLOCK_SECONDS=900
+```
+
+- formularios `POST` agora validam token CSRF. Se aparecer mensagem de formulario expirado, recarregue a pagina e envie novamente.
 
 ### Subir a aplicacao com Docker
 
@@ -188,6 +202,30 @@ docker compose logs -f web
 Checar banco de dentro do container:
 
 ```bash
+docker compose exec web uv run python -m opcoes.cli db check
+```
+
+Se o `db check` falhar com `host.docker.internal` em `timed out`, o PostgreSQL do host
+normalmente ainda nao esta aceitando conexoes vindas da rede Docker. Corrija assim:
+
+```bash
+docker network inspect controle_de_opcoes_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+sudo nano /etc/postgresql/16/main/postgresql.conf
+```
+
+No `postgresql.conf`, ajuste:
+
+```bash
+listen_addresses = '*'
+```
+
+Depois libere a sub-rede Docker no `pg_hba.conf`, trocando `<SUBNET_DOCKER>` pelo valor
+retornado no `docker network inspect`:
+
+```bash
+echo "host    mercado_opcoes    opcoes_app    <SUBNET_DOCKER>    scram-sha-256" | sudo tee -a /etc/postgresql/16/main/pg_hba.conf
+sudo ufw allow from <SUBNET_DOCKER> to any port 5432 proto tcp
+sudo systemctl restart postgresql
 docker compose exec web uv run python -m opcoes.cli db check
 ```
 
@@ -246,6 +284,9 @@ uv run python -m opcoes.cli user list
 - `OPCOES_SESSION_IDLE_MINUTES`
 - `OPCOES_SESSION_COOKIE_SECURE`
 - `OPCOES_SESSION_COOKIE_SAMESITE`
+- `OPCOES_LOGIN_MAX_ATTEMPTS`
+- `OPCOES_LOGIN_WINDOW_SECONDS`
+- `OPCOES_LOGIN_BLOCK_SECONDS`
 - `OPCOES_RANKING_CACHE_SECONDS`
 
 ## Testes
@@ -266,6 +307,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
+- web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.
