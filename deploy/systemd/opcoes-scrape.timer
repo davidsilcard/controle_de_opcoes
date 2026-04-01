@@ -1,0 +1,10 @@
+[Unit]
+Description=Agenda coleta diária da aplicação Opções
+
+[Timer]
+OnCalendar=Mon..Fri 21:15
+Persistent=true
+Unit=opcoes-scrape.service
+
+[Install]
+WantedBy=timers.target

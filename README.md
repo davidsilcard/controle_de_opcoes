@@ -248,6 +248,78 @@ git pull
 docker compose up -d --build
 ```
 
+### Migracao integral do PostgreSQL local para a VPS
+
+Quando a origem local ja esta em PostgreSQL e voce quer levar **todas as tabelas da aplicacao**
+para a VPS, use o fluxo abaixo. O comando faz copia **table-to-table via `COPY` streaming**,
+preserva IDs/identidades e valida a contagem no final.
+
+Tabelas migradas a partir dos schemas da aplicacao:
+
+- `auth.web_users`
+- `admin.settings`
+- `admin.positions`
+- `admin.ledger`
+- `admin.darf_months`
+- `admin.option_snapshots`
+- `admin.underlying_snapshots`
+- `admin.flow_history`
+- `admin.iv_history`
+- `admin.ranking_runs`
+- `admin.ranking_entries`
+- `admin.decisions`
+- `admin.fundamentus_runs`
+- `admin.fundamentus_snapshots`
+- `admin.fundamentus_filter_runs`
+- `admin.fundamentus_signals`
+- `admin.ticker_metadata`
+
+Recomendacao operacional:
+
+1. no VPS, pare momentaneamente a escrita da aplicacao:
+
+```bash
+cd ~/controle_de_opcoes
+docker compose stop web
+```
+
+2. da sua maquina local, abra um tunel SSH para o PostgreSQL da VPS:
+
+```bash
+ssh -L 15432:127.0.0.1:5432 david@SEU_IP_DA_VPS
+```
+
+3. ainda na maquina local, com o `.env` apontando para o PostgreSQL de origem, rode:
+
+```bash
+uv run python -m opcoes.cli db migrate \
+  --target-dsn postgresql://opcoes_app:SUA_SENHA_DA_VPS@127.0.0.1:15432/mercado_opcoes \
+  --source-app-schema admin \
+  --target-app-schema admin \
+  --source-auth-schema auth \
+  --target-auth-schema auth
+```
+
+Observacoes:
+
+- por padrao, o destino sofre `TRUNCATE` antes da copia. Isso e o modo correto para migracao integral.
+- use `--no-truncate` apenas em cenario muito controlado.
+- para tabelas grandes como `option_snapshots` e `flow_history`, o processo pode levar algum tempo.
+
+4. ao terminar, religue a aplicacao no VPS:
+
+```bash
+cd ~/controle_de_opcoes
+docker compose up -d
+```
+
+5. valide a aplicacao:
+
+```bash
+docker compose exec web uv run python -m opcoes.cli db check
+docker compose exec web uv run python -m opcoes.cli user list
+```
+
 ### Scraper com Docker
 
 O mesmo container inclui Playwright + Chromium, entao o scraper pode rodar assim:
@@ -261,6 +333,50 @@ Se quiser exportar o snapshot atual:
 ```bash
 docker compose run --rm web uv run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv
 ```
+
+### Agendamento do scraper na VPS com systemd
+
+Arquivos versionados:
+
+- `deploy/scripts/run_scrape_cycle.sh`
+- `deploy/systemd/opcoes-scrape.service`
+- `deploy/systemd/opcoes-scrape.timer`
+
+O script faz este ciclo:
+
+1. valida o banco com `db check`
+2. executa `scrape --statusinvest`
+3. executa `fundamentus`
+4. executa `fundamentus-filter`
+
+Instalacao no VPS:
+
+```bash
+cd ~/controle_de_opcoes
+chmod +x deploy/scripts/run_scrape_cycle.sh
+sudo cp deploy/systemd/opcoes-scrape.service /etc/systemd/system/
+sudo cp deploy/systemd/opcoes-scrape.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now opcoes-scrape.timer
+sudo systemctl list-timers opcoes-scrape.timer
+```
+
+Logs da ultima execucao:
+
+```bash
+sudo journalctl -u opcoes-scrape.service -n 200 --no-pager
+```
+
+Execucao manual do job agendado:
+
+```bash
+sudo systemctl start opcoes-scrape.service
+```
+
+Observacao de horario:
+
+- o timer padrao esta em `Mon..Fri 21:15`, que no servidor em `UTC` equivale a `18:15` em `America/Sao_Paulo`.
+- ajuste o `OnCalendar` se quiser outro horario apos o fechamento do mercado.
 
 ## Usuários (acesso web)
 
@@ -308,6 +424,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
+- CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
+- assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.

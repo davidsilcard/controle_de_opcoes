@@ -18,6 +18,8 @@ from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
 from .db_health import is_postgres_ready, run_db_check
+from .db_health import resolve_postgres_target
+from .db_migrate import migrate_postgres
 from .db_optimize import optimize_postgres_schema
 from . import finance
 from .fundamentus import (
@@ -394,6 +396,51 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Não executa ANALYZE após criar índices.",
     )
+    db_migrate = dbs.add_parser(
+        "migrate",
+        help="Migra todas as tabelas dos schemas da aplicação entre dois PostgreSQLs via COPY streaming.",
+    )
+    db_migrate.add_argument(
+        "--target-dsn",
+        type=str,
+        required=True,
+        help="DSN PostgreSQL de destino. Ex.: postgresql://user:senha@127.0.0.1:15432/mercado_opcoes",
+    )
+    db_migrate.add_argument(
+        "--source-dsn",
+        type=str,
+        default=None,
+        help="DSN PostgreSQL de origem. Se omitido, usa o .env local carregado pela aplicação.",
+    )
+    db_migrate.add_argument(
+        "--source-app-schema",
+        type=str,
+        default="admin",
+        help="Schema operacional de origem (default: admin).",
+    )
+    db_migrate.add_argument(
+        "--target-app-schema",
+        type=str,
+        default="admin",
+        help="Schema operacional de destino (default: admin).",
+    )
+    db_migrate.add_argument(
+        "--source-auth-schema",
+        type=str,
+        default="auth",
+        help="Schema de autenticação de origem (default: auth).",
+    )
+    db_migrate.add_argument(
+        "--target-auth-schema",
+        type=str,
+        default="auth",
+        help="Schema de autenticação de destino (default: auth).",
+    )
+    db_migrate.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="Não limpa as tabelas de destino antes da cópia. Use apenas em cenários muito controlados.",
+    )
 
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
     fc.add_argument(
@@ -748,6 +795,47 @@ def main() -> None:
                 for table in analyzed:
                     print(f"  - {table}")
             print("Optimize concluído.")
+        elif args.subcmd == "migrate":
+            source_dsn = args.source_dsn
+            if not source_dsn:
+                source_target, source_errors = resolve_postgres_target()
+                if source_target is None:
+                    details = "; ".join(source_errors) if source_errors else "configuração ausente"
+                    raise SystemExit(
+                        f"Falha ao resolver origem no .env local: {details}"
+                    )
+                source_dsn = source_target.dsn
+
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print("Iniciando migração PostgreSQL -> PostgreSQL...")
+            try:
+                report = migrate_postgres(
+                    source_dsn=source_dsn,
+                    target_dsn=args.target_dsn,
+                    source_app_schema=sanitize_schema_name(args.source_app_schema),
+                    target_app_schema=sanitize_schema_name(args.target_app_schema),
+                    source_auth_schema=sanitize_schema_name(args.source_auth_schema),
+                    target_auth_schema=sanitize_schema_name(args.target_auth_schema),
+                    truncate_target=not bool(getattr(args, "no_truncate", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha na migração: {exc}") from exc
+
+            print(f"Origem:  {report['source']}")
+            print(f"Destino: {report['target']}")
+            print(
+                "Modo destino: "
+                + ("TRUNCATE + cópia integral" if report.get("truncate_target") else "cópia sem truncate")
+            )
+            print("Tabelas migradas:")
+            for item in report.get("tables", []):
+                print(
+                    f"  - {item['source_schema']}.{item['table']} -> "
+                    f"{item['target_schema']}.{item['table']} ({item['rows']} linhas)"
+                )
+            print(f"Total de linhas copiadas: {report.get('total_rows', 0)}")
+            print("Migração concluída com contagem validada.")
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:
