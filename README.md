@@ -349,6 +349,7 @@ O script faz este ciclo:
 3. exporta o snapshot consolidado para `data/opcoes_latest.csv`
 4. executa `fundamentus`
 5. executa `fundamentus-filter`
+6. aplica `retention` para remover market data envelhecida
 
 Observacoes importantes:
 
@@ -367,6 +368,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now opcoes-scrape.timer
 sudo systemctl list-timers opcoes-scrape.timer
 ```
+
+O unit `opcoes-scrape.service` chama o script via `/bin/bash`, entao o agendamento nao depende do bit de execucao continuar preservado apos `git pull` feito em ambientes Windows.
 
 Logs da ultima execucao:
 
@@ -433,6 +436,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
 - assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.
+- CLI `retention` agora aplica politica automatica de expiracao para snapshots e historicos de mercado, preservando dados do usuario, auditoria e DARF.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.
@@ -476,3 +480,27 @@ Smoke test rapido:
 ```bash
 uv run python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); page=b.new_page(); page.goto('https://example.com'); print(page.title()); b.close(); p.stop()"
 ```
+
+## Retencao automatica
+
+Comando principal:
+
+```bash
+uv run python -m opcoes.cli retention
+uv run python -m opcoes.cli retention --dry-run
+```
+
+Politica padrao por tabela:
+
+- `positions`, `ledger`, `darf_months`, `settings`, `web_users`, `decisions` e `ticker_metadata`: preservados para sempre.
+- `option_snapshots`: 120 dias de historico + 30 dias de graca apos vencimento recente.
+- `underlying_snapshots`: 400 dias para suportar HV longa (ate 252 dias com folga).
+- `iv_history`: 240 dias + 30 dias de graca apos vencimento recente.
+- `flow_history`: 60 dias.
+- `ranking_entries` e `ranking_runs`: 60 dias.
+- `fundamentus_*`: 365 dias.
+
+Observacoes:
+
+- a retencao limpa apenas dados de mercado e apoio operacional; nao toca nos dados fiscais nem nas operacoes do usuario.
+- o script `deploy/scripts/run_scrape_cycle.sh` agora aplica essa retencao ao final do ciclo agendado.

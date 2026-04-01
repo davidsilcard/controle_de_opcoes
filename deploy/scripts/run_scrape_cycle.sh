@@ -21,4 +21,7 @@ echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Atualizando Fundamentus..."
 "$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli fundamentus
 "$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli fundamentus-filter
 
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Ciclo concluído."
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Aplicando retencao automatica..."
+"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli retention
+
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Ciclo concluido."

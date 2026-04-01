@@ -34,6 +34,10 @@ from .history import (
     record_decision,
     record_ranking_entries,
 )
+from .retention import (
+    RetentionPolicy,
+    apply_retention,
+)
 from .runtime_env import load_dotenv_once
 
 
@@ -330,6 +334,70 @@ def parse_args() -> argparse.Namespace:
     )
 
     tc = sub.add_parser("tax", help="Relatório fiscal (DARF)")
+    rt = sub.add_parser(
+        "retention",
+        help="Aplica retencao automatica dos dados de mercado, preservando dados do usuario e fiscais.",
+    )
+    rt.add_argument(
+        "--option-days",
+        type=int,
+        default=120,
+        help="Dias de retencao dos option_snapshots (default: 120).",
+    )
+    rt.add_argument(
+        "--option-expired-grace-days",
+        type=int,
+        default=30,
+        help="Dias de graca apos o vencimento para option_snapshots recentes (default: 30).",
+    )
+    rt.add_argument(
+        "--underlying-days",
+        type=int,
+        default=400,
+        help="Dias de retencao dos underlying_snapshots para suportar HV longa (default: 400).",
+    )
+    rt.add_argument(
+        "--iv-days",
+        type=int,
+        default=240,
+        help="Dias de retencao do iv_history (default: 240).",
+    )
+    rt.add_argument(
+        "--iv-expired-grace-days",
+        type=int,
+        default=30,
+        help="Dias de graca apos o vencimento para iv_history recente (default: 30).",
+    )
+    rt.add_argument(
+        "--flow-days",
+        type=int,
+        default=60,
+        help="Dias de retencao do flow_history (default: 60).",
+    )
+    rt.add_argument(
+        "--ranking-days",
+        type=int,
+        default=60,
+        help="Dias de retencao de ranking_entries/ranking_runs (default: 60).",
+    )
+    rt.add_argument(
+        "--fundamentus-days",
+        type=int,
+        default=365,
+        help="Dias de retencao das tabelas Fundamentus (default: 365).",
+    )
+    rt.add_argument(
+        "--today",
+        type=str,
+        default=None,
+        help="Data de referencia YYYY-MM-DD para simulacao/teste.",
+    )
+    rt.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra quanto seria removido sem apagar nada.",
+    )
+
     tc.add_argument("--year", type=int, required=True, help="Ano (YYYY)")
     tc.add_argument("--month", type=int, required=True, help="Mês (1-12)")
     tc.add_argument(
@@ -678,6 +746,66 @@ def main() -> None:
             f"rankings {removed['ranking_entries']} apagados, runs {removed['ranking_runs']} apagados, "
             f"snapshots {removed['option_snapshots']} apagados, underlyings {removed['underlying_snapshots']} apagados."
         )
+    elif args.cmd == "retention":
+        ref_today = _parse_trade_date(args.today) if args.today else None
+        policy = RetentionPolicy(
+            option_snapshot_days=args.option_days,
+            option_expired_grace_days=args.option_expired_grace_days,
+            underlying_snapshot_days=args.underlying_days,
+            iv_history_days=args.iv_days,
+            iv_expired_grace_days=args.iv_expired_grace_days,
+            flow_history_days=args.flow_days,
+            ranking_days=args.ranking_days,
+            fundamentus_days=args.fundamentus_days,
+        )
+        report = apply_retention(
+            policy=policy,
+            today=dt.date.fromisoformat(ref_today) if ref_today else None,
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+        action_label = "Previa de retencao" if report["dry_run"] else "Retencao aplicada"
+        print(f"{action_label} em {report['today']}")
+        print("Dados preservados para sempre:")
+        for table in report["preserved_forever"]:
+            print(f"  - {table}")
+        print("Janela automatica de limpeza:")
+        print(
+            "  - option_snapshots: "
+            f"{report['policy']['option_snapshot_days']} dias + "
+            f"{report['policy']['option_expired_grace_days']} dias apos vencimento"
+        )
+        print(
+            "  - underlying_snapshots: "
+            f"{report['policy']['underlying_snapshot_days']} dias"
+        )
+        print(
+            "  - iv_history: "
+            f"{report['policy']['iv_history_days']} dias + "
+            f"{report['policy']['iv_expired_grace_days']} dias apos vencimento"
+        )
+        print(f"  - flow_history: {report['policy']['flow_history_days']} dias")
+        print(f"  - ranking_entries/ranking_runs: {report['policy']['ranking_days']} dias")
+        print(f"  - fundamentus_*: {report['policy']['fundamentus_days']} dias")
+        removed = report["removed"]
+        print("Resultado:")
+        print(
+            "  - option_snapshots: "
+            f"{removed['option_snapshots']} "
+            f"(idade={removed['option_snapshots_age']}, vencidos={removed['option_snapshots_expired']})"
+        )
+        print(f"  - underlying_snapshots: {removed['underlying_snapshots']}")
+        print(
+            "  - iv_history: "
+            f"{removed['iv_history']} "
+            f"(idade={removed['iv_history_age']}, vencidos={removed['iv_history_expired']})"
+        )
+        print(f"  - flow_history: {removed['flow_history']}")
+        print(f"  - ranking_entries: {removed['ranking_entries']}")
+        print(f"  - ranking_runs: {removed['ranking_runs']}")
+        print(f"  - fundamentus_snapshots: {removed['fundamentus_snapshots']}")
+        print(f"  - fundamentus_runs: {removed['fundamentus_runs']}")
+        print(f"  - fundamentus_signals: {removed['fundamentus_signals']}")
+        print(f"  - fundamentus_filter_runs: {removed['fundamentus_filter_runs']}")
     elif args.cmd == "tax":
         mode = (args.mode or "real").strip().lower()
         is_simulated: Optional[bool]

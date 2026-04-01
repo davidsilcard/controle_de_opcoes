@@ -8,7 +8,7 @@ Type=oneshot
 User=david
 Group=docker
 WorkingDirectory=/home/david/controle_de_opcoes
-ExecStart=/usr/bin/flock -n /tmp/opcoes-scrape.lock /home/david/controle_de_opcoes/deploy/scripts/run_scrape_cycle.sh
+ExecStart=/usr/bin/flock -n /tmp/opcoes-scrape.lock /bin/bash /home/david/controle_de_opcoes/deploy/scripts/run_scrape_cycle.sh
 Nice=10
 
 [Install]
