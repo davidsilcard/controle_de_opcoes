@@ -2,7 +2,7 @@
 Description=Agenda coleta diária da aplicação Opções
 
 [Timer]
-OnCalendar=Mon..Fri 21:15
+OnCalendar=Mon..Fri *-*-* 09:00:00 UTC
 Persistent=true
 Unit=opcoes-scrape.service
 

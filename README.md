@@ -346,8 +346,15 @@ O script faz este ciclo:
 
 1. valida o banco com `db check`
 2. executa `scrape --statusinvest`
-3. executa `fundamentus`
-4. executa `fundamentus-filter`
+3. exporta o snapshot consolidado para `data/opcoes_latest.csv`
+4. executa `fundamentus`
+5. executa `fundamentus-filter`
+
+Observacoes importantes:
+
+- o timer atualiza dados; ele nao sobe `opcoes.web`, porque a aplicacao web ja fica publicada continuamente via `docker compose up -d`.
+- o fluxo da VPS nao usa `--headful` nem o proxy legado da maquina antiga.
+- o CSV exportado diariamente pode ser usado para download/conferencia operacional.
 
 Instalacao no VPS:
 
@@ -375,8 +382,8 @@ sudo systemctl start opcoes-scrape.service
 
 Observacao de horario:
 
-- o timer padrao esta em `Mon..Fri 21:15`, que no servidor em `UTC` equivale a `18:15` em `America/Sao_Paulo`.
-- ajuste o `OnCalendar` se quiser outro horario apos o fechamento do mercado.
+- o timer versionado roda em `Mon..Fri *-*-* 09:00:00 UTC`, que equivale a `06:00` em `America/Sao_Paulo` no cenario atual.
+- se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
 
 ## Usuários (acesso web)
 
@@ -425,7 +432,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
-- assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS.
+- assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.
