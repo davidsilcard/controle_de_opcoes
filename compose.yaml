@@ -1,0 +1,15 @@
+services:
+  web:
+    build:
+      context: .
+    container_name: opcoes-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+

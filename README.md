@@ -134,6 +134,96 @@ A partir da baixa da posicao:
 uv run python -m opcoes.web
 ```
 
+## Deploy Docker no VPS
+
+Fluxo recomendado para producao no VPS Linux:
+
+- codigo versionado no GitHub
+- aplicacao web em container Docker
+- PostgreSQL rodando no host do VPS
+- proxy HTTPS configurado depois, quando o dominio estiver pronto
+
+Arquivos de deploy incluidos no repositorio:
+
+- `Dockerfile`
+- `compose.yaml`
+- `.dockerignore`
+
+### Variaveis para Docker no VPS
+
+Ao usar `compose.yaml`, o container precisa enxergar o PostgreSQL do host.
+No Linux, use `host.docker.internal` como host do banco dentro do `.env`:
+
+```bash
+DATABASE_URL=postgresql://opcoes_app:sua_senha_forte@host.docker.internal:5432/mercado_opcoes
+OPCOES_PG_SCHEMA=admin
+OPCOES_SECRET_KEY=troque-por-uma-chave-longa-e-unica
+OPCOES_AUTH_SCHEMA=auth
+OPCOES_AUTH_ENABLED=1
+OPCOES_WEB_DEBUG=0
+OPCOES_SESSION_COOKIE_SECURE=0
+OPCOES_SESSION_COOKIE_SAMESITE=Lax
+```
+
+Observacao:
+
+- use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
+- troque para `1` quando colocar HTTPS com proxy reverso
+
+### Subir a aplicacao com Docker
+
+Build e subida inicial:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Ver logs:
+
+```bash
+docker compose logs -f web
+```
+
+Checar banco de dentro do container:
+
+```bash
+docker compose exec web uv run python -m opcoes.cli db check
+```
+
+Criar usuario inicial da aplicacao web:
+
+```bash
+docker compose exec web uv run python -m opcoes.cli user create --username admin
+```
+
+Smoke test HTTP local no VPS:
+
+```bash
+curl http://127.0.0.1:8000/login
+```
+
+### Atualizar a aplicacao no VPS
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### Scraper com Docker
+
+O mesmo container inclui Playwright + Chromium, entao o scraper pode rodar assim:
+
+```bash
+docker compose run --rm web uv run python -m opcoes.cli scrape
+```
+
+Se quiser exportar o snapshot atual:
+
+```bash
+docker compose run --rm web uv run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv
+```
+
 ## Usuários (acesso web)
 
 ```bash
@@ -173,6 +263,9 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 ```
 
 ## Melhorias recentes
+
+- deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
+- README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.

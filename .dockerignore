@@ -1,0 +1,12 @@
+.git
+.gitignore
+.pytest_cache
+.uv-cache
+.venv
+__pycache__
+*.pyc
+.env
+data/*
+!data/.gitkeep
+_mcp_out
+
