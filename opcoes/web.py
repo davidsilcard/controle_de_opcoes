@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from secrets import compare_digest, token_urlsafe
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from flask import Flask, g, redirect, render_template, request, session, url_for
 from markupsafe import Markup
@@ -52,6 +53,7 @@ from .settings import (
     update_strategy_settings,
     update_fundamentus_settings,
 )
+from .service_runs import get_service_dashboard
 from .strategies import (
     get_cash_covered_put_context,
     get_covered_call_context,
@@ -69,6 +71,7 @@ from .tax import (
 
 DEFAULT_SECRET_KEY = "troque-esta-chave-em-producao"
 CSRF_FIELD_NAME = "_csrf_token"
+LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 def create_app() -> Flask:
@@ -898,6 +901,46 @@ def create_app() -> Flask:
 
     @app.route("/settings", methods=["GET", "POST"])
     def settings_view() -> str:
+        def _format_panel_datetime(
+            value: object,
+            *,
+            tz: datetime.tzinfo = LOCAL_DISPLAY_TZ,
+        ) -> str:
+            if value is None:
+                return "-"
+            if isinstance(value, datetime.datetime):
+                current = value
+            else:
+                return str(value)
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=datetime.timezone.utc)
+            localized = current.astimezone(tz)
+            return localized.strftime("%d/%m/%Y %H:%M")
+
+        def _format_duration(seconds: object) -> str:
+            if seconds is None:
+                return "-"
+            try:
+                total = max(int(seconds), 0)
+            except (TypeError, ValueError):
+                return "-"
+            if total < 60:
+                return f"{total}s"
+            minutes, rem_seconds = divmod(total, 60)
+            if minutes < 60:
+                return f"{minutes}m {rem_seconds:02d}s"
+            hours, rem_minutes = divmod(minutes, 60)
+            return f"{hours}h {rem_minutes:02d}m"
+
+        def _status_meta(status: object) -> tuple[str, str]:
+            normalized = str(status or "").strip().lower()
+            mapping = {
+                "running": ("Em andamento", "text-bg-warning"),
+                "success": ("Concluido", "text-bg-success"),
+                "failed": ("Falhou", "text-bg-danger"),
+            }
+            return mapping.get(normalized, ("Sem registro", "text-bg-secondary"))
+
         if request.method == "POST":
             form = request.form
 
@@ -995,6 +1038,50 @@ def create_app() -> Flask:
         fund_cfg: FundamentusSettings = get_fundamentus_settings()
         ccall_cfg: CoveredCallSettings = get_covered_call_settings()
         cash_put_cfg: CashCoveredPutSettings = get_cash_put_settings()
+        automation_dashboard = get_service_dashboard(limit=12)
+
+        automation_services = []
+        for service in automation_dashboard.get("services", []):
+            last_run = service.get("last_run")
+            last_run_view = None
+            if isinstance(last_run, dict):
+                status_label, status_class = _status_meta(last_run.get("status"))
+                last_run_view = {
+                    "status_label": status_label,
+                    "status_class": status_class,
+                    "started_at_display": _format_panel_datetime(last_run.get("started_at")),
+                    "finished_at_display": _format_panel_datetime(last_run.get("finished_at")),
+                    "duration_display": _format_duration(last_run.get("duration_seconds")),
+                    "summary": (last_run.get("summary") or "").strip(),
+                    "error_message": (last_run.get("error_message") or "").strip(),
+                }
+            automation_services.append(
+                {
+                    **service,
+                    "next_run_local_display": _format_panel_datetime(service.get("next_run_local")),
+                    "next_run_utc_display": _format_panel_datetime(
+                        service.get("next_run_utc"),
+                        tz=datetime.timezone.utc,
+                    ),
+                    "last_run_view": last_run_view,
+                }
+            )
+
+        automation_runs = []
+        for row in automation_dashboard.get("recent_runs", []):
+            status_label, status_class = _status_meta(row.get("status"))
+            automation_runs.append(
+                {
+                    **row,
+                    "status_label": status_label,
+                    "status_class": status_class,
+                    "started_at_display": _format_panel_datetime(row.get("started_at")),
+                    "finished_at_display": _format_panel_datetime(row.get("finished_at")),
+                    "duration_display": _format_duration(row.get("duration_seconds")),
+                    "summary_display": (row.get("summary") or "").strip(),
+                    "error_display": (row.get("error_message") or "").strip(),
+                }
+            )
         return render_template(
             "settings.html",
             fees=fees_cfg,
@@ -1002,6 +1089,8 @@ def create_app() -> Flask:
             fund=fund_cfg,
             covered_call=ccall_cfg,
             cash_put=cash_put_cfg,
+            automation_services=automation_services,
+            automation_runs=automation_runs,
         )
 
     @app.route("/positions")

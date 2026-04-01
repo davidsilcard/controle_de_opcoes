@@ -27,6 +27,116 @@
     </nav>
 
     <div class="container">
+      <section class="mb-4">
+        <h1 class="h4 mb-2">Automacao e servicos</h1>
+        <p class="text-muted small mb-3">
+          Aqui voce acompanha quando o ciclo agendado comecou, terminou, falhou e qual e a proxima execucao prevista.
+        </p>
+
+        <div class="row g-3 mb-3">
+          {% for service in automation_services %}
+          <div class="col-lg-6">
+            <div class="card shadow-sm border-0">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                  <div>
+                    <h2 class="h6 mb-1">{{ service.label }}</h2>
+                    <p class="text-muted small mb-2">{{ service.description }}</p>
+                  </div>
+                  {% if service.last_run_view %}
+                  <span class="badge {{ service.last_run_view.status_class }}">{{ service.last_run_view.status_label }}</span>
+                  {% else %}
+                  <span class="badge text-bg-secondary">Sem historico</span>
+                  {% endif %}
+                </div>
+
+                <dl class="row small mb-0">
+                  <dt class="col-sm-5">Agendamento</dt>
+                  <dd class="col-sm-7">{{ service.schedule_label }}</dd>
+
+                  <dt class="col-sm-5">Proxima prevista</dt>
+                  <dd class="col-sm-7">
+                    {{ service.next_run_local_display }}
+                    <div class="text-muted">Base UTC: {{ service.next_run_utc_display }}</div>
+                  </dd>
+
+                  {% if service.last_run_view %}
+                  <dt class="col-sm-5">Ultimo inicio</dt>
+                  <dd class="col-sm-7">{{ service.last_run_view.started_at_display }}</dd>
+
+                  <dt class="col-sm-5">Ultimo fim</dt>
+                  <dd class="col-sm-7">{{ service.last_run_view.finished_at_display }}</dd>
+
+                  <dt class="col-sm-5">Duracao</dt>
+                  <dd class="col-sm-7">{{ service.last_run_view.duration_display }}</dd>
+
+                  <dt class="col-sm-5">Resumo</dt>
+                  <dd class="col-sm-7">
+                    {% if service.last_run_view.summary %}
+                    {{ service.last_run_view.summary }}
+                    {% elif service.last_run_view.error_message %}
+                    {{ service.last_run_view.error_message }}
+                    {% else %}
+                    -
+                    {% endif %}
+                  </dd>
+                  {% endif %}
+                </dl>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="card shadow-sm border-0 mb-4">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h2 class="h6 mb-0">Execucoes recentes</h2>
+              <span class="text-muted small">Horario exibido em America/Sao_Paulo</span>
+            </div>
+            {% if automation_runs %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Servico</th>
+                    <th>Status</th>
+                    <th>Inicio</th>
+                    <th>Fim</th>
+                    <th>Duracao</th>
+                    <th>Resumo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in automation_runs %}
+                  <tr>
+                    <td>{{ row.service_key }}</td>
+                    <td><span class="badge {{ row.status_class }}">{{ row.status_label }}</span></td>
+                    <td>{{ row.started_at_display }}</td>
+                    <td>{{ row.finished_at_display }}</td>
+                    <td>{{ row.duration_display }}</td>
+                    <td>
+                      {% if row.summary_display %}
+                      {{ row.summary_display }}
+                      {% elif row.error_display %}
+                      {{ row.error_display }}
+                      {% else %}
+                      -
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <p class="text-muted small mb-0">
+              Ainda nao ha historico salvo. Assim que o ciclo agendado terminar, a execucao aparecera aqui.
+            </p>
+            {% endif %}
+          </div>
+        </div>
+      </section>
       <h1 class="h4 mb-3">Configuração de taxas</h1>
       <p class="text-muted small">
         Estes valores são usados apenas quando o campo <strong>Taxas</strong> fica em branco ao cadastrar uma posição.

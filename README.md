@@ -351,6 +351,11 @@ O script faz este ciclo:
 5. executa `fundamentus-filter`
 6. aplica `retention` para remover market data envelhecida
 
+Painel web:
+
+- a aba `Configuracoes` passa a mostrar o status do ciclo agendado, com ultima execucao, inicio, fim, duracao e proxima execucao prevista.
+- as marcacoes usam a tabela `service_runs`, gravada automaticamente pelo proprio job agendado.
+
 Observacoes importantes:
 
 - o timer atualiza dados; ele nao sobe `opcoes.web`, porque a aplicacao web ja fica publicada continuamente via `docker compose up -d`.
@@ -377,6 +382,12 @@ Logs da ultima execucao:
 sudo journalctl -u opcoes-scrape.service -n 200 --no-pager
 ```
 
+Consulta rapida das execucoes registradas no banco:
+
+```bash
+docker compose exec web /app/.venv/bin/python -m opcoes.cli service-run list
+```
+
 Execucao manual do job agendado:
 
 ```bash
@@ -387,6 +398,7 @@ Observacao de horario:
 
 - o timer versionado roda em `Mon..Fri *-*-* 09:00:00 UTC`, que equivale a `06:00` em `America/Sao_Paulo` no cenario atual.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
+- depois de atualizar o repositorio na VPS com `git pull`, rode `docker compose up -d --build` para que o container use os comandos e telas novos.
 
 ## Usuários (acesso web)
 
@@ -437,6 +449,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
 - assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.
 - CLI `retention` agora aplica politica automatica de expiracao para snapshots e historicos de mercado, preservando dados do usuario, auditoria e DARF.
+- aba `Configuracoes` agora inclui um painel de automacao com historico do job agendado, inicio, fim, duracao, status e proxima execucao prevista.
+- CLI `service-run` registra e lista execucoes do ciclo agendado para alimentar esse painel.
 
 - Runtime consolidado em PostgreSQL, sem fallback operacional.
 - `snapshot export` usa o backend ativo da aplicação.
@@ -492,7 +506,7 @@ uv run python -m opcoes.cli retention --dry-run
 
 Politica padrao por tabela:
 
-- `positions`, `ledger`, `darf_months`, `settings`, `web_users`, `decisions` e `ticker_metadata`: preservados para sempre.
+- `positions`, `ledger`, `darf_months`, `settings`, `web_users`, `decisions`, `ticker_metadata` e `service_runs`: preservados para sempre.
 - `option_snapshots`: 120 dias de historico + 30 dias de graca apos vencimento recente.
 - `underlying_snapshots`: 400 dias para suportar HV longa (ate 252 dias com folga).
 - `iv_history`: 240 dias + 30 dias de graca apos vencimento recente.

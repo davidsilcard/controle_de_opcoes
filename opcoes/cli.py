@@ -38,6 +38,12 @@ from .retention import (
     RetentionPolicy,
     apply_retention,
 )
+from .service_runs import (
+    DEFAULT_SERVICE_KEY,
+    finish_service_run,
+    list_service_runs,
+    start_service_run,
+)
 from .runtime_env import load_dotenv_once
 
 
@@ -430,6 +436,73 @@ def parse_args() -> argparse.Namespace:
         "--all",
         action="store_true",
         help="Inclui usuários inativos.",
+    )
+
+    src = sub.add_parser("service-run", help="Registra e consulta execucoes dos servicos agendados")
+    srcs = src.add_subparsers(dest="subcmd", required=True)
+
+    sr_start = srcs.add_parser("start", help="Marca o inicio de uma execucao")
+    sr_start.add_argument(
+        "--service",
+        default=DEFAULT_SERVICE_KEY,
+        help=f"Chave do servico (default: {DEFAULT_SERVICE_KEY}).",
+    )
+    sr_start.add_argument(
+        "--trigger",
+        default="systemd",
+        help="Origem do disparo (ex.: systemd, manual).",
+    )
+    sr_start.add_argument(
+        "--summary",
+        default=None,
+        help="Resumo opcional para aparecer no painel.",
+    )
+    sr_start.add_argument(
+        "--step",
+        default="starting",
+        help="Etapa inicial da execucao (default: starting).",
+    )
+    sr_start.add_argument(
+        "--scheduled-for",
+        default=None,
+        help="Horario previsto em ISO 8601 (opcional).",
+    )
+
+    sr_finish = srcs.add_parser("finish", help="Marca o termino de uma execucao")
+    sr_finish.add_argument("--run-id", required=True, help="ID retornado no start.")
+    sr_finish.add_argument(
+        "--status",
+        required=True,
+        choices=["success", "failed"],
+        help="Resultado final da execucao.",
+    )
+    sr_finish.add_argument(
+        "--summary",
+        default=None,
+        help="Resumo final mostrado no painel.",
+    )
+    sr_finish.add_argument(
+        "--message",
+        default=None,
+        help="Detalhe do erro ou observacao final.",
+    )
+    sr_finish.add_argument(
+        "--step",
+        default="finished",
+        help="Etapa final registrada no painel.",
+    )
+
+    sr_list = srcs.add_parser("list", help="Lista execucoes recentes")
+    sr_list.add_argument(
+        "--service",
+        default=None,
+        help="Filtra por chave de servico.",
+    )
+    sr_list.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Quantidade maxima de linhas (default: 20).",
     )
 
     dbc = sub.add_parser("db", help="Diagnóstico de banco de dados")
@@ -861,6 +934,56 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
+    elif args.cmd == "service-run":
+        if args.subcmd == "start":
+            scheduled_for = None
+            if args.scheduled_for:
+                try:
+                    scheduled_for = dt.datetime.fromisoformat(args.scheduled_for)
+                except ValueError as exc:
+                    raise SystemExit(
+                        "Data/hora invalida em --scheduled-for. Use ISO 8601."
+                    ) from exc
+            run_id = start_service_run(
+                service_key=args.service,
+                trigger_type=args.trigger,
+                scheduled_for=scheduled_for,
+                step=args.step,
+                summary=args.summary,
+            )
+            print(run_id)
+        elif args.subcmd == "finish":
+            updated = finish_service_run(
+                args.run_id,
+                status=args.status,
+                step=args.step,
+                summary=args.summary,
+                error_message=args.message,
+            )
+            if not updated:
+                raise SystemExit(
+                    f"Execucao {args.run_id} nao encontrada para finalizar."
+                )
+            print(args.run_id)
+        elif args.subcmd == "list":
+            rows = list_service_runs(
+                limit=int(getattr(args, "limit", 20)),
+                service_key=getattr(args, "service", None),
+            )
+            if not rows:
+                print("Nenhuma execucao registrada.")
+            else:
+                for row in rows:
+                    started_at = str(row.get("started_at") or "")
+                    finished_at = str(row.get("finished_at") or "-")
+                    status = str(row.get("status") or "-")
+                    service_key = str(row.get("service_key") or "-")
+                    summary = str(row.get("summary") or "").strip()
+                    suffix = f" | {summary}" if summary else ""
+                    print(
+                        f"{row.get('id')} | {service_key} | {status} | "
+                        f"inicio={started_at} | fim={finished_at}{suffix}"
+                    )
     elif args.cmd == "db":
         if args.subcmd == "check":
             report = run_db_check(timeout_seconds=float(args.timeout))

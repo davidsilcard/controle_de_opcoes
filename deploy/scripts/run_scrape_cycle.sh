@@ -3,25 +3,57 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/home/david/controle_de_opcoes}"
 COMPOSE_BIN="${COMPOSE_BIN:-/usr/bin/docker}"
+CLI_PYTHON="${CLI_PYTHON:-/app/.venv/bin/python}"
 SCRAPE_ARGS="${SCRAPE_ARGS:---statusinvest}"
 SNAPSHOT_OUTPUT="${SNAPSHOT_OUTPUT:-data/opcoes_latest.csv}"
+RUN_ID=""
 
 cd "$APP_DIR"
 
+run_cli() {
+  "$COMPOSE_BIN" compose exec -T web "$CLI_PYTHON" -m opcoes.cli "$@"
+}
+
+finish_run() {
+  exit_code=$?
+  trap - EXIT
+  if [[ -n "$RUN_ID" ]]; then
+    if [[ $exit_code -eq 0 ]]; then
+      run_cli service-run finish \
+        --run-id "$RUN_ID" \
+        --status success \
+        --step done \
+        --summary "Ciclo diario concluido com scrape, exportacao, Fundamentus e retencao." || true
+    else
+      run_cli service-run finish \
+        --run-id "$RUN_ID" \
+        --status failed \
+        --step failed \
+        --summary "Ciclo diario interrompido." \
+        --message "Falha no ciclo agendado. Consulte o journal do opcoes-scrape.service." || true
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap finish_run EXIT
+
+RUN_ID="$(run_cli service-run start --service scrape_cycle --trigger systemd --step db_check --summary "Ciclo diario iniciado.")"
+
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Validando banco..."
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli db check
+run_cli db check
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Rodando scrape..."
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli scrape ${SCRAPE_ARGS}
+run_cli scrape ${SCRAPE_ARGS}
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Exportando snapshot CSV..."
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli snapshot export --output "${SNAPSHOT_OUTPUT}"
+run_cli snapshot export --output "${SNAPSHOT_OUTPUT}"
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Atualizando Fundamentus..."
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli fundamentus
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli fundamentus-filter
+run_cli fundamentus
+run_cli fundamentus-filter
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Aplicando retencao automatica..."
-"$COMPOSE_BIN" compose exec -T web uv run python -m opcoes.cli retention
+run_cli retention
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Ciclo concluido."

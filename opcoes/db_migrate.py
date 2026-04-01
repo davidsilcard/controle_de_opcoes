@@ -11,6 +11,7 @@ _DEFAULT_AUTH_SCHEMA = "auth"
 _DEFAULT_TABLE_ORDER = [
     "web_users",
     "settings",
+    "service_runs",
     "positions",
     "ledger",
     "darf_months",

@@ -330,6 +330,7 @@ def apply_retention(
                 "web_users",
                 "decisions",
                 "ticker_metadata",
+                "service_runs",
             ],
             "removed": removed,
         }
