@@ -18,7 +18,7 @@ COPY pyproject.toml uv.lock README.md ./
 COPY opcoes ./opcoes
 
 RUN uv sync --frozen --no-dev \
-    && /app/.venv/bin/pip install --no-cache-dir gunicorn==23.0.0 \
+    && uv pip install --python /app/.venv/bin/python gunicorn==23.0.0 \
     && /app/.venv/bin/playwright install --with-deps chromium
 
 RUN useradd --create-home --shell /bin/bash appuser \
@@ -32,4 +32,3 @@ ENV PATH="/app/.venv/bin:${PATH}"
 EXPOSE 8000
 
 CMD ["gunicorn", "--workers=2", "--bind=0.0.0.0:8000", "opcoes.web:create_app()"]
-
