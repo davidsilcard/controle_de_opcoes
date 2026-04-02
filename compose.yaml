@@ -5,11 +5,10 @@ services:
     container_name: opcoes-web
     restart: unless-stopped
     env_file:
-      - .env
+      - ${OPCOES_APP_ENV_FILE:-.env}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000"
+      - ${OPCOES_WEB_BIND:-8000:8000}
     volumes:
-      - ./data:/app/data
-
+      - ${OPCOES_DATA_DIR:-./data}:/app/data

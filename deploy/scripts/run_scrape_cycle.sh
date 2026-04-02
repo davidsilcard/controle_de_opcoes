@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/home/david/controle_de_opcoes}"
-COMPOSE_BIN="${COMPOSE_BIN:-/usr/bin/docker}"
+APP_DIR="${APP_DIR:-/home/david/apps/controle_de_opcoes}"
 CLI_PYTHON="${CLI_PYTHON:-/app/.venv/bin/python}"
 SCRAPE_ARGS="${SCRAPE_ARGS:---statusinvest}"
 SNAPSHOT_OUTPUT="${SNAPSHOT_OUTPUT:-data/opcoes_latest.csv}"
+COMPOSE_HELPER="${COMPOSE_HELPER:-${APP_DIR}/deploy/scripts/opcoes-compose-vps.sh}"
 RUN_ID=""
 
 cd "$APP_DIR"
 
 run_cli() {
-  "$COMPOSE_BIN" compose exec -T web "$CLI_PYTHON" -m opcoes.cli "$@"
+  /bin/bash "$COMPOSE_HELPER" exec -T web "$CLI_PYTHON" -m opcoes.cli "$@"
 }
 
 finish_run() {

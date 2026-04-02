@@ -29,6 +29,30 @@ Observacao:
 
 - em producao, a aplicacao nao sobe se `OPCOES_SECRET_KEY` estiver ausente ou no valor padrao.
 - para desenvolvimento local, defina uma chave propria mesmo em ambiente simples.
+- para VPS com varias aplicacoes, prefira guardar segredos fora do projeto, por exemplo em `/etc/controle_de_opcoes/app.env`.
+
+### Padrao recomendado para VPS com varias aplicacoes
+
+Estrutura sugerida:
+
+```text
+/home/david/apps/controle_de_opcoes      -> codigo da aplicacao
+/etc/controle_de_opcoes/app.env          -> segredos e configuracao de producao
+/etc/systemd/system/opcoes-scrape.service
+/etc/systemd/system/opcoes-scrape.timer
+/etc/caddy/Caddyfile
+```
+
+Separacao de responsabilidades:
+
+- `/home/david/apps/...`: codigo versionado e pasta `data/` da app
+- `/etc/<app>/app.env`: segredos e parametros de producao
+- `systemd`: jobs agendados e timers
+- `Caddy`: dominio, HTTPS e roteamento por subdominio
+
+Exemplo de arquivo seguro de producao:
+
+- `deploy/env/app.env.example`
 
 Alternativa sem `DATABASE_URL`:
 
@@ -202,7 +226,7 @@ docker compose logs -f web
 Checar banco de dentro do container:
 
 ```bash
-docker compose exec web uv run python -m opcoes.cli db check
+docker compose exec web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
 Se o `db check` falhar com `host.docker.internal` em `timed out`, o PostgreSQL do host
@@ -226,13 +250,13 @@ retornado no `docker network inspect`:
 echo "host    mercado_opcoes    opcoes_app    <SUBNET_DOCKER>    scram-sha-256" | sudo tee -a /etc/postgresql/16/main/pg_hba.conf
 sudo ufw allow from <SUBNET_DOCKER> to any port 5432 proto tcp
 sudo systemctl restart postgresql
-docker compose exec web uv run python -m opcoes.cli db check
+docker compose exec web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
 Criar usuario inicial da aplicacao web:
 
 ```bash
-docker compose exec web uv run python -m opcoes.cli user create --username admin
+docker compose exec web /app/.venv/bin/python -m opcoes.cli user create --username admin
 ```
 
 Smoke test HTTP local no VPS:
@@ -244,8 +268,9 @@ curl http://127.0.0.1:8000/login
 ### Atualizar a aplicacao no VPS
 
 ```bash
+cd ~/apps/controle_de_opcoes
 git pull
-docker compose up -d --build
+deploy/scripts/opcoes-compose-vps.sh up -d --build
 ```
 
 ### Migracao integral do PostgreSQL local para a VPS
@@ -273,14 +298,15 @@ Tabelas migradas a partir dos schemas da aplicacao:
 - `admin.fundamentus_filter_runs`
 - `admin.fundamentus_signals`
 - `admin.ticker_metadata`
+- `admin.service_runs`
 
 Recomendacao operacional:
 
 1. no VPS, pare momentaneamente a escrita da aplicacao:
 
 ```bash
-cd ~/controle_de_opcoes
-docker compose stop web
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh stop web
 ```
 
 2. da sua maquina local, abra um tunel SSH para o PostgreSQL da VPS:
@@ -309,15 +335,15 @@ Observacoes:
 4. ao terminar, religue a aplicacao no VPS:
 
 ```bash
-cd ~/controle_de_opcoes
-docker compose up -d
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh up -d
 ```
 
 5. valide a aplicacao:
 
 ```bash
-docker compose exec web uv run python -m opcoes.cli db check
-docker compose exec web uv run python -m opcoes.cli user list
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli user list
 ```
 
 ### Scraper com Docker
@@ -332,6 +358,36 @@ Se quiser exportar o snapshot atual:
 
 ```bash
 docker compose run --rm web uv run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv
+```
+
+### Compose para producao na VPS
+
+O `compose.yaml` agora aceita tres variaveis para separar o ambiente de producao do ambiente local:
+
+- `OPCOES_APP_ENV_FILE`: caminho do arquivo com segredos da app
+- `OPCOES_WEB_BIND`: bind da porta HTTP interna da aplicacao
+- `OPCOES_DATA_DIR`: pasta persistente do host para `data/`
+
+Exemplo local:
+
+```bash
+docker compose up -d --build
+```
+
+Exemplo de producao na VPS:
+
+```bash
+export OPCOES_APP_ENV_FILE=/etc/controle_de_opcoes/app.env
+export OPCOES_WEB_BIND=127.0.0.1:8000:8000
+export OPCOES_DATA_DIR=/home/david/apps/controle_de_opcoes/data
+docker compose up -d --build
+```
+
+Para evitar repetir essas variaveis na VPS, use o helper versionado:
+
+```bash
+deploy/scripts/opcoes-compose-vps.sh up -d --build
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
 ### Agendamento do scraper na VPS com systemd
@@ -365,7 +421,12 @@ Observacoes importantes:
 Instalacao no VPS:
 
 ```bash
-cd ~/controle_de_opcoes
+cd ~/apps/controle_de_opcoes
+sudo mkdir -p /etc/controle_de_opcoes
+sudo cp deploy/env/app.env.example /etc/controle_de_opcoes/app.env
+sudo chown root:david /etc/controle_de_opcoes/app.env
+sudo chmod 640 /etc/controle_de_opcoes/app.env
+chmod +x deploy/scripts/opcoes-compose-vps.sh
 chmod +x deploy/scripts/run_scrape_cycle.sh
 sudo cp deploy/systemd/opcoes-scrape.service /etc/systemd/system/
 sudo cp deploy/systemd/opcoes-scrape.timer /etc/systemd/system/
@@ -374,7 +435,10 @@ sudo systemctl enable --now opcoes-scrape.timer
 sudo systemctl list-timers opcoes-scrape.timer
 ```
 
+Antes de subir a aplicacao, edite `/etc/controle_de_opcoes/app.env` e troque todos os placeholders de senha/chave.
+
 O unit `opcoes-scrape.service` chama o script via `/bin/bash`, entao o agendamento nao depende do bit de execucao continuar preservado apos `git pull` feito em ambientes Windows.
+O helper `deploy/scripts/opcoes-compose-vps.sh` centraliza o uso de `/etc/controle_de_opcoes/app.env`, bind local `127.0.0.1:8000:8000` e a pasta persistente `/home/david/apps/controle_de_opcoes/data`.
 
 Logs da ultima execucao:
 
@@ -385,7 +449,7 @@ sudo journalctl -u opcoes-scrape.service -n 200 --no-pager
 Consulta rapida das execucoes registradas no banco:
 
 ```bash
-docker compose exec web /app/.venv/bin/python -m opcoes.cli service-run list
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli service-run list
 ```
 
 Execucao manual do job agendado:
@@ -398,7 +462,7 @@ Observacao de horario:
 
 - o timer versionado roda em `Mon..Fri *-*-* 09:00:00 UTC`, que equivale a `06:00` em `America/Sao_Paulo` no cenario atual.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
-- depois de atualizar o repositorio na VPS com `git pull`, rode `docker compose up -d --build` para que o container use os comandos e telas novos.
+- depois de atualizar o repositorio na VPS com `git pull`, rode `deploy/scripts/opcoes-compose-vps.sh up -d --build` para que o container use os comandos e telas novos.
 
 ## Usuários (acesso web)
 
