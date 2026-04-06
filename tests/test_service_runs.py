@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from opcoes.service_runs import (
+    fail_latest_running_service_run,
     finish_service_run,
     get_service_dashboard,
     list_service_runs,
@@ -46,6 +47,7 @@ class _FakeConn:
                 "error_message": None,
                 "finished_at": None,
                 "duration_seconds": None,
+                "updated_at": params[7],
             }
             self.rows.insert(0, row)
             return _FakeResult([], rowcount=1)
@@ -62,6 +64,7 @@ class _FakeConn:
                     row["step"] = params[3]
                     row["summary"] = params[4]
                     row["error_message"] = params[5]
+                    row["updated_at"] = params[6]
                     return _FakeResult([], rowcount=1)
             return _FakeResult([], rowcount=0)
         if "FROM service_runs WHERE service_key =" in compact:
@@ -118,6 +121,40 @@ def test_service_run_lifecycle_and_dashboard(monkeypatch) -> None:
     )
     assert dashboard["services"][0]["label"] == "Ciclo diario do scraper"
     assert dashboard["services"][0]["last_run"]["status"] == "success"
+    assert dashboard["services"][0]["last_run"]["monitor_status"] == "success"
     assert dashboard["services"][0]["next_run_utc"].isoformat() == "2026-04-02T09:00:00+00:00"
 
     assert fake.closed >= 4
+
+
+def test_service_dashboard_flags_possible_stall_and_watchdog_can_fail_run(monkeypatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("opcoes.service_runs._connect", lambda: fake)
+
+    run_id = start_service_run(
+        service_key="scrape_cycle",
+        trigger_type="systemd",
+        summary="Ciclo iniciado",
+        scheduled_for=dt.datetime(2026, 4, 1, 9, 0, tzinfo=dt.timezone.utc),
+    )
+    fake.rows[0]["started_at"] = dt.datetime(2026, 4, 1, 9, 0, tzinfo=dt.timezone.utc)
+
+    dashboard = get_service_dashboard(
+        limit=5,
+        now_utc=dt.datetime(2026, 4, 1, 14, 15, tzinfo=dt.timezone.utc),
+    )
+    last_run = dashboard["services"][0]["last_run"]
+    assert last_run["monitor_status"] == "stalled"
+    assert "acima do limite esperado" in (last_run["monitor_message"] or "")
+    assert last_run["display_duration_seconds"] == 18900
+
+    reconciled = fail_latest_running_service_run(
+        service_key="scrape_cycle",
+        step="watchdog",
+        summary="Watchdog marcou a execucao como interrompida.",
+        error_message="Servico nao estava mais ativo.",
+    )
+    assert reconciled == run_id
+    assert fake.rows[0]["status"] == "failed"
+    assert fake.rows[0]["step"] == "watchdog"
+    assert fake.rows[0]["error_message"] == "Servico nao estava mais ativo."

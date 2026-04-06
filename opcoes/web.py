@@ -936,6 +936,7 @@ def create_app() -> Flask:
             normalized = str(status or "").strip().lower()
             mapping = {
                 "running": ("Em andamento", "text-bg-warning"),
+                "stalled": ("Possivel travamento", "text-bg-danger"),
                 "success": ("Concluido", "text-bg-success"),
                 "failed": ("Falhou", "text-bg-danger"),
             }
@@ -1045,15 +1046,20 @@ def create_app() -> Flask:
             last_run = service.get("last_run")
             last_run_view = None
             if isinstance(last_run, dict):
-                status_label, status_class = _status_meta(last_run.get("status"))
+                status_label, status_class = _status_meta(
+                    last_run.get("monitor_status") or last_run.get("status")
+                )
                 last_run_view = {
                     "status_label": status_label,
                     "status_class": status_class,
                     "started_at_display": _format_panel_datetime(last_run.get("started_at")),
                     "finished_at_display": _format_panel_datetime(last_run.get("finished_at")),
-                    "duration_display": _format_duration(last_run.get("duration_seconds")),
+                    "duration_display": _format_duration(
+                        last_run.get("display_duration_seconds")
+                    ),
                     "summary": (last_run.get("summary") or "").strip(),
                     "error_message": (last_run.get("error_message") or "").strip(),
+                    "warning_message": (last_run.get("monitor_message") or "").strip(),
                 }
             automation_services.append(
                 {
@@ -1069,7 +1075,9 @@ def create_app() -> Flask:
 
         automation_runs = []
         for row in automation_dashboard.get("recent_runs", []):
-            status_label, status_class = _status_meta(row.get("status"))
+            status_label, status_class = _status_meta(
+                row.get("monitor_status") or row.get("status")
+            )
             automation_runs.append(
                 {
                     **row,
@@ -1077,9 +1085,12 @@ def create_app() -> Flask:
                     "status_class": status_class,
                     "started_at_display": _format_panel_datetime(row.get("started_at")),
                     "finished_at_display": _format_panel_datetime(row.get("finished_at")),
-                    "duration_display": _format_duration(row.get("duration_seconds")),
+                    "duration_display": _format_duration(
+                        row.get("display_duration_seconds")
+                    ),
                     "summary_display": (row.get("summary") or "").strip(),
                     "error_display": (row.get("error_message") or "").strip(),
+                    "warning_display": (row.get("monitor_message") or "").strip(),
                 }
             )
         return render_template(

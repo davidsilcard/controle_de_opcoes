@@ -26,6 +26,7 @@ class ServiceDefinition:
     weekdays: tuple[int, ...]
     run_hour_utc: int
     run_minute_utc: int
+    stale_after_seconds: int
 
 
 def _sanitize_schema(value: str) -> str:
@@ -117,6 +118,19 @@ def _coerce_datetime(value: Optional[dt.datetime]) -> Optional[dt.datetime]:
     return value.astimezone(_UTC)
 
 
+def _format_duration_label(seconds: Optional[int]) -> str:
+    if seconds is None:
+        return "-"
+    total = max(int(seconds), 0)
+    if total < 60:
+        return f"{total}s"
+    minutes, rem_seconds = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {rem_seconds:02d}s"
+    hours, rem_minutes = divmod(minutes, 60)
+    return f"{hours}h {rem_minutes:02d}m"
+
+
 def start_service_run(
     *,
     service_key: str,
@@ -196,6 +210,32 @@ def finish_service_run(
         conn.close()
 
 
+def fail_latest_running_service_run(
+    *,
+    service_key: str,
+    step: Optional[str] = None,
+    summary: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> Optional[str]:
+    rows = list_service_runs(limit=1, service_key=service_key)
+    if not rows:
+        return None
+    latest = rows[0]
+    if str(latest.get("status") or "").strip().lower() != "running":
+        return None
+    run_id = str(latest.get("id") or "").strip()
+    if not run_id:
+        return None
+    updated = finish_service_run(
+        run_id,
+        status="failed",
+        step=step,
+        summary=summary,
+        error_message=error_message,
+    )
+    return run_id if updated else None
+
+
 def list_service_runs(*, limit: int = 20, service_key: Optional[str] = None) -> List[Dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 200))
     conn = _connect()
@@ -239,6 +279,7 @@ def _service_definitions() -> List[ServiceDefinition]:
             weekdays=(0, 1, 2, 3, 4),
             run_hour_utc=9,
             run_minute_utc=0,
+            stale_after_seconds=4 * 60 * 60,
         )
     ]
 
@@ -261,14 +302,63 @@ def _compute_next_run(definition: ServiceDefinition, *, now_utc: Optional[dt.dat
     return base + dt.timedelta(days=1)
 
 
+def _decorate_run_for_monitoring(
+    row: Dict[str, Any],
+    *,
+    definition: Optional[ServiceDefinition],
+    now_utc: Optional[dt.datetime] = None,
+) -> Dict[str, Any]:
+    decorated = dict(row)
+    normalized_status = str(decorated.get("status") or "").strip().lower()
+    decorated["monitor_status"] = normalized_status
+    decorated["monitor_message"] = None
+
+    stored_duration = decorated.get("duration_seconds")
+    display_duration = stored_duration
+
+    if normalized_status == "running":
+        started_at = _coerce_datetime(decorated.get("started_at"))
+        current = _coerce_datetime(now_utc) or dt.datetime.now(_UTC)
+        runtime_seconds = None
+        if started_at is not None:
+            runtime_seconds = max(int((current - started_at).total_seconds()), 0)
+            if display_duration is None:
+                display_duration = runtime_seconds
+        decorated["runtime_seconds"] = runtime_seconds
+
+        if (
+            definition is not None
+            and runtime_seconds is not None
+            and runtime_seconds > int(definition.stale_after_seconds)
+        ):
+            decorated["monitor_status"] = "stalled"
+            decorated["monitor_message"] = (
+                "Execucao sem finalizacao ha "
+                f"{_format_duration_label(runtime_seconds)}, acima do limite esperado de "
+                f"{_format_duration_label(definition.stale_after_seconds)}. "
+                "Verifique logs e status do systemd."
+            )
+
+    decorated["display_duration_seconds"] = display_duration
+    return decorated
+
+
 def get_service_dashboard(*, limit: int = 20, now_utc: Optional[dt.datetime] = None) -> Dict[str, Any]:
-    recent_runs = list_service_runs(limit=limit)
+    definitions = {definition.key: definition for definition in _service_definitions()}
+    recent_runs = [
+        _decorate_run_for_monitoring(
+            row,
+            definition=definitions.get(str(row.get("service_key") or "")),
+            now_utc=now_utc,
+        )
+        for row in list_service_runs(limit=limit)
+    ]
     by_service: Dict[str, List[Dict[str, Any]]] = {}
     for row in recent_runs:
         by_service.setdefault(str(row.get("service_key") or ""), []).append(row)
 
     services: List[Dict[str, Any]] = []
-    for definition in _service_definitions():
+    for definition in definitions.values():
         next_run_utc = _compute_next_run(definition, now_utc=now_utc)
         services.append(
             {
@@ -276,6 +366,7 @@ def get_service_dashboard(*, limit: int = 20, now_utc: Optional[dt.datetime] = N
                 "label": definition.label,
                 "description": definition.description,
                 "schedule_label": definition.schedule_label,
+                "stale_after_seconds": definition.stale_after_seconds,
                 "next_run_utc": next_run_utc,
                 "next_run_local": next_run_utc.astimezone(_LOCAL_TZ),
                 "last_run": (by_service.get(definition.key) or [None])[0],
@@ -290,6 +381,7 @@ def get_service_dashboard(*, limit: int = 20, now_utc: Optional[dt.datetime] = N
 
 __all__ = [
     "DEFAULT_SERVICE_KEY",
+    "fail_latest_running_service_run",
     "finish_service_run",
     "get_service_dashboard",
     "list_service_runs",

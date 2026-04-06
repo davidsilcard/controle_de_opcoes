@@ -439,8 +439,11 @@ deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes
 Arquivos versionados:
 
 - `deploy/scripts/run_scrape_cycle.sh`
+- `deploy/scripts/check_scrape_watchdog.sh`
 - `deploy/systemd/opcoes-scrape.service`
 - `deploy/systemd/opcoes-scrape.timer`
+- `deploy/systemd/opcoes-scrape-watchdog.service`
+- `deploy/systemd/opcoes-scrape-watchdog.timer`
 
 O script faz este ciclo:
 
@@ -455,6 +458,8 @@ Painel web:
 
 - a aba `Configuracoes` passa a mostrar o status do ciclo agendado, com ultima execucao, inicio, fim, duracao e proxima execucao prevista.
 - as marcacoes usam a tabela `service_runs`, gravada automaticamente pelo proprio job agendado.
+- se uma execucao ficar tempo demais sem finalizar, o painel sinaliza `Possivel travamento`.
+- um watchdog do host reconcilia execucoes que morrerem fora do fluxo normal e evita deixar o painel preso em `Em andamento`.
 
 Observacoes importantes:
 
@@ -472,11 +477,16 @@ sudo chown root:david /etc/controle_de_opcoes/app.env
 sudo chmod 640 /etc/controle_de_opcoes/app.env
 chmod +x deploy/scripts/opcoes-compose-vps.sh
 chmod +x deploy/scripts/run_scrape_cycle.sh
+chmod +x deploy/scripts/check_scrape_watchdog.sh
 sudo cp deploy/systemd/opcoes-scrape.service /etc/systemd/system/
 sudo cp deploy/systemd/opcoes-scrape.timer /etc/systemd/system/
+sudo cp deploy/systemd/opcoes-scrape-watchdog.service /etc/systemd/system/
+sudo cp deploy/systemd/opcoes-scrape-watchdog.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now opcoes-scrape.timer
+sudo systemctl enable --now opcoes-scrape-watchdog.timer
 sudo systemctl list-timers opcoes-scrape.timer
+sudo systemctl list-timers opcoes-scrape-watchdog.timer
 ```
 
 Antes de subir a aplicacao, edite `/etc/controle_de_opcoes/app.env` e troque todos os placeholders de senha/chave.
@@ -488,6 +498,7 @@ Logs da ultima execucao:
 
 ```bash
 sudo journalctl -u opcoes-scrape.service -n 200 --no-pager
+sudo journalctl -u opcoes-scrape-watchdog.service -n 50 --no-pager
 ```
 
 Consulta rapida das execucoes registradas no banco:
@@ -500,6 +511,15 @@ Execucao manual do job agendado:
 
 ```bash
 sudo systemctl start opcoes-scrape.service
+sudo systemctl start opcoes-scrape-watchdog.service
+```
+
+Diagnostico rapido para distinguir rodando de travado:
+
+```bash
+sudo systemctl status opcoes-scrape.service
+sudo systemctl show opcoes-scrape.service -p ActiveState -p SubState -p Result
+sudo journalctl -u opcoes-scrape.service -f
 ```
 
 Observacao de horario:
@@ -554,6 +574,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 - README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild e `db check`.
+- painel de `Configuracoes` agora sinaliza `Possivel travamento` quando um ciclo fica tempo demais sem finalizar, e o host passa a ter um watchdog para reconciliar status `running` orfao.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
 - assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.

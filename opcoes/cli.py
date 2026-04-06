@@ -40,6 +40,7 @@ from .retention import (
 )
 from .service_runs import (
     DEFAULT_SERVICE_KEY,
+    fail_latest_running_service_run,
     finish_service_run,
     list_service_runs,
     start_service_run,
@@ -503,6 +504,34 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=20,
         help="Quantidade maxima de linhas (default: 20).",
+    )
+
+    sr_watchdog = srcs.add_parser(
+        "watchdog",
+        help="Marca como falha a ultima execucao running quando o monitor externo detectar interrupcao.",
+    )
+    sr_watchdog.add_argument(
+        "--service",
+        default=DEFAULT_SERVICE_KEY,
+        help=f"Chave do servico (default: {DEFAULT_SERVICE_KEY}).",
+    )
+    sr_watchdog.add_argument(
+        "--summary",
+        default="Watchdog marcou a execucao como interrompida.",
+        help="Resumo final mostrado no painel.",
+    )
+    sr_watchdog.add_argument(
+        "--message",
+        default=(
+            "O monitor externo detectou que o servico nao esta mais ativo, "
+            "mas o painel ainda mostrava a execucao em andamento."
+        ),
+        help="Mensagem final exibida como detalhe do erro.",
+    )
+    sr_watchdog.add_argument(
+        "--step",
+        default="watchdog",
+        help="Etapa final registrada no painel.",
     )
 
     dbc = sub.add_parser("db", help="Diagnóstico de banco de dados")
@@ -984,6 +1013,14 @@ def main() -> None:
                         f"{row.get('id')} | {service_key} | {status} | "
                         f"inicio={started_at} | fim={finished_at}{suffix}"
                     )
+        elif args.subcmd == "watchdog":
+            run_id = fail_latest_running_service_run(
+                service_key=args.service,
+                step=args.step,
+                summary=args.summary,
+                error_message=args.message,
+            )
+            print(run_id or "noop")
     elif args.cmd == "db":
         if args.subcmd == "check":
             report = run_db_check(timeout_seconds=float(args.timeout))

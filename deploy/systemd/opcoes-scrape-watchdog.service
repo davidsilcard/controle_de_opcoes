@@ -1,0 +1,15 @@
+[Unit]
+Description=Reconcilia status do ciclo do scraper no painel da aplicacao Opcoes
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=david
+Group=docker
+WorkingDirectory=/home/david/apps/controle_de_opcoes
+ExecStart=/bin/bash /home/david/apps/controle_de_opcoes/deploy/scripts/check_scrape_watchdog.sh
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

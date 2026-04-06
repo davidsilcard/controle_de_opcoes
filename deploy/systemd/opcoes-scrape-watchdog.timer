@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitora se o ciclo do scraper ficou preso como running no painel
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=opcoes-scrape-watchdog.service
+
+[Install]
+WantedBy=timers.target

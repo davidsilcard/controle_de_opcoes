@@ -32,6 +32,9 @@
         <p class="text-muted small mb-3">
           Aqui voce acompanha quando o ciclo agendado comecou, terminou, falhou e qual e a proxima execucao prevista.
         </p>
+        <p class="text-muted small mb-3">
+          Se uma execucao ficar tempo demais sem finalizar, o painel passa a sinalizar possivel travamento.
+        </p>
 
         <div class="row g-3 mb-3">
           {% for service in automation_services %}
@@ -79,6 +82,9 @@
                     {% else %}
                     -
                     {% endif %}
+                    {% if service.last_run_view.warning_message %}
+                    <div class="text-danger mt-1">{{ service.last_run_view.warning_message }}</div>
+                    {% endif %}
                   </dd>
                   {% endif %}
                 </dl>
@@ -122,6 +128,9 @@
                       {{ row.error_display }}
                       {% else %}
                       -
+                      {% endif %}
+                      {% if row.warning_display %}
+                      <div class="text-danger small mt-1">{{ row.warning_display }}</div>
                       {% endif %}
                     </td>
                   </tr>
