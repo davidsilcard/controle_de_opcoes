@@ -147,6 +147,15 @@ def _list_tables(conn, schemas: Sequence[str]) -> List[tuple[str, str]]:
     return tables
 
 
+def _normalize_table_names(values: Sequence[str] | None) -> set[str]:
+    names: set[str] = set()
+    for value in values or ():
+        text = str(value or "").strip()
+        if text:
+            names.add(text)
+    return names
+
+
 def _fetch_columns(conn, schema: str, table: str) -> List[ColumnDef]:
     with conn.cursor() as cur:
         cur.execute(
@@ -551,7 +560,93 @@ def migrate_postgres(
         target_conn.close()
 
 
+def clone_postgres_schema(
+    *,
+    dsn: str,
+    source_schema: str,
+    target_schema: str,
+    include_tables: Sequence[str] | None = None,
+    truncate_target: bool = True,
+) -> Dict[str, Any]:
+    source_conn = _connect(dsn)
+    target_conn = _connect(dsn)
+    try:
+        source_tables = _list_tables(source_conn, [source_schema])
+        if not source_tables:
+            raise RuntimeError("Nenhuma tabela encontrada no schema de origem informado.")
+
+        allowed_tables = _normalize_table_names(include_tables)
+        if allowed_tables:
+            source_tables = [
+                (schema, table)
+                for schema, table in source_tables
+                if table in allowed_tables
+            ]
+        if not source_tables:
+            raise RuntimeError("Nenhuma tabela selecionada para copiar no bootstrap do usuario.")
+
+        blueprints = {
+            (schema, table): _fetch_blueprint(source_conn, schema, table)
+            for schema, table in source_tables
+        }
+
+        for source_schema_name, table_name in source_tables:
+            _ensure_schema_and_table(
+                target_conn,
+                blueprints[(source_schema_name, table_name)],
+                target_schema=target_schema,
+            )
+
+        if truncate_target:
+            for _source_schema_name, table_name in reversed(source_tables):
+                _truncate_table(target_conn, target_schema, table_name)
+            target_conn.commit()
+
+        report_tables: List[Dict[str, Any]] = []
+        total_rows = 0
+        for source_schema_name, table_name in source_tables:
+            blueprint = blueprints[(source_schema_name, table_name)]
+            source_count = _count_rows(source_conn, source_schema_name, table_name)
+            if source_count > 0:
+                _copy_table_data(
+                    source_conn,
+                    target_conn,
+                    source_schema=source_schema_name,
+                    target_schema=target_schema,
+                    table=table_name,
+                    columns=blueprint.columns,
+                )
+            _reset_identity_sequences(target_conn, target_schema, table_name)
+            target_conn.commit()
+            target_count = _count_rows(target_conn, target_schema, table_name)
+            if target_count != source_count:
+                raise RuntimeError(
+                    f"Contagem divergente em {source_schema_name}.{table_name}: origem={source_count}, destino={target_count}."
+                )
+            total_rows += source_count
+            report_tables.append(
+                {
+                    "source_schema": source_schema_name,
+                    "target_schema": target_schema,
+                    "table": table_name,
+                    "rows": source_count,
+                }
+            )
+
+        return {
+            "source": _redact_dsn(dsn),
+            "target": _redact_dsn(dsn),
+            "tables": report_tables,
+            "total_rows": total_rows,
+            "truncate_target": bool(truncate_target),
+        }
+    finally:
+        source_conn.close()
+        target_conn.close()
+
+
 __all__ = [
+    "clone_postgres_schema",
     "migrate_postgres",
     "_build_column_sql",
     "_build_create_table_sql",

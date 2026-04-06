@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from .auth import (
     create_user,
+    issue_temporary_password,
     list_users,
 )
 from .scraper.run import scrape_all
@@ -19,7 +20,7 @@ from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
 from .db_health import is_postgres_ready, run_db_check
 from .db_health import resolve_postgres_target
-from .db_migrate import migrate_postgres
+from .db_migrate import clone_postgres_schema, migrate_postgres
 from .db_optimize import optimize_postgres_schema
 from . import finance
 from .fundamentus import (
@@ -46,6 +47,75 @@ from .service_runs import (
     start_service_run,
 )
 from .runtime_env import load_dotenv_once
+
+
+USER_BOOTSTRAP_MARKET_TABLES = [
+    "settings",
+    "option_snapshots",
+    "underlying_snapshots",
+    "flow_history",
+    "iv_history",
+    "ranking_runs",
+    "ranking_entries",
+    "fundamentus_runs",
+    "fundamentus_snapshots",
+    "fundamentus_filter_runs",
+    "fundamentus_signals",
+    "ticker_metadata",
+]
+
+
+def _bootstrap_user_schema(
+    *,
+    loaded_env_path: Path | None,
+    source_schema: str,
+    target_schema: str,
+    mode: str,
+) -> None:
+    target_target, target_errors = resolve_postgres_target()
+    if target_target is None:
+        details = "; ".join(target_errors) if target_errors else "configuração ausente"
+        raise SystemExit(
+            f"Falha ao resolver PostgreSQL para bootstrap do usuário: {details}"
+        )
+
+    include_tables = None
+    if mode == "market":
+        include_tables = USER_BOOTSTRAP_MARKET_TABLES
+
+    print(
+        f"Bootstrap do schema {target_schema} a partir de {source_schema}..."
+    )
+    print(
+        "Modo: "
+        + (
+            "base de mercado/configuração sem copiar posições do outro usuário"
+            if mode == "market"
+            else "cópia integral do schema operacional de origem"
+        )
+    )
+    try:
+        report = clone_postgres_schema(
+            dsn=target_target.dsn,
+            source_schema=source_schema,
+            target_schema=target_schema,
+            include_tables=include_tables,
+            truncate_target=True,
+        )
+    except Exception as exc:
+        raise SystemExit(f"Falha no bootstrap do usuário: {exc}") from exc
+
+    for item in report.get("tables", []):
+        print(
+            f"  - {item['source_schema']}.{item['table']} -> "
+            f"{item['target_schema']}.{item['table']} ({item['rows']} linhas)"
+        )
+    print(f"Total de linhas copiadas: {report.get('total_rows', 0)}")
+    print(
+        "Bootstrap concluído. O novo usuário já pode entrar sem herdar operações pessoais do schema base."
+        if mode == "market"
+        else "Bootstrap concluído com cópia integral do schema operacional."
+    )
 
 
 def sanitize_schema_name(value: str) -> str:
@@ -437,6 +507,80 @@ def parse_args() -> argparse.Namespace:
         "--all",
         action="store_true",
         help="Inclui usuários inativos.",
+    )
+
+    uc_invite = ucs.add_parser(
+        "invite",
+        help="Cria ou renova um usuário com senha temporária de primeiro acesso.",
+    )
+    uc_invite.add_argument(
+        "--username", required=True, help="Nome do usuário (minúsculo, 3-64 chars)"
+    )
+    uc_invite.add_argument(
+        "--replace",
+        action="store_true",
+        help="Se o usuário já existir, emite nova senha temporária.",
+    )
+    uc_invite.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Também prepara o schema inicial do usuário a partir de um schema base.",
+    )
+    uc_invite.add_argument(
+        "--from-schema",
+        default="admin",
+        help="Schema base de onde copiar a estrutura inicial (default: admin).",
+    )
+    uc_invite.add_argument(
+        "--target-schema",
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    uc_invite.add_argument(
+        "--mode",
+        choices=["market", "full"],
+        default="market",
+        help=(
+            "market copia apenas base de mercado/configuração; "
+            "full copia também posições e histórico fiscal do schema base."
+        ),
+    )
+
+    uc_bootstrap = ucs.add_parser(
+        "bootstrap",
+        help="Cria usuário web e prepara o schema inicial a partir de um schema base.",
+    )
+    uc_bootstrap.add_argument(
+        "--username", required=True, help="Nome do usuário (minúsculo, 3-64 chars)"
+    )
+    uc_bootstrap.add_argument(
+        "--password",
+        default=None,
+        help="Senha. Se omitida, solicita via prompt seguro.",
+    )
+    uc_bootstrap.add_argument(
+        "--replace",
+        action="store_true",
+        help="Se o usuário já existir, atualiza a senha.",
+    )
+    uc_bootstrap.add_argument(
+        "--from-schema",
+        default="admin",
+        help="Schema base de onde copiar a estrutura inicial (default: admin).",
+    )
+    uc_bootstrap.add_argument(
+        "--target-schema",
+        default=None,
+        help="Schema de destino no PostgreSQL (default: username normalizado).",
+    )
+    uc_bootstrap.add_argument(
+        "--mode",
+        choices=["market", "full"],
+        default="market",
+        help=(
+            "market copia apenas base de mercado/configuração; "
+            "full copia também posições e histórico fiscal do schema base."
+        ),
     )
 
     src = sub.add_parser("service-run", help="Registra e consulta execucoes dos servicos agendados")
@@ -963,6 +1107,64 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
+        elif args.subcmd == "invite":
+            try:
+                temp_password = issue_temporary_password(
+                    username=args.username,
+                    replace=bool(getattr(args, "replace", False)),
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print(f"Usuário temporário preparado: {args.username}")
+            print(f"Senha de primeiro acesso: {temp_password}")
+            print(
+                "Envie essa senha ao cliente por canal seguro. No primeiro login, ele será obrigado a cadastrar a senha pessoal."
+            )
+
+            if bool(getattr(args, "bootstrap", False)):
+                source_schema = sanitize_schema_name(args.from_schema)
+                target_schema = sanitize_schema_name(args.target_schema or args.username)
+                _bootstrap_user_schema(
+                    loaded_env_path=loaded_env_path,
+                    source_schema=source_schema,
+                    target_schema=target_schema,
+                    mode=args.mode,
+                )
+        elif args.subcmd == "bootstrap":
+            password = args.password
+            if not password:
+                password = getpass.getpass("Senha do usuário: ")
+            created = create_user(
+                username=args.username,
+                password=password,
+                replace=bool(getattr(args, "replace", False)),
+            )
+            if not created and not bool(getattr(args, "replace", False)):
+                raise SystemExit(
+                    f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
+                )
+
+            target_target, target_errors = resolve_postgres_target()
+            if target_target is None:
+                details = "; ".join(target_errors) if target_errors else "configuração ausente"
+                raise SystemExit(
+                    f"Falha ao resolver PostgreSQL para bootstrap do usuário: {details}"
+                )
+
+            source_schema = sanitize_schema_name(args.from_schema)
+            target_schema = sanitize_schema_name(args.target_schema or args.username)
+            print(
+                f"Bootstrap do usuário '{args.username}' em {target_schema} a partir de {source_schema}..."
+            )
+            _bootstrap_user_schema(
+                loaded_env_path=loaded_env_path,
+                source_schema=source_schema,
+                target_schema=target_schema,
+                mode=args.mode,
+            )
     elif args.cmd == "service-run":
         if args.subcmd == "start":
             scheduled_for = None

@@ -295,6 +295,39 @@ Criar usuario inicial da aplicacao web:
 docker compose exec web /app/.venv/bin/python -m opcoes.cli user create --username admin
 ```
 
+Convidar um cliente com senha temporaria de primeiro acesso:
+
+```bash
+docker compose exec web /app/.venv/bin/python -m opcoes.cli user invite --username alice
+```
+
+Fluxo recomendado:
+
+- o comando imprime uma senha temporaria forte uma unica vez no terminal
+- voce copia `usuario + senha temporaria` e envia ao cliente por canal seguro
+- no primeiro login, o sistema obriga o cliente a cadastrar a senha pessoal antes de acessar a plataforma
+- depois da troca, a senha temporaria deixa de valer
+- a senha temporaria expira em `3 horas`; se vencer, reemita com `user invite --replace`
+
+Se quiser convidar e ja preparar o schema inicial do cliente no mesmo passo:
+
+```bash
+docker compose exec web /app/.venv/bin/python -m opcoes.cli user invite --username alice --bootstrap --from-schema admin
+```
+
+Preparar um segundo usuario sem copiar posicoes/DARF do `admin`:
+
+```bash
+docker compose exec web /app/.venv/bin/python -m opcoes.cli user bootstrap --username alice --from-schema admin
+```
+
+Observacoes:
+
+- o modo padrao `market` copia apenas base de mercado e configuracoes operacionais para o novo schema.
+- isso evita misturar posicoes, ledger e DARF de outro usuario.
+- se voce realmente quiser clonar tudo do schema base, use `--mode full`.
+- o schema de destino, por padrao, segue o username normalizado; se precisar, sobrescreva com `--target-schema`.
+
 Smoke test HTTP local no VPS:
 
 ```bash

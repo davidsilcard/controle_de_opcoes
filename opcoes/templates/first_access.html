@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Login | Opções</title>
+  <title>Primeiro Acesso | Opções</title>
   <style>
     :root {
       color-scheme: light;
@@ -14,6 +14,8 @@
       --accent: #1f5aff;
       --danger: #b00020;
       --border: #d9deea;
+      --notice-bg: #eef4ff;
+      --notice-border: #c7d7ff;
     }
 
     body {
@@ -29,7 +31,7 @@
 
     .card {
       width: 100%;
-      max-width: 420px;
+      max-width: 460px;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -47,6 +49,17 @@
       margin: 0 0 14px;
       color: var(--muted);
       font-size: 0.95rem;
+      line-height: 1.45;
+    }
+
+    .notice {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--notice-bg);
+      border: 1px solid var(--notice-border);
+      color: var(--text);
+      font-size: 0.92rem;
       line-height: 1.45;
     }
 
@@ -85,40 +98,33 @@
       font-size: 0.92rem;
       font-weight: 600;
     }
-
-    .notice {
-      margin-top: 12px;
-      font-size: 0.82rem;
-      color: var(--muted);
-    }
   </style>
 </head>
 <body>
   <main class="card">
-    <h1>Acesso à plataforma</h1>
-    <p>Entre com seu usuário e senha. Seus dados ficam isolados por conta.</p>
+    <h1>Defina sua senha pessoal</h1>
+    <p>Seu acesso inicial foi liberado com uma senha temporária. Antes de entrar na plataforma, cadastre agora a senha que você deseja usar no dia a dia.</p>
+
+    <p class="notice">
+      Usuário: <strong>{{ username }}</strong><br />
+      Escolha uma senha que só você conheça. Depois desta etapa, a senha temporária deixa de valer.
+    </p>
 
     {% if error %}
     <p class="error">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('login') }}">
+    <form method="post" action="{{ url_for('first_access') }}">
       {{ csrf_input() }}
-      <input type="hidden" name="next" value="{{ next_url }}" />
 
-      <label for="username">Usuário</label>
-      <input id="username" name="username" type="text" autocomplete="username" required />
+      <label for="password">Nova senha</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required />
 
-      <label for="password">Senha</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <label for="password_confirm">Confirme a nova senha</label>
+      <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required />
 
-      <button type="submit">Entrar</button>
+      <button type="submit">Salvar senha e entrar</button>
     </form>
-
-    <p class="notice">
-      Dica: o administrador cria usuários com o comando
-      <code>uv run python -m opcoes.cli user invite --username ...</code>.
-    </p>
   </main>
 </body>
 </html>

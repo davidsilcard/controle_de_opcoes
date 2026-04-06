@@ -16,7 +16,8 @@ from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .auth import (
-    authenticate_user,
+    authenticate_login,
+    change_password,
     ensure_bootstrap_user_from_env,
     normalize_username,
 )
@@ -328,6 +329,9 @@ def create_app() -> Flask:
             return url_for("index")
         return candidate
 
+    def _is_first_access_pending() -> bool:
+        return bool(session.get("must_change_password"))
+
     @app.before_request
     def _protect_csrf():
         if app.testing:
@@ -363,7 +367,7 @@ def create_app() -> Flask:
             return None
 
         endpoint = request.endpoint or ""
-        if endpoint in {"login", "logout", "static"}:
+        if endpoint in {"login", "logout", "first_access", "static"}:
             return None
 
         username = normalize_username(session.get("username") or "")
@@ -404,6 +408,8 @@ def create_app() -> Flask:
 
         g.pg_schema_override_token = set_pg_schema_override(username)
         g.current_username = username
+        if _is_first_access_pending():
+            return redirect(url_for("first_access"))
         return None
 
     @app.teardown_request
@@ -486,15 +492,27 @@ def create_app() -> Flask:
                 )
             username = normalize_username(request.form.get("username") or "")
             password = request.form.get("password") or ""
-            if authenticate_user(username=username, password=password):
+            auth_result = authenticate_login(username=username, password=password)
+            auth_user = auth_result.user
+            if auth_user:
                 _clear_failed_login()
                 session.clear()
-                session["username"] = username
+                session["username"] = auth_user.username
+                session["must_change_password"] = bool(auth_user.must_change_password)
                 now_ts = _utc_now_ts()
                 session["session_started_at"] = now_ts
                 session["last_activity_at"] = now_ts
+                if auth_user.must_change_password:
+                    session["post_login_redirect"] = next_url
+                    return redirect(url_for("first_access"))
                 return redirect(next_url)
-            error = "Usuário ou senha inválidos."
+            if auth_result.error_code == "temp_password_expired":
+                error = (
+                    "A senha temporaria expirou apos 3 horas. "
+                    "Peca ao administrador para emitir uma nova senha de primeiro acesso."
+                )
+            else:
+                error = "Usuário ou senha inválidos."
 
         if request.method == "POST" and error:
             blocked_for = _record_failed_login()
@@ -508,6 +526,40 @@ def create_app() -> Flask:
                     429,
                 )
         return render_template("login.html", error=error, next_url=next_url)
+
+    @app.route("/first-access", methods=["GET", "POST"])
+    def first_access() -> str:
+        if app.testing or not _is_auth_enabled():
+            return redirect(url_for("index"))
+
+        username = normalize_username(session.get("username") or "")
+        if not username:
+            return redirect(url_for("login"))
+        if not _is_first_access_pending():
+            return redirect(url_for("index"))
+
+        error = None
+        if request.method == "POST":
+            password = request.form.get("password") or ""
+            password_confirm = request.form.get("password_confirm") or ""
+            if password != password_confirm:
+                error = "As senhas nao conferem. Revise e tente novamente."
+            else:
+                try:
+                    updated = change_password(username=username, password=password)
+                except ValueError as exc:
+                    error = str(exc)
+                else:
+                    if not updated:
+                        session.clear()
+                        return redirect(url_for("login"))
+                    session["must_change_password"] = False
+                    next_url = _safe_redirect_target(
+                        session.pop("post_login_redirect", None)
+                    )
+                    return redirect(next_url)
+
+        return render_template("first_access.html", error=error, username=username)
 
     @app.post("/logout")
     def logout():
