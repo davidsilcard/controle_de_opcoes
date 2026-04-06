@@ -305,8 +305,16 @@ curl http://127.0.0.1:8000/login
 
 ```bash
 cd ~/apps/controle_de_opcoes
-git pull
+git pull origin main
 deploy/scripts/opcoes-compose-vps.sh up -d --build
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
+```
+
+Se quiser acompanhar a subida logo depois:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh logs -f web
 ```
 
 ### Migracao integral do PostgreSQL local para a VPS
@@ -545,6 +553,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
+- README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild e `db check`.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
 - assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.
