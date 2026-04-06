@@ -12,3 +12,24 @@ services:
       - ${OPCOES_WEB_BIND:-8000:8000}
     volumes:
       - ${OPCOES_DATA_DIR:-./data}:/app/data
+  edge:
+    build:
+      context: .
+    container_name: opcoes-edge
+    restart: unless-stopped
+    env_file:
+      - ${OPCOES_APP_ENV_FILE:-.env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - uvicorn
+      - opcoes.edge:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+    ports:
+      - ${OPCOES_EDGE_BIND:-127.0.0.1:8001:8001}
+    volumes:
+      - ${OPCOES_DATA_DIR:-./data}:/app/data

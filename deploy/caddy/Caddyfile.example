@@ -1,0 +1,15 @@
+opcoes.moven.cloud {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}
+
+api.moven.cloud {
+    encode zstd gzip
+
+    @ws {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    reverse_proxy 127.0.0.1:8001
+}

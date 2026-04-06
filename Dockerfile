@@ -29,6 +29,6 @@ USER appuser
 
 ENV PATH="/app/.venv/bin:${PATH}"
 
-EXPOSE 8000
+EXPOSE 8000 8001
 
 CMD ["gunicorn", "--workers=2", "--bind=0.0.0.0:8000", "opcoes.web:create_app()"]

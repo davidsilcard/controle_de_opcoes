@@ -163,6 +163,42 @@ A partir da baixa da posicao:
 uv run python -m opcoes.web
 ```
 
+### Edge API publica
+
+Servico separado para `api.moven.cloud`, com cache curto, bearer token e WebSocket:
+
+```bash
+uv run python -m opcoes.edge
+```
+
+Responsabilidades da edge:
+
+- autenticar clientes publicos com bearer token
+- consumir o `mt5-gateway` privado via HMAC
+- cachear quotes por poucos milissegundos
+- emitir tickets curtos para WebSocket
+
+Variaveis minimas para a edge:
+
+```bash
+MT5_GATEWAY_BASE_URL=http://100.64.0.10:8000
+MT5_GATEWAY_KEY_ID=edge-1
+MT5_GATEWAY_SHARED_SECRET=troque-por-um-segredo-forte
+OPCOES_EDGE_API_TOKENS=excel=troque-este-token,app=troque-outro-token
+```
+
+Fluxo recomendado:
+
+- `opcoes.moven.cloud` continua na app Flask
+- `api.moven.cloud` publica a edge FastAPI
+- a edge chama o gateway privado rodando na maquina Windows com MT5
+
+Arquivos principais:
+
+- `opcoes/mt5_gateway.py`
+- `opcoes/edge.py`
+- `docs/edge-vps-runbook.md`
+
 ## Deploy Docker no VPS
 
 Fluxo recomendado para producao no VPS Linux:
