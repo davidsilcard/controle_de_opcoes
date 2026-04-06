@@ -3,13 +3,14 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-# Séries tradicionais da B3: A–L = calls, M–X = puts.
+# Series tradicionais da B3: A-L = calls, M-X = puts.
 CALL_SERIES = set("ABCDEFGHIJKL")
 PUT_SERIES = set("MNOPQRSTUVWX")
+_B3_OPTION_SERIES_RE = re.compile(r"^[A-Z]{4}([A-Z])(?=\d)")
 
 
 def infer_option_type(ticker: str) -> Optional[str]:
-    """Infere CALL/PUT a partir da letra da série no ticker."""
+    """Infere CALL/PUT apenas para tickers no padrao de opcao da B3."""
 
     if not ticker:
         return None
@@ -17,14 +18,12 @@ def infer_option_type(ticker: str) -> Optional[str]:
     if not text:
         return None
 
-    # Procura a primeira letra imediatamente antes de um dígito (ex.: PETRA30, ABEVA105W1).
-    match = re.search(r"([A-Z])\d", text)
+    # Exige raiz de 4 letras + serie + digitos para nao confundir
+    # acoes como BBAS3 com opcoes.
+    match = _B3_OPTION_SERIES_RE.match(text)
     series_letter: Optional[str] = match.group(1) if match else None
-
-    has_digits = any(ch.isdigit() for ch in text)
-    # Fallback: assume que a 5ª letra (índice 4) é a série quando há dígitos no ticker.
-    if series_letter is None and has_digits and len(text) >= 5 and text[4].isalpha():
-        series_letter = text[4]
+    if series_letter is None:
+        return None
 
     if series_letter in CALL_SERIES:
         return "CALL"
@@ -34,7 +33,7 @@ def infer_option_type(ticker: str) -> Optional[str]:
 
 
 def format_decimal(value: Optional[float], decimals: int = 2, signed: bool = False) -> str:
-    """Formata float para string PT-BR (vírgula decimal)."""
+    """Formata float para string PT-BR (virgula decimal)."""
     if value is None:
         return ""
     fmt = f"{{:.{decimals}f}}"
@@ -45,7 +44,7 @@ def format_decimal(value: Optional[float], decimals: int = 2, signed: bool = Fal
 
 
 def parse_ptbr_number(value: object) -> Optional[float]:
-    """Converte strings com vírgula/porcentagem em float."""
+    """Converte strings com virgula/porcentagem em float."""
 
     if value is None:
         return None
@@ -60,7 +59,6 @@ def parse_ptbr_number(value: object) -> Optional[float]:
     cleaned = (
         text.replace("\xa0", "")
         .replace("\u2212", "-")
-        .replace("−", "-")
         .replace("%", "")
         .replace("+", "")
         .replace(" ", "")
