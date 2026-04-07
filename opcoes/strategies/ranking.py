@@ -321,7 +321,7 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         if "Nenhum snapshot encontrado" in str(exc):
             data = _build_empty_report_data()
             empty_state_message = (
-                "Ainda não há snapshots para este usuário. "
+                "Ainda não há snapshots na base compartilhada. "
                 "Rode a coleta (scrape) para começar a visualizar oportunidades."
             )
         else:
@@ -331,7 +331,7 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         if "option_snapshots" in str(exc).lower() and "does not exist" in str(exc).lower():
             data = _build_empty_report_data()
             empty_state_message = (
-                "Ainda não há snapshots para este usuário. "
+                "Ainda não há snapshots na base compartilhada. "
                 "Rode a coleta (scrape) para começar a visualizar oportunidades."
             )
         else:

@@ -4,7 +4,7 @@ import contextlib
 import datetime as dt
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
-from ..config import get_postgres_schema
+from ..config import get_postgres_shared_schema
 from ..db_health import resolve_postgres_target
 
 
@@ -65,7 +65,7 @@ def _connect_postgres() -> _DbConn:
             "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
-    schema = get_postgres_schema()
+    schema = get_postgres_shared_schema()
     raw = psycopg.connect(target.dsn)
     with raw.cursor() as cur:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")

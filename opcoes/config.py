@@ -48,10 +48,24 @@ def get_postgres_schema() -> str:
     return "public"
 
 
+def get_postgres_shared_schema() -> str:
+    shared_value = os.getenv("OPCOES_SHARED_SCHEMA", "")
+    if shared_value.strip():
+        return _sanitize_pg_schema(shared_value)
+    automation_value = os.getenv("OPCOES_AUTOMATION_SCHEMA", "")
+    if automation_value.strip():
+        return _sanitize_pg_schema(automation_value)
+    env_value = os.getenv("OPCOES_PG_SCHEMA", "")
+    if env_value.strip():
+        return _sanitize_pg_schema(env_value)
+    return "public"
+
+
 __all__ = [
     "get_data_backend",
     "is_postgres_strict_mode",
     "get_postgres_schema",
+    "get_postgres_shared_schema",
     "set_pg_schema_override",
     "reset_pg_schema_override",
 ]

@@ -36,6 +36,7 @@ from .portfolio import (
     close_position,
     get_position,
 )
+from .snapshot_repository import fetch_latest_option_snapshot
 from .utils import infer_option_type, parse_ptbr_number
 from .settings import (
     CashCoveredPutSettings,
@@ -1880,17 +1881,10 @@ def create_app() -> Flask:
         if not ticker:
             return None
         t = ticker.strip().upper()
-        conn = open_db()
-        try:
-            row = conn.execute(
-                "SELECT underlying FROM option_snapshots WHERE ticker = %s ORDER BY snapshot_date DESC LIMIT 1",
-                (t,),
-            ).fetchone()
-            if not row:
-                return None
-            return row.get("underlying") if isinstance(row, dict) else row[0]
-        finally:
-            conn.close()
+        row = fetch_latest_option_snapshot(t)
+        if not row:
+            return None
+        return str(row.get("underlying") or "").strip().upper() or None
 
     def _safe_next_url(value: str | None) -> str | None:
         if not value:
@@ -1961,24 +1955,10 @@ def create_app() -> Flask:
         if not ticker:
             return None
         t = ticker.strip().upper()
-        conn = open_db()
-        try:
-            row = conn.execute(
-                """
-                SELECT strike
-                FROM option_snapshots
-                WHERE ticker = %s
-                ORDER BY snapshot_date DESC
-                LIMIT 1
-                """,
-                (t,),
-            ).fetchone()
-            if not row:
-                return None
-            strike = row.get("strike") if isinstance(row, dict) else row[0]
-            return float(parse_ptbr_number(strike) or 0.0)
-        finally:
-            conn.close()
+        row = fetch_latest_option_snapshot(t)
+        if not row:
+            return None
+        return float(parse_ptbr_number(row.get("last_strike")) or 0.0)
 
     def _auto_fees(
         *,

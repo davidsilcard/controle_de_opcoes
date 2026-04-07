@@ -4,6 +4,11 @@ import csv
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from .config import (
+    get_postgres_shared_schema,
+    reset_pg_schema_override,
+    set_pg_schema_override,
+)
 from .db import open_db
 from .scraper.storage import CSV_FIELDS, CSV_WRITER_KWARGS, _ensure_parent, normalize_csv_row
 
@@ -63,7 +68,11 @@ def export_snapshot(
     output_csv = Path(output_csv)
     _ensure_parent(output_csv)
 
-    conn = open_db()
+    token = set_pg_schema_override(get_postgres_shared_schema())
+    try:
+        conn = open_db()
+    finally:
+        reset_pg_schema_override(token)
     try:
         _ensure_snapshot_columns(conn)
         if not _has_option_snapshots_table(conn):

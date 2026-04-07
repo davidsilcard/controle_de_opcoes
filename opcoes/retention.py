@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
-from .config import get_postgres_schema
+from .config import get_postgres_shared_schema
 from .db_health import resolve_postgres_target
 
 
@@ -92,7 +92,7 @@ def _connect_postgres() -> _DbConn:
             "Driver psycopg nao encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
-    schema = get_postgres_schema()
+    schema = get_postgres_shared_schema()
     raw_conn = psycopg.connect(target.dsn, row_factory=dict_row)
     with raw_conn.cursor() as cur:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")

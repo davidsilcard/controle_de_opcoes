@@ -8,6 +8,7 @@ from .config import (
     get_postgres_schema,
 )
 from .db_health import resolve_postgres_target
+from .snapshot_repository import fetch_latest_option_snapshots
 from .utils import infer_option_type, parse_ptbr_number
 
 
@@ -263,39 +264,39 @@ def _table_exists(conn: _DbConn, table_name: str) -> bool:
     return _first_col(row) is not None
 
 
-def _has_option_snapshots_table(conn: _DbConn) -> bool:
-    return _table_exists(conn, "option_snapshots")
+def _row_as_dict(row: Any) -> dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, Mapping):
+        return dict(row)
+    try:
+        return dict(row)
+    except Exception:
+        return {}
 
 
-def _snapshot_subquery_sql(has_snapshot_table: bool) -> str:
-    if has_snapshot_table:
-        return """
-            SELECT os1.*
-            FROM option_snapshots os1
-            INNER JOIN (
-                SELECT ticker, MAX(snapshot_date) AS snapshot_date
-                FROM option_snapshots
-                GROUP BY ticker
-            ) latest
-            ON os1.ticker = latest.ticker AND os1.snapshot_date = latest.snapshot_date
-        """
-
-    # Banco recém-criado (sem snapshots): mantém o JOIN compatível retornando NULLs.
-    return """
-        SELECT
-            NULL AS ticker,
-            NULL AS snapshot_date,
-            NULL AS "ultimo",
-            NULL AS "score_total",
-            NULL AS "trend_flag",
-            NULL AS "vencimento",
-            NULL AS "dias_uteis",
-            NULL AS "underlying_price",
-            NULL AS "extrinsic_pct_spot",
-            NULL AS "%_Alta_p_2x",
-            NULL AS "strike"
-        WHERE 1 = 0
-    """
+def _attach_snapshot_fields(
+    row: Any,
+    snapshot_map: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    payload = _row_as_dict(row)
+    ticker = (payload.get("ticker") or "").strip().upper()
+    snapshot = snapshot_map.get(ticker)
+    payload["last_snapshot_date"] = snapshot.get("snapshot_date") if snapshot else None
+    payload["last_price_raw"] = snapshot.get("last_price_raw") if snapshot else None
+    payload["last_score_total"] = snapshot.get("last_score_total") if snapshot else None
+    payload["last_trend_flag"] = snapshot.get("last_trend_flag") if snapshot else None
+    payload["last_vencimento"] = snapshot.get("last_vencimento") if snapshot else None
+    payload["last_dias_uteis"] = snapshot.get("last_dias_uteis") if snapshot else None
+    payload["last_underlying_price"] = (
+        snapshot.get("last_underlying_price") if snapshot else None
+    )
+    payload["last_extrinsic_pct_spot"] = (
+        snapshot.get("last_extrinsic_pct_spot") if snapshot else None
+    )
+    payload["last_pct_2x"] = snapshot.get("last_pct_2x") if snapshot else None
+    payload["last_strike"] = snapshot.get("last_strike") if snapshot else None
+    return payload
 
 
 def add_position(
@@ -553,82 +554,12 @@ def get_position(position_id: int, *, conn: Optional[Any] = None) -> Optional[di
     try:
         if not _table_exists(db, "positions"):
             return None
-        has_snapshots = _has_option_snapshots_table(db)
-        if db.backend == "postgres":
-            if has_snapshots:
-                query = """
-                    SELECT
-                        p.*,
-                        snap.snapshot_date AS last_snapshot_date,
-                        snap."ultimo" AS last_price_raw,
-                        snap."score_total" AS last_score_total,
-                        snap."trend_flag" AS last_trend_flag,
-                        snap."vencimento" AS last_vencimento,
-                        snap."dias_uteis" AS last_dias_uteis,
-                        snap."underlying_price" AS last_underlying_price,
-                        snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-                        snap."%_Alta_p_2x" AS last_pct_2x,
-                        snap."strike" AS last_strike
-                    FROM positions p
-                    LEFT JOIN LATERAL (
-                        SELECT
-                            os.snapshot_date,
-                            os."ultimo",
-                            os."score_total",
-                            os."trend_flag",
-                            os."vencimento",
-                            os."dias_uteis",
-                            os."underlying_price",
-                            os."extrinsic_pct_spot",
-                            os."%_Alta_p_2x",
-                            os."strike"
-                        FROM option_snapshots os
-                        WHERE os.ticker = p.ticker
-                        ORDER BY os.snapshot_date DESC
-                        LIMIT 1
-                    ) AS snap ON TRUE
-                    WHERE p.id = ?
-                """
-            else:
-                query = """
-                    SELECT
-                        p.*,
-                        NULL AS last_snapshot_date,
-                        NULL AS last_price_raw,
-                        NULL AS last_score_total,
-                        NULL AS last_trend_flag,
-                        NULL AS last_vencimento,
-                        NULL AS last_dias_uteis,
-                        NULL AS last_underlying_price,
-                        NULL AS last_extrinsic_pct_spot,
-                        NULL AS last_pct_2x,
-                        NULL AS last_strike
-                    FROM positions p
-                    WHERE p.id = ?
-                """
-        else:
-            snap_subquery = _snapshot_subquery_sql(has_snapshots)
-            query = f"""
-                SELECT
-                    p.*,
-                    snap.snapshot_date AS last_snapshot_date,
-                    snap."ultimo" AS last_price_raw,
-                    snap."score_total" AS last_score_total,
-                    snap."trend_flag" AS last_trend_flag,
-                    snap."vencimento" AS last_vencimento,
-                    snap."dias_uteis" AS last_dias_uteis,
-                    snap."underlying_price" AS last_underlying_price,
-                    snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-                    snap."%_Alta_p_2x" AS last_pct_2x,
-                    snap."strike" AS last_strike
-                FROM positions p
-                LEFT JOIN (
-                    {snap_subquery}
-                ) AS snap ON snap.ticker = p.ticker
-                WHERE p.id = ?
-            """
-        row = db.execute(query, (int(position_id),)).fetchone()
-        return _row_to_dict(row) if row else None
+        row = db.execute("SELECT p.* FROM positions p WHERE p.id = ?", (int(position_id),)).fetchone()
+        if not row:
+            return None
+        ticker = (_row_as_dict(row).get("ticker") or "").strip().upper()
+        snapshot_map = fetch_latest_option_snapshots([ticker]) if ticker else {}
+        return _row_to_dict(_attach_snapshot_fields(row, snapshot_map))
     finally:
         if owns_conn:
             db.close()
@@ -647,119 +578,58 @@ def list_positions(
     conn: Optional[Any] = None,
 ) -> List[dict]:
     db, owns_conn = _resolve_conn(conn)
-    if not _table_exists(db, "positions"):
-        if owns_conn:
-            db.close()
-        return []
-    where: List[str] = []
-    params: List[object] = []
-    if only_closed:
-        where.append("p.status = 'closed'")
-    elif not include_closed:
-        where.append("p.status = 'open'")
-    if ticker:
-        where.append("p.ticker = ?")
-        params.append(_normalize_ticker(ticker))
-    if ticker_contains:
-        where.append("p.ticker LIKE ?")
-        params.append(f"%{_normalize_ticker(ticker_contains)}%")
-    if underlying_contains:
-        where.append("p.underlying LIKE ?")
-        params.append(f"%{_normalize_ticker(underlying_contains)}%")
-    if trade_type:
-        where.append("p.trade_type = ?")
-        params.append((trade_type or "").strip().lower())
-    if strategy_tag:
-        if strategy_tag == "__none__":
-            where.append("COALESCE(p.strategy_tag, '') = ''")
-        else:
-            where.append("p.strategy_tag = ?")
-            params.append((strategy_tag or "").strip())
-    if is_simulated is not None:
-        where.append("COALESCE(p.is_simulated, 0) = ?")
-        params.append(1 if is_simulated else 0)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    has_snapshots = _has_option_snapshots_table(db)
-    if db.backend == "postgres":
-        if has_snapshots:
-            query = f"""
-                SELECT
-                    p.*,
-                    snap.snapshot_date AS last_snapshot_date,
-                    snap."ultimo" AS last_price_raw,
-                    snap."score_total" AS last_score_total,
-                    snap."trend_flag" AS last_trend_flag,
-                    snap."vencimento" AS last_vencimento,
-                    snap."dias_uteis" AS last_dias_uteis,
-                    snap."underlying_price" AS last_underlying_price,
-                    snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-                    snap."%_Alta_p_2x" AS last_pct_2x,
-                    snap."strike" AS last_strike
-                FROM positions p
-                LEFT JOIN LATERAL (
-                    SELECT
-                        os.snapshot_date,
-                        os."ultimo",
-                        os."score_total",
-                        os."trend_flag",
-                        os."vencimento",
-                        os."dias_uteis",
-                        os."underlying_price",
-                        os."extrinsic_pct_spot",
-                        os."%_Alta_p_2x",
-                        os."strike"
-                    FROM option_snapshots os
-                    WHERE os.ticker = p.ticker
-                    ORDER BY os.snapshot_date DESC
-                    LIMIT 1
-                ) AS snap ON TRUE
-                {where_clause}
-                ORDER BY p.trade_date DESC, p.id DESC
-            """
-        else:
-            query = f"""
-                SELECT
-                    p.*,
-                    NULL AS last_snapshot_date,
-                    NULL AS last_price_raw,
-                    NULL AS last_score_total,
-                    NULL AS last_trend_flag,
-                    NULL AS last_vencimento,
-                    NULL AS last_dias_uteis,
-                    NULL AS last_underlying_price,
-                    NULL AS last_extrinsic_pct_spot,
-                    NULL AS last_pct_2x,
-                    NULL AS last_strike
-                FROM positions p
-                {where_clause}
-                ORDER BY p.trade_date DESC, p.id DESC
-            """
-    else:
-        snap_subquery = _snapshot_subquery_sql(has_snapshots)
-        query = f"""
-            SELECT
-                p.*,
-                snap.snapshot_date AS last_snapshot_date,
-                snap."ultimo" AS last_price_raw,
-                snap."score_total" AS last_score_total,
-                snap."trend_flag" AS last_trend_flag,
-                snap."vencimento" AS last_vencimento,
-                snap."dias_uteis" AS last_dias_uteis,
-                snap."underlying_price" AS last_underlying_price,
-                snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-                snap."%_Alta_p_2x" AS last_pct_2x,
-                snap."strike" AS last_strike
+    try:
+        if not _table_exists(db, "positions"):
+            return []
+        where: List[str] = []
+        params: List[object] = []
+        if only_closed:
+            where.append("p.status = 'closed'")
+        elif not include_closed:
+            where.append("p.status = 'open'")
+        if ticker:
+            where.append("p.ticker = ?")
+            params.append(_normalize_ticker(ticker))
+        if ticker_contains:
+            where.append("p.ticker LIKE ?")
+            params.append(f"%{_normalize_ticker(ticker_contains)}%")
+        if underlying_contains:
+            where.append("p.underlying LIKE ?")
+            params.append(f"%{_normalize_ticker(underlying_contains)}%")
+        if trade_type:
+            where.append("p.trade_type = ?")
+            params.append((trade_type or "").strip().lower())
+        if strategy_tag:
+            if strategy_tag == "__none__":
+                where.append("COALESCE(p.strategy_tag, '') = ''")
+            else:
+                where.append("p.strategy_tag = ?")
+                params.append((strategy_tag or "").strip())
+        if is_simulated is not None:
+            where.append("COALESCE(p.is_simulated, 0) = ?")
+            params.append(1 if is_simulated else 0)
+        where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = db.execute(
+            f"""
+            SELECT p.*
             FROM positions p
-            LEFT JOIN (
-                {snap_subquery}
-            ) AS snap ON snap.ticker = p.ticker
             {where_clause}
             ORDER BY p.trade_date DESC, p.id DESC
-        """
-    rows = db.execute(query, params).fetchall()
-    if owns_conn:
-        db.close()
-    return [_row_to_dict(row) for row in rows]
+            """,
+            params,
+        ).fetchall()
+        tickers = [
+            (_row_as_dict(row).get("ticker") or "").strip().upper()
+            for row in rows
+        ]
+        snapshot_map = fetch_latest_option_snapshots(tickers)
+        return [
+            _row_to_dict(_attach_snapshot_fields(row, snapshot_map))
+            for row in rows
+        ]
+    finally:
+        if owns_conn:
+            db.close()
 
 
 def summarize_realized_positions(
@@ -1024,7 +894,7 @@ def _row_to_dict(row: Any) -> dict:
         "realized_pl": realized_pl,
         "breakeven_price": breakeven,
         "trade_type": row["trade_type"],
-        "irrf": row["irrf"],
+        "irrf": row["irrf"] if "irrf" in row.keys() else None,
         "is_simulated": bool(is_sim_raw),
         "parent_position_id": row["parent_position_id"] if "parent_position_id" in row.keys() else None,
         "underlying_price": underlying_price,

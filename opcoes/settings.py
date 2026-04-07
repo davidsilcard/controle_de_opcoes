@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Dict
 
 from .config import (
-    get_postgres_schema,
+    get_postgres_shared_schema,
 )
 from .db_health import resolve_postgres_target
 
@@ -81,7 +81,7 @@ def _connect_postgres(*, ensure_table: bool = False):
             "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
-    schema = get_postgres_schema()
+    schema = get_postgres_shared_schema()
     conn = psycopg.connect(target.dsn)
     with conn.cursor() as cur:
         cur.execute(f"SET search_path TO {_quote_ident(schema)}")

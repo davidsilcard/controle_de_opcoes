@@ -6,6 +6,11 @@ from typing import Iterable, List, Optional
 
 import yfinance as yf
 
+from .config import (
+    get_postgres_shared_schema,
+    reset_pg_schema_override,
+    set_pg_schema_override,
+)
 from .db import open_db
 
 
@@ -109,7 +114,11 @@ def backfill_prices(
     underlyings: Optional[Iterable[str]] = None,
 ) -> None:
     """Preenche histórico de preços diários em PostgreSQL usando yfinance."""
-    conn = open_db()
+    token = set_pg_schema_override(get_postgres_shared_schema())
+    try:
+        conn = open_db()
+    finally:
+        reset_pg_schema_override(token)
     try:
         _ensure_underlyings_table(conn)
         if underlyings is None:

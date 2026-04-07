@@ -67,7 +67,6 @@ USER_BOOTSTRAP_MARKET_TABLES = [
 
 def _bootstrap_user_schema(
     *,
-    loaded_env_path: Path | None,
     source_schema: str,
     target_schema: str,
     mode: str,
@@ -1128,7 +1127,6 @@ def main() -> None:
                 source_schema = sanitize_schema_name(args.from_schema)
                 target_schema = sanitize_schema_name(args.target_schema or args.username)
                 _bootstrap_user_schema(
-                    loaded_env_path=loaded_env_path,
                     source_schema=source_schema,
                     target_schema=target_schema,
                     mode=args.mode,
@@ -1147,20 +1145,12 @@ def main() -> None:
                     f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
                 )
 
-            target_target, target_errors = resolve_postgres_target()
-            if target_target is None:
-                details = "; ".join(target_errors) if target_errors else "configuração ausente"
-                raise SystemExit(
-                    f"Falha ao resolver PostgreSQL para bootstrap do usuário: {details}"
-                )
-
             source_schema = sanitize_schema_name(args.from_schema)
             target_schema = sanitize_schema_name(args.target_schema or args.username)
             print(
                 f"Bootstrap do usuário '{args.username}' em {target_schema} a partir de {source_schema}..."
             )
             _bootstrap_user_schema(
-                loaded_env_path=loaded_env_path,
                 source_schema=source_schema,
                 target_schema=target_schema,
                 mode=args.mode,

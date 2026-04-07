@@ -30,6 +30,8 @@ Observacao:
 - em producao, a aplicacao nao sobe se `OPCOES_SECRET_KEY` estiver ausente ou no valor padrao.
 - para desenvolvimento local, defina uma chave propria mesmo em ambiente simples.
 - para VPS com varias aplicacoes, prefira guardar segredos fora do projeto, por exemplo em `/etc/controle_de_opcoes/app.env`.
+- opcionalmente, use `OPCOES_SHARED_SCHEMA` para separar a base compartilhada de mercado/configuracoes do schema operacional do usuario.
+- se `OPCOES_SHARED_SCHEMA` nao for definido, a aplicacao usa `OPCOES_AUTOMATION_SCHEMA` e depois `OPCOES_PG_SCHEMA` como base compartilhada.
 
 ### Padrao recomendado para VPS com varias aplicacoes
 
@@ -243,6 +245,7 @@ OPCOES_LOGIN_BLOCK_SECONDS=900
 ```
 
 - formularios `POST` agora validam token CSRF. Se aparecer mensagem de formulario expirado, recarregue a pagina e envie novamente.
+- snapshots, ranking, Fundamentus e configuracoes didaticas agora sao lidos da base compartilhada; posicoes, ledger, DARF e dados fiscais continuam isolados por usuario autenticado.
 
 ### Subir a aplicacao com Docker
 
@@ -323,8 +326,9 @@ docker compose exec web /app/.venv/bin/python -m opcoes.cli user bootstrap --use
 
 Observacoes:
 
-- o modo padrao `market` copia apenas base de mercado e configuracoes operacionais para o novo schema.
-- isso evita misturar posicoes, ledger e DARF de outro usuario.
+- a base de mercado, relatorios indicados, Fundamentus e configuracoes didaticas agora e compartilhada por todos os usuarios.
+- o schema do usuario continua reservado para posicoes, ledger, DARF, premios, exercicios e demais dados pessoais.
+- o modo padrao `market` continua disponivel para compatibilidade operacional, sem misturar posicoes, ledger e DARF de outro usuario.
 - se voce realmente quiser clonar tudo do schema base, use `--mode full`.
 - o schema de destino, por padrao, segue o username normalizado; se precisar, sobrescreva com `--target-schema`.
 
@@ -573,6 +577,7 @@ uv run python -m opcoes.cli user list
 - `DATABASE_URL`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_HOST`, `DB_PORT`
 - `OPCOES_PG_SCHEMA`
+- `OPCOES_SHARED_SCHEMA`
 - `OPCOES_AUTH_SCHEMA` (schema da autenticação web; default: `auth`)
 - `OPCOES_SECRET_KEY`
 - `OPCOES_AUTH_ENABLED`

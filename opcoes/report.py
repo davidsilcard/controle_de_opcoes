@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from . import quant
 from .scraper.storage import CSV_FIELDS
 from .config import (
-    get_postgres_schema,
+    get_postgres_shared_schema,
 )
 from .db_health import resolve_postgres_target
 from .portfolio import list_positions
@@ -272,7 +272,7 @@ def _connect_postgres() -> _ReportConnection:
             "Driver psycopg não encontrado. Instale com: uv add psycopg[binary]"
         ) from exc
 
-    schema = get_postgres_schema()
+    schema = get_postgres_shared_schema()
     conn = psycopg.connect(target.dsn)
     with conn.cursor() as cur:
         cur.execute(f"SET search_path TO {_quote_ident(schema)}")
