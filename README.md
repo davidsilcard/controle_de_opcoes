@@ -664,6 +664,7 @@ uv run pytest -q
 ```
 
 Observação: testes marcados com `requires_postgres` são pulados automaticamente quando não há `DATABASE_URL`/`POSTGRES_*` configurado.
+Artefatos locais de apoio, como `agents/`, `.agents/` e diretórios temporários de teste, não fazem parte do versionamento padrão do projeto.
 
 E2E opcional:
 
@@ -673,6 +674,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
+- higiene de repositório reforçada para ignorar artefatos locais de agentes/skills e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.
 - README agora documenta `db optimize` para criar os indices recomendados apos bootstrap ou migracao.
 - README detalha melhor o rate limit de login por IP, incluindo a dependencia de `ProxyFix` e a persistencia no schema de autenticacao.
