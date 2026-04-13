@@ -52,11 +52,11 @@ class _FakeConn:
         self.closed = True
 
 
-def test_export_snapshot_uses_active_backend_connection(monkeypatch, tmp_path: Path):
+def test_export_snapshot_uses_active_backend_connection(monkeypatch, workspace_tmp_path: Path):
     fake_conn = _FakeConn()
     monkeypatch.setattr(se, "open_db", lambda: fake_conn)
 
-    out = tmp_path / "latest.csv"
+    out = workspace_tmp_path / "latest.csv"
     result = se.export_snapshot(output_csv=out, snapshot_date=None)
 
     assert result == out

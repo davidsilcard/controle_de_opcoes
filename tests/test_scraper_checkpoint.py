@@ -17,8 +17,8 @@ def _sample_row(*, ticker: str, underlying: str) -> dict:
     }
 
 
-def test_checkpoint_roundtrip_resume_state(tmp_path: Path) -> None:
-    output_csv = tmp_path / "opcoes_latest.csv"
+def test_checkpoint_roundtrip_resume_state(workspace_tmp_path: Path) -> None:
+    output_csv = workspace_tmp_path / "opcoes_latest.csv"
     checkpoint_path = default_checkpoint_db_path(output_csv)
     store = ScrapeCheckpointStore(checkpoint_path)
     try:
@@ -54,8 +54,8 @@ def test_checkpoint_roundtrip_resume_state(tmp_path: Path) -> None:
         store.close()
 
 
-def test_checkpoint_reconcile_changed_symbol_list(tmp_path: Path) -> None:
-    output_csv = tmp_path / "opcoes_latest.csv"
+def test_checkpoint_reconcile_changed_symbol_list(workspace_tmp_path: Path) -> None:
+    output_csv = workspace_tmp_path / "opcoes_latest.csv"
     checkpoint_path = default_checkpoint_db_path(output_csv)
     store = ScrapeCheckpointStore(checkpoint_path)
     try:
@@ -95,8 +95,8 @@ def test_checkpoint_reconcile_changed_symbol_list(tmp_path: Path) -> None:
         store.close()
 
 
-def test_checkpoint_clear_after_complete(tmp_path: Path) -> None:
-    output_csv = tmp_path / "opcoes_latest.csv"
+def test_checkpoint_clear_after_complete(workspace_tmp_path: Path) -> None:
+    output_csv = workspace_tmp_path / "opcoes_latest.csv"
     checkpoint_path = default_checkpoint_db_path(output_csv)
     store = ScrapeCheckpointStore(checkpoint_path)
     try:
