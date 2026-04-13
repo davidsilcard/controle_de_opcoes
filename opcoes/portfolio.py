@@ -11,6 +11,8 @@ from .db_health import resolve_postgres_target
 from .snapshot_repository import fetch_latest_option_snapshots
 from .utils import infer_option_type, parse_ptbr_number
 
+_UNSET = object()
+
 
 class _PgResult:
     def __init__(
@@ -442,88 +444,88 @@ def close_position(
 def update_position(
     *,
     position_id: int,
-    ticker: Optional[str] = None,
-    underlying: Optional[str] = None,
-    trade_date: Optional[str] = None,
-    qty: Optional[int] = None,
-    entry_price: Optional[float] = None,
-    fees: Optional[float] = None,
-    status: Optional[str] = None,
-    exit_date: Optional[str] = None,
-    exit_price: Optional[float] = None,
-    notes: Optional[str] = None,
-    partial_date: Optional[str] = None,
-    partial_price: Optional[float] = None,
-    partial_qty: Optional[int] = None,
-    exit_reason: Optional[str] = None,
-    trade_type: Optional[str] = None,
-    side: Optional[str] = None,
-    irrf: Optional[float] = None,
-    is_simulated: Optional[bool] = None,
-    parent_position_id: Optional[int] = None,
-    strategy_tag: Optional[str] = None,
+    ticker: Any = _UNSET,
+    underlying: Any = _UNSET,
+    trade_date: Any = _UNSET,
+    qty: Any = _UNSET,
+    entry_price: Any = _UNSET,
+    fees: Any = _UNSET,
+    status: Any = _UNSET,
+    exit_date: Any = _UNSET,
+    exit_price: Any = _UNSET,
+    notes: Any = _UNSET,
+    partial_date: Any = _UNSET,
+    partial_price: Any = _UNSET,
+    partial_qty: Any = _UNSET,
+    exit_reason: Any = _UNSET,
+    trade_type: Any = _UNSET,
+    side: Any = _UNSET,
+    irrf: Any = _UNSET,
+    is_simulated: Any = _UNSET,
+    parent_position_id: Any = _UNSET,
+    strategy_tag: Any = _UNSET,
     conn: Optional[Any] = None,
 ) -> None:
     fields = []
     params = []
-    if ticker is not None:
+    if ticker is not _UNSET:
         fields.append("ticker = ?")
         params.append(_normalize_ticker(ticker))
-    if underlying is not None:
+    if underlying is not _UNSET:
         fields.append("underlying = ?")
         params.append(_normalize_ticker(underlying))
-    if trade_date is not None:
+    if trade_date is not _UNSET:
         fields.append("trade_date = ?")
         params.append(trade_date)
-    if qty is not None:
+    if qty is not _UNSET:
         fields.append("qty = ?")
         params.append(int(qty))
-    if entry_price is not None:
+    if entry_price is not _UNSET:
         fields.append("entry_price = ?")
         params.append(float(entry_price))
-    if fees is not None:
+    if fees is not _UNSET:
         fields.append("fees = ?")
         params.append(float(fees))
-    if status is not None:
+    if status is not _UNSET:
         fields.append("status = ?")
         params.append(status)
-    if exit_date is not None:
+    if exit_date is not _UNSET:
         fields.append("exit_date = ?")
         params.append(exit_date)
-    if exit_price is not None:
+    if exit_price is not _UNSET:
         fields.append("exit_price = ?")
-        params.append(float(exit_price))
-    if notes is not None:
+        params.append(float(exit_price) if exit_price is not None else None)
+    if notes is not _UNSET:
         fields.append("notes = ?")
         params.append(notes)
-    if partial_date is not None:
+    if partial_date is not _UNSET:
         fields.append("partial_date = ?")
         params.append(partial_date)
-    if partial_price is not None:
+    if partial_price is not _UNSET:
         fields.append("partial_price = ?")
-        params.append(float(partial_price))
-    if partial_qty is not None:
+        params.append(float(partial_price) if partial_price is not None else None)
+    if partial_qty is not _UNSET:
         fields.append("partial_qty = ?")
-        params.append(int(partial_qty))
-    if exit_reason is not None:
+        params.append(int(partial_qty) if partial_qty is not None else None)
+    if exit_reason is not _UNSET:
         fields.append("exit_reason = ?")
         params.append(exit_reason)
-    if trade_type is not None:
+    if trade_type is not _UNSET:
         fields.append("trade_type = ?")
         params.append(trade_type)
-    if side is not None:
+    if side is not _UNSET:
         fields.append("side = ?")
         params.append(_normalize_side(side))
-    if irrf is not None:
+    if irrf is not _UNSET:
         fields.append("irrf = ?")
-        params.append(float(irrf))
-    if is_simulated is not None:
+        params.append(float(irrf) if irrf is not None else None)
+    if is_simulated is not _UNSET:
         fields.append("is_simulated = ?")
         params.append(1 if is_simulated else 0)
-    if parent_position_id is not None:
+    if parent_position_id is not _UNSET:
         fields.append("parent_position_id = ?")
-        params.append(int(parent_position_id))
-    if strategy_tag is not None:
+        params.append(int(parent_position_id) if parent_position_id is not None else None)
+    if strategy_tag is not _UNSET:
         fields.append("strategy_tag = ?")
         params.append(strategy_tag)
     if not fields:

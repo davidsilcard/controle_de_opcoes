@@ -18,8 +18,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .auth import (
     authenticate_login,
     change_password,
+    clear_login_rate_limit,
     ensure_bootstrap_user_from_env,
+    get_login_block_remaining_seconds,
+    get_user_app_schema,
     normalize_username,
+    record_failed_login_attempt,
 )
 from .config import (
     reset_pg_schema_override,
@@ -108,8 +112,6 @@ def create_app() -> Flask:
     ensure_bootstrap_user_from_env()
     ranking_cache: dict[tuple, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
-    login_attempts: dict[str, dict[str, float | int]] = {}
-    login_attempts_lock = threading.Lock()
     ranking_cache_write_endpoints = {
         "darf_generate",
         "darf_pay",
@@ -226,9 +228,8 @@ def create_app() -> Flask:
         )
 
     def _client_ip() -> str:
-        forwarded = (request.headers.get("X-Forwarded-For") or "").strip()
-        if forwarded:
-            return forwarded.split(",", 1)[0].strip() or "unknown"
+        # Com ProxyFix ativo, remote_addr já reflete o IP do cliente quando o
+        # proxy frontal é confiável. Evitamos confiar em X-Forwarded-For cru.
         return request.remote_addr or "unknown"
 
     def _login_rate_limit_window_seconds() -> int:
@@ -247,64 +248,22 @@ def create_app() -> Flask:
             f"Aguarde cerca de {minutes} minuto(s) e tente novamente."
         )
 
-    def _prune_login_attempts(now: float) -> None:
-        stale_keys = []
-        window = float(_login_rate_limit_window_seconds())
-        for key, state in login_attempts.items():
-            blocked_until = float(state.get("blocked_until") or 0.0)
-            first_failure_at = float(state.get("first_failure_at") or 0.0)
-            if blocked_until > now:
-                continue
-            if (first_failure_at + window) > now:
-                continue
-            stale_keys.append(key)
-        for key in stale_keys:
-            login_attempts.pop(key, None)
-
     def _login_block_remaining_seconds() -> int | None:
-        key = _client_ip()
-        now = time.monotonic()
-        with login_attempts_lock:
-            _prune_login_attempts(now)
-            state = login_attempts.get(key)
-            if not state:
-                return None
-            blocked_until = float(state.get("blocked_until") or 0.0)
-            if blocked_until <= now:
-                return None
-            return max(1, math.ceil(blocked_until - now))
+        return get_login_block_remaining_seconds(
+            client_key=_client_ip(),
+            window_seconds=_login_rate_limit_window_seconds(),
+        )
 
     def _record_failed_login() -> int | None:
-        key = _client_ip()
-        now = time.monotonic()
-        window = float(_login_rate_limit_window_seconds())
-        block_seconds = float(_login_rate_limit_block_seconds())
-        max_attempts = _login_rate_limit_max_attempts()
-        with login_attempts_lock:
-            _prune_login_attempts(now)
-            state = login_attempts.get(key)
-            if not state or (float(state.get("first_failure_at") or 0.0) + window) <= now:
-                state = {
-                    "count": 0,
-                    "first_failure_at": now,
-                    "blocked_until": 0.0,
-                }
-            count = int(state.get("count") or 0) + 1
-            state["count"] = count
-            if count >= max_attempts:
-                state["count"] = 0
-                state["first_failure_at"] = now
-                state["blocked_until"] = now + block_seconds
-            login_attempts[key] = state
-            blocked_until = float(state.get("blocked_until") or 0.0)
-            if blocked_until <= now:
-                return None
-            return max(1, math.ceil(blocked_until - now))
+        return record_failed_login_attempt(
+            client_key=_client_ip(),
+            window_seconds=_login_rate_limit_window_seconds(),
+            block_seconds=_login_rate_limit_block_seconds(),
+            max_attempts=_login_rate_limit_max_attempts(),
+        )
 
     def _clear_failed_login() -> None:
-        key = _client_ip()
-        with login_attempts_lock:
-            login_attempts.pop(key, None)
+        clear_login_rate_limit(client_key=_client_ip())
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SECURE"] = _env_bool(
@@ -407,7 +366,24 @@ def create_app() -> Flask:
         # Sliding session: renova enquanto usuário estiver ativo.
         session["last_activity_at"] = now_ts
 
-        g.pg_schema_override_token = set_pg_schema_override(username)
+        app_schema = (session.get("app_schema") or "").strip()
+        if not app_schema:
+            try:
+                app_schema = get_user_app_schema(username) or ""
+            except RuntimeError:
+                next_url = (
+                    request.full_path
+                    if request.full_path and request.full_path != "/?"
+                    else request.path
+                )
+                session.clear()
+                return redirect(
+                    url_for("login", next=next_url, reason="schema-migration")
+                )
+            if app_schema:
+                session["app_schema"] = app_schema
+
+        g.pg_schema_override_token = set_pg_schema_override(app_schema or username)
         g.current_username = username
         if _is_first_access_pending():
             return redirect(url_for("first_access"))
@@ -477,8 +453,14 @@ def create_app() -> Flask:
             return redirect(url_for("index"))
 
         error = None
+        should_record_failed_login = False
         if request.method == "GET" and request.args.get("reason") == "expired":
             error = "Sessão expirada por inatividade. Entre novamente."
+        elif request.method == "GET" and request.args.get("reason") == "schema-migration":
+            error = (
+                "Seu acesso precisa de uma migração de schema para isolar os dados com segurança. "
+                "Peça ao administrador para executar `opcoes user migrate-schemas`."
+            )
         next_url = _safe_redirect_target(request.values.get("next"))
         if request.method == "POST":
             blocked_for = _login_block_remaining_seconds()
@@ -499,6 +481,7 @@ def create_app() -> Flask:
                 _clear_failed_login()
                 session.clear()
                 session["username"] = auth_user.username
+                session["app_schema"] = auth_user.app_schema
                 session["must_change_password"] = bool(auth_user.must_change_password)
                 now_ts = _utc_now_ts()
                 session["session_started_at"] = now_ts
@@ -512,10 +495,17 @@ def create_app() -> Flask:
                     "A senha temporaria expirou apos 3 horas. "
                     "Peca ao administrador para emitir uma nova senha de primeiro acesso."
                 )
+                should_record_failed_login = True
+            elif auth_result.error_code == "schema_migration_required":
+                error = (
+                    "Seu acesso precisa de uma migração de schema para isolar os dados com segurança. "
+                    "Peça ao administrador para executar `opcoes user migrate-schemas`."
+                )
             else:
                 error = "Usuário ou senha inválidos."
+                should_record_failed_login = True
 
-        if request.method == "POST" and error:
+        if request.method == "POST" and error and should_record_failed_login:
             blocked_for = _record_failed_login()
             if blocked_for is not None:
                 return (
@@ -1780,7 +1770,7 @@ def create_app() -> Flask:
     @app.post("/positions/update/<int:position_id>")
     def update_position_view(position_id: int):
         form = request.form
-        status = form.get("status") or None
+        status = (form.get("status") or "").strip() or None
         ticker = (form.get("ticker") or "").strip()
         side_raw = form.get("side") or None
         strategy_tag_raw = form.get("strategy_tag") or None
@@ -1804,6 +1794,24 @@ def create_app() -> Flask:
                 parent_id = int(form.get("parent_position_id"))
             except ValueError:
                 parent_id = None
+        exit_date = (form.get("exit_date") or "").strip() or None
+        exit_price = (
+            _parse_form_float(form.get("exit_price"))
+            if form.get("exit_price")
+            else None
+        )
+        partial_date = (form.get("partial_date") or "").strip() or None
+        partial_price = (
+            _parse_form_float(form.get("partial_price"))
+            if form.get("partial_price")
+            else None
+        )
+        partial_qty = int(form["partial_qty"]) if form.get("partial_qty") else None
+        exit_reason = (form.get("exit_reason") or "").strip() or None
+        if status == "open":
+            exit_date = None
+            exit_price = None
+            exit_reason = None
         update_position(
             position_id=position_id,
             ticker=ticker or None,
@@ -1817,27 +1825,19 @@ def create_app() -> Flask:
             ),
             fees=_parse_form_float(form.get("fees")) if form.get("fees") else None,
             status=status,
-            exit_date=form.get("exit_date") or None,
-            exit_price=(
-                _parse_form_float(form.get("exit_price"))
-                if form.get("exit_price")
-                else None
-            ),
-            notes=form.get("notes") or None,
+            exit_date=exit_date,
+            exit_price=exit_price,
+            notes=(form.get("notes") or "").strip() or None,
             trade_type=form.get("trade_type") or None,
             side=side_raw,
             irrf=_parse_form_float(form.get("irrf")) if form.get("irrf") else None,
-            partial_date=form.get("partial_date") or None,
-            partial_price=(
-                _parse_form_float(form.get("partial_price"))
-                if form.get("partial_price")
-                else None
-            ),
-            partial_qty=int(form["partial_qty"]) if form.get("partial_qty") else None,
-            exit_reason=form.get("exit_reason") or None,
+            partial_date=partial_date,
+            partial_price=partial_price,
+            partial_qty=partial_qty,
+            exit_reason=exit_reason,
             is_simulated=is_simulated,
             parent_position_id=parent_id,
-            strategy_tag=strategy_tag_raw,
+            strategy_tag=(strategy_tag_raw or "").strip() or None,
         )
         finance.sync_position_closure_effects(position_id=position_id)
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))

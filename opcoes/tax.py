@@ -67,6 +67,7 @@ def _format_period(year: int, month: int) -> str:
 
 def build_position_tax_events(position: Mapping[str, object]) -> list[TaxEvent]:
     trade_type = _normalize_trade_bucket(str(position.get("trade_type") or "swing"))
+    status = str(position.get("status") or "").strip().lower()
     qty = int(position.get("qty") or 0)
     entry_price = float(position.get("entry_price") or 0.0)
     fees = float(position.get("fees") or 0.0)
@@ -100,7 +101,7 @@ def build_position_tax_events(position: Mapping[str, object]) -> list[TaxEvent]:
             )
         )
 
-    if open_qty > 0 and exit_price is not None and exit_date:
+    if status == "closed" and open_qty > 0 and exit_price is not None and exit_date:
         amount = (direction * (float(exit_price) - entry_price) * open_qty) - fees
         events.append(
             TaxEvent(

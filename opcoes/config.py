@@ -8,6 +8,7 @@ _pg_schema_override: ContextVar[str | None] = ContextVar(
     "opcoes_pg_schema_override", default=None
 )
 
+
 def get_data_backend() -> str:
     # Runtime consolidado: operação oficial apenas em PostgreSQL.
     return "postgres"
@@ -18,7 +19,7 @@ def is_postgres_strict_mode() -> bool:
     return True
 
 
-def _sanitize_pg_schema(value: str) -> str:
+def sanitize_pg_schema_name(value: str) -> str:
     text = (value or "").strip().lower()
     text = re.sub(r"[^a-z0-9_]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
@@ -30,7 +31,7 @@ def _sanitize_pg_schema(value: str) -> str:
 
 
 def set_pg_schema_override(schema: str) -> Token[str | None]:
-    safe = _sanitize_pg_schema(schema)
+    safe = sanitize_pg_schema_name(schema)
     return _pg_schema_override.set(safe)
 
 
@@ -41,23 +42,23 @@ def reset_pg_schema_override(token: Token[str | None]) -> None:
 def get_postgres_schema() -> str:
     override_ctx = _pg_schema_override.get()
     if override_ctx:
-        return _sanitize_pg_schema(override_ctx)
+        return sanitize_pg_schema_name(override_ctx)
     env_value = os.getenv("OPCOES_PG_SCHEMA", "")
     if env_value.strip():
-        return _sanitize_pg_schema(env_value)
+        return sanitize_pg_schema_name(env_value)
     return "public"
 
 
 def get_postgres_shared_schema() -> str:
     shared_value = os.getenv("OPCOES_SHARED_SCHEMA", "")
     if shared_value.strip():
-        return _sanitize_pg_schema(shared_value)
+        return sanitize_pg_schema_name(shared_value)
     automation_value = os.getenv("OPCOES_AUTOMATION_SCHEMA", "")
     if automation_value.strip():
-        return _sanitize_pg_schema(automation_value)
+        return sanitize_pg_schema_name(automation_value)
     env_value = os.getenv("OPCOES_PG_SCHEMA", "")
     if env_value.strip():
-        return _sanitize_pg_schema(env_value)
+        return sanitize_pg_schema_name(env_value)
     return "public"
 
 
@@ -68,4 +69,5 @@ __all__ = [
     "get_postgres_shared_schema",
     "set_pg_schema_override",
     "reset_pg_schema_override",
+    "sanitize_pg_schema_name",
 ]

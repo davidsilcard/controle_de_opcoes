@@ -6,6 +6,7 @@ from opcoes.config import (
     get_postgres_shared_schema,
     is_postgres_strict_mode,
     reset_pg_schema_override,
+    sanitize_pg_schema_name,
     set_pg_schema_override,
 )
 
@@ -49,3 +50,8 @@ def test_get_postgres_shared_schema_prefers_explicit_env(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_AUTOMATION_SCHEMA", "automation")
     monkeypatch.setenv("OPCOES_SHARED_SCHEMA", "mercado.comum")
     assert get_postgres_shared_schema() == "mercado_comum"
+
+
+def test_sanitize_pg_schema_name_normalizes_symbols_and_prefixes_digits() -> None:
+    assert sanitize_pg_schema_name("Cliente.Novo") == "cliente_novo"
+    assert sanitize_pg_schema_name("123abc") == "u_123abc"

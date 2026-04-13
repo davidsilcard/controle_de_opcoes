@@ -12,7 +12,47 @@ Arquitetura operacional consolidada em **PostgreSQL** para manter histórico ún
 ## Instalação
 
 ```bash
-uv sync --dev
+uv sync --locked --dev
+```
+
+O comando acima cria o `.venv` automaticamente e sincroniza as dependências do projeto e do grupo `dev` a partir do `uv.lock`.
+
+Se quiser ativar o ambiente no PowerShell para rodar binários diretamente:
+
+```powershell
+.venv\Scripts\Activate.ps1
+python -V
+pytest -q
+deactivate
+```
+
+Se o PowerShell responder que `uv` "is not recognized", o mais comum e a sessao atual ter sido aberta antes da instalacao do `uv`.
+Feche e abra o terminal novamente. No Windows, o executavel costuma ficar em:
+
+```text
+C:\Users\SEU_USUARIO\.local\bin\uv.exe
+```
+
+Validacoes uteis no PowerShell:
+
+```powershell
+where.exe uv
+Get-Command uv
+```
+
+Correcao temporaria para a sessao atual:
+
+```powershell
+$env:Path += ";$HOME\\.local\\bin"
+uv --version
+```
+
+Se o terminal estava aberto antes da instalacao do `uv`, recarregue o `PATH` completo do Windows na sessao atual e ative o ambiente novamente:
+
+```powershell
+$env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
+& .\.venv\Scripts\Activate.ps1
+uv --version
 ```
 
 ## Configuração de ambiente
@@ -22,7 +62,9 @@ Crie um `.env` com:
 ```bash
 DATABASE_URL=postgresql://usuario:senha@host:5432/mercado-opcoes
 OPCOES_PG_SCHEMA=admin
+OPCOES_AUTH_SCHEMA=auth
 OPCOES_SECRET_KEY=uma-chave-longa-unica-e-secreta
+OPCOES_TEMP_PASSWORD_TTL_SECONDS=10800
 ```
 
 Observacao:
@@ -30,6 +72,8 @@ Observacao:
 - em producao, a aplicacao nao sobe se `OPCOES_SECRET_KEY` estiver ausente ou no valor padrao.
 - para desenvolvimento local, defina uma chave propria mesmo em ambiente simples.
 - para VPS com varias aplicacoes, prefira guardar segredos fora do projeto, por exemplo em `/etc/controle_de_opcoes/app.env`.
+- `OPCOES_AUTH_SCHEMA` define o schema dedicado de autenticacao web, onde ficam `auth.web_users` e os dados de login.
+- `OPCOES_TEMP_PASSWORD_TTL_SECONDS` ajusta por quanto tempo a senha temporaria continua valida antes de expirar no primeiro acesso.
 - opcionalmente, use `OPCOES_SHARED_SCHEMA` para separar a base compartilhada de mercado/configuracoes do schema operacional do usuario.
 - se `OPCOES_SHARED_SCHEMA` nao for definido, a aplicacao usa `OPCOES_AUTOMATION_SCHEMA` e depois `OPCOES_PG_SCHEMA` como base compartilhada.
 
@@ -74,6 +118,14 @@ OPCOES_PG_SCHEMA=admin
 ```bash
 uv run python -m opcoes.cli db check
 ```
+
+### Otimizacao do schema PostgreSQL
+
+```bash
+uv run python -m opcoes.cli db optimize --username admin
+```
+
+Use este comando depois de preparar um usuario/schema novo ou apos uma migracao integral, para criar os indices recomendados e reduzir a latencia de leitura.
 
 ### Scrape diário
 
@@ -236,7 +288,9 @@ Observacao:
 
 - use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
 - troque para `1` quando colocar HTTPS com proxy reverso
-- o login aplica rate limit por IP. Ajustes opcionais:
+- o login aplica rate limit por IP e usa o IP percebido pelo Flask depois do `ProxyFix`; em ambiente com proxy reverso, o proxy precisa ser confiavel.
+- o rate limit agora fica persistido no schema de autenticacao (`OPCOES_AUTH_SCHEMA`), entao continua valendo mesmo com multiplos workers/instancias da web.
+- ajustes opcionais:
 
 ```bash
 OPCOES_LOGIN_MAX_ATTEMPTS=5
@@ -330,7 +384,9 @@ Observacoes:
 - o schema do usuario continua reservado para posicoes, ledger, DARF, premios, exercicios e demais dados pessoais.
 - o modo padrao `market` continua disponivel para compatibilidade operacional, sem misturar posicoes, ledger e DARF de outro usuario.
 - se voce realmente quiser clonar tudo do schema base, use `--mode full`.
-- o schema de destino, por padrao, segue o username normalizado; se precisar, sobrescreva com `--target-schema`.
+- cada usuario agora recebe um `app_schema` exclusivo e persistido no cadastro em `auth.web_users`, evitando colisao entre usernames como `ana.silva` e `ana_silva`.
+- o schema de destino padrao do bootstrap usa esse `app_schema` exclusivo; se precisar, sobrescreva com `--target-schema`.
+- depois de atualizar uma base antiga, rode `uv run python -m opcoes.cli user audit-schemas` para revisar o mapeamento e `uv run python -m opcoes.cli user migrate-schemas` para gravar/replicar os schemas legados de usuarios existentes.
 
 Smoke test HTTP local no VPS:
 
@@ -424,6 +480,7 @@ deploy/scripts/opcoes-compose-vps.sh up -d
 
 ```bash
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db optimize --username admin
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli user list
 ```
 
@@ -570,7 +627,13 @@ Observacao de horario:
 ```bash
 uv run python -m opcoes.cli user create --username admin
 uv run python -m opcoes.cli user list
+uv run python -m opcoes.cli user invite --username alice --bootstrap --from-schema admin
+uv run python -m opcoes.cli user bootstrap --username alice --from-schema admin
+uv run python -m opcoes.cli user audit-schemas
+uv run python -m opcoes.cli user migrate-schemas
 ```
+
+Use `user invite` para emitir senha temporaria e `user bootstrap` quando quiser criar o acesso e preparar o schema inicial do cliente na mesma operacao. O schema de destino padrao agora segue o `app_schema` exclusivo gravado para cada usuario.
 
 ## Variáveis de ambiente relevantes
 
@@ -581,6 +644,7 @@ uv run python -m opcoes.cli user list
 - `OPCOES_AUTH_SCHEMA` (schema da autenticação web; default: `auth`)
 - `OPCOES_SECRET_KEY`
 - `OPCOES_AUTH_ENABLED`
+- `OPCOES_TEMP_PASSWORD_TTL_SECONDS`
 - `OPCOES_ADMIN_USER`
 - `OPCOES_ADMIN_PASSWORD`
 - `OPCOES_ADMIN_REPLACE_PASSWORD`
@@ -609,6 +673,9 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
+- autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.
+- README agora documenta `db optimize` para criar os indices recomendados apos bootstrap ou migracao.
+- README detalha melhor o rate limit de login por IP, incluindo a dependencia de `ProxyFix` e a persistencia no schema de autenticacao.
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 - README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild e `db check`.

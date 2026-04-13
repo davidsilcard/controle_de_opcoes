@@ -5,6 +5,7 @@ from opcoes import cli
 
 def test_cli_db_optimize_success(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv_once", lambda: None)
+    monkeypatch.setattr(cli, "get_user_app_schema", lambda *args, **kwargs: "admin")
     monkeypatch.setattr(
         cli,
         "optimize_postgres_schema",

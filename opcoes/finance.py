@@ -707,9 +707,8 @@ def sync_position_realized_pnl(
                 raise ValueError("Informe position_id ou position.")
             from .portfolio import get_position
 
-            # `portfolio` e `finance` mantêm wrappers de conexão distintos.
-            # Buscar a posição com a própria conexão do módulo evita cruzar wrappers.
-            pos = get_position(int(position_id))
+            raw_conn = getattr(db, "_raw_conn", db)
+            pos = get_position(int(position_id), conn=raw_conn)
 
         if not pos:
             return {}
@@ -810,17 +809,19 @@ def sync_position_realized_pnl(
 def sync_position_closure_effects(
     *,
     position_id: int,
+    position: Optional[Mapping[str, Any]] = None,
     conn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Mantém ledger alinhado após parcial, encerramento ou reabertura."""
 
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
-        from .portfolio import get_position
+        pos = position
+        if pos is None:
+            from .portfolio import get_position
 
-        # `portfolio` e `finance` mantêm wrappers de conexão distintos.
-        # Buscar a posição com a própria conexão do módulo evita cruzar wrappers.
-        pos = get_position(int(position_id))
+            raw_conn = getattr(db, "_raw_conn", db)
+            pos = get_position(int(position_id), conn=raw_conn)
         if not pos:
             return {"buyback": 0.0, "realized": {}}
 

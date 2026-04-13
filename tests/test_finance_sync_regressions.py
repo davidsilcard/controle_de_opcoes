@@ -26,7 +26,7 @@ class _FakeConn:
         return _FakeResult([])
 
 
-def test_sync_position_closure_effects_loads_position_without_cross_module_conn(
+def test_sync_position_closure_effects_reuses_current_transaction_conn(
     monkeypatch,
 ) -> None:
     fake_db = _FakeConn()
@@ -53,11 +53,11 @@ def test_sync_position_closure_effects_loads_position_without_cross_module_conn(
 
     result = finance.sync_position_closure_effects(position_id=6)
 
-    assert seen["conn"] is None
+    assert seen["conn"] is fake_db
     assert result == {"buyback": 0.0, "realized": {"close": 1003.4}}
 
 
-def test_sync_position_realized_pnl_loads_position_without_cross_module_conn(
+def test_sync_position_realized_pnl_reuses_current_transaction_conn(
     monkeypatch,
 ) -> None:
     fake_db = _FakeConn()
@@ -105,7 +105,7 @@ def test_sync_position_realized_pnl_loads_position_without_cross_module_conn(
 
     result = finance.sync_position_realized_pnl(position_id=6)
 
-    assert seen["conn"] is None
+    assert seen["conn"] is fake_db
     assert result == {"close": 1003.4}
     assert inserted == [
         {

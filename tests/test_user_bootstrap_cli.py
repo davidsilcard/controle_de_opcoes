@@ -10,6 +10,7 @@ def test_cli_user_bootstrap_market_mode(monkeypatch, capsys) -> None:
         "create_user",
         lambda **kwargs: True,
     )
+    monkeypatch.setattr(cli, "get_user_app_schema", lambda *args, **kwargs: "alice")
     monkeypatch.setattr(
         cli,
         "resolve_postgres_target",
@@ -62,6 +63,11 @@ def test_cli_user_bootstrap_full_mode(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "create_user", lambda **kwargs: True)
     monkeypatch.setattr(
         cli,
+        "get_user_app_schema",
+        lambda username, **_kwargs: "cliente_bob" if username == "bob" else None,
+    )
+    monkeypatch.setattr(
+        cli,
         "resolve_postgres_target",
         lambda: (type("Target", (), {"dsn": "postgresql://demo:secret@host:5432/opcoes"})(), []),
     )
@@ -109,6 +115,7 @@ def test_cli_user_invite_prints_temporary_password(monkeypatch, capsys) -> None:
         "issue_temporary_password",
         lambda **kwargs: "TempPass123",
     )
+    monkeypatch.setattr(cli, "get_user_app_schema", lambda *args, **kwargs: "alice")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -130,6 +137,7 @@ def test_cli_user_invite_prints_temporary_password(monkeypatch, capsys) -> None:
 def test_cli_user_invite_can_bootstrap_schema(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv_once", lambda: None)
     monkeypatch.setattr(cli, "issue_temporary_password", lambda **kwargs: "TempPass123")
+    monkeypatch.setattr(cli, "get_user_app_schema", lambda *args, **kwargs: "alice")
     monkeypatch.setattr(
         cli,
         "resolve_postgres_target",

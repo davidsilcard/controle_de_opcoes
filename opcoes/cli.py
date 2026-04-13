@@ -8,8 +8,11 @@ from typing import List, Optional
 
 from .auth import (
     create_user,
+    get_user_app_schema,
     issue_temporary_password,
+    list_user_schema_mappings,
     list_users,
+    migrate_user_app_schemas,
 )
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
@@ -126,6 +129,19 @@ def sanitize_schema_name(value: str) -> str:
     if text[0].isdigit():
         text = f"u_{text}"
     return text[:63]
+
+
+def _resolve_user_target_schema(
+    *,
+    username: str,
+    explicit_schema: str | None = None,
+) -> str:
+    if explicit_schema:
+        return sanitize_schema_name(explicit_schema)
+    mapped = get_user_app_schema(username, fail_on_collision=False)
+    if mapped:
+        return mapped
+    return sanitize_schema_name(username)
 
 
 def parse_args() -> argparse.Namespace:
@@ -533,7 +549,7 @@ def parse_args() -> argparse.Namespace:
     uc_invite.add_argument(
         "--target-schema",
         default=None,
-        help="Schema de destino no PostgreSQL (default: username normalizado).",
+        help="Schema de destino no PostgreSQL (default: schema exclusivo atribuído ao usuário).",
     )
     uc_invite.add_argument(
         "--mode",
@@ -570,7 +586,7 @@ def parse_args() -> argparse.Namespace:
     uc_bootstrap.add_argument(
         "--target-schema",
         default=None,
-        help="Schema de destino no PostgreSQL (default: username normalizado).",
+        help="Schema de destino no PostgreSQL (default: schema exclusivo atribuído ao usuário).",
     )
     uc_bootstrap.add_argument(
         "--mode",
@@ -580,6 +596,31 @@ def parse_args() -> argparse.Namespace:
             "market copia apenas base de mercado/configuração; "
             "full copia também posições e histórico fiscal do schema base."
         ),
+    )
+
+    uc_schema_audit = ucs.add_parser(
+        "audit-schemas",
+        help="Lista o mapeamento username -> app_schema e identifica migrações pendentes.",
+    )
+    uc_schema_audit.add_argument(
+        "--pending-only",
+        action="store_true",
+        help="Mostra apenas usuários que ainda precisam gravar ou revisar app_schema.",
+    )
+
+    uc_schema_migrate = ucs.add_parser(
+        "migrate-schemas",
+        help="Atribui app_schema exclusivo aos usuários e replica schemas legados colididos quando necessário.",
+    )
+    uc_schema_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra o plano sem gravar alterações nem clonar schemas.",
+    )
+    uc_schema_migrate.add_argument(
+        "--no-clone-legacy",
+        action="store_true",
+        help="Não replica o schema legado para usuários que receberem schema novo.",
     )
 
     src = sub.add_parser("service-run", help="Registra e consulta execucoes dos servicos agendados")
@@ -1088,13 +1129,17 @@ def main() -> None:
             password = args.password
             if not password:
                 password = getpass.getpass("Senha do usuário: ")
-            created = create_user(
-                username=args.username,
-                password=password,
-                replace=bool(getattr(args, "replace", False)),
-            )
+            try:
+                created = create_user(
+                    username=args.username,
+                    password=password,
+                    replace=bool(getattr(args, "replace", False)),
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
             if created:
-                print(f"Usuário '{args.username}' salvo com sucesso.")
+                user_schema = _resolve_user_target_schema(username=args.username)
+                print(f"Usuário '{args.username}' salvo com sucesso. Schema: {user_schema}")
             else:
                 raise SystemExit(
                     f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
@@ -1106,11 +1151,59 @@ def main() -> None:
             else:
                 for username in users:
                     print(username)
+        elif args.subcmd == "audit-schemas":
+            rows = list_user_schema_mappings()
+            if bool(getattr(args, "pending_only", False)):
+                rows = [row for row in rows if str(row.get("action") or "") != "keep"]
+            if not rows:
+                print("Nenhuma migração pendente de schema.")
+            else:
+                for row in rows:
+                    action = str(row.get("action") or "keep")
+                    clone_note = ""
+                    if (
+                        action == "assign_unique"
+                        and bool(row.get("legacy_schema_exists"))
+                        and not bool(row.get("planned_schema_exists"))
+                    ):
+                        clone_note = " | clone legado sugerido"
+                    print(
+                        f"{row.get('username')} | atual={row.get('app_schema') or '-'} | "
+                        f"planejado={row.get('planned_schema')} | legado={row.get('legacy_schema')} | "
+                        f"acao={action}{clone_note}"
+                    )
+        elif args.subcmd == "migrate-schemas":
+            try:
+                report = migrate_user_app_schemas(
+                    dry_run=bool(getattr(args, "dry_run", False)),
+                    clone_legacy_schema=not bool(getattr(args, "no_clone_legacy", False)),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha na migração de schemas dos usuários: {exc}") from exc
+            if report.get("dry_run"):
+                print("Dry-run da migração de schemas:")
+            else:
+                print("Migração de schemas concluída.")
+            for row in report.get("mappings", []):
+                print(
+                    f"{row.get('username')} | atual={row.get('app_schema') or '-'} | "
+                    f"planejado={row.get('planned_schema')} | legado={row.get('legacy_schema')} | "
+                    f"acao={row.get('action')}"
+                )
+            cloned = report.get("cloned_schemas", [])
+            if cloned:
+                print("Schemas clonados:")
+                for item in cloned:
+                    print(
+                        f"  - {item.get('source_schema')} -> {item.get('target_schema')}"
+                    )
         elif args.subcmd == "invite":
+            explicit_schema = sanitize_schema_name(args.target_schema) if args.target_schema else None
             try:
                 temp_password = issue_temporary_password(
                     username=args.username,
                     replace=bool(getattr(args, "replace", False)),
+                    app_schema=explicit_schema,
                 )
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
@@ -1125,7 +1218,10 @@ def main() -> None:
 
             if bool(getattr(args, "bootstrap", False)):
                 source_schema = sanitize_schema_name(args.from_schema)
-                target_schema = sanitize_schema_name(args.target_schema or args.username)
+                target_schema = _resolve_user_target_schema(
+                    username=args.username,
+                    explicit_schema=args.target_schema,
+                )
                 _bootstrap_user_schema(
                     source_schema=source_schema,
                     target_schema=target_schema,
@@ -1135,18 +1231,26 @@ def main() -> None:
             password = args.password
             if not password:
                 password = getpass.getpass("Senha do usuário: ")
-            created = create_user(
-                username=args.username,
-                password=password,
-                replace=bool(getattr(args, "replace", False)),
-            )
+            explicit_schema = sanitize_schema_name(args.target_schema) if args.target_schema else None
+            try:
+                created = create_user(
+                    username=args.username,
+                    password=password,
+                    replace=bool(getattr(args, "replace", False)),
+                    app_schema=explicit_schema,
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
             if not created and not bool(getattr(args, "replace", False)):
                 raise SystemExit(
                     f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
                 )
 
             source_schema = sanitize_schema_name(args.from_schema)
-            target_schema = sanitize_schema_name(args.target_schema or args.username)
+            target_schema = _resolve_user_target_schema(
+                username=args.username,
+                explicit_schema=args.target_schema,
+            )
             print(
                 f"Bootstrap do usuário '{args.username}' em {target_schema} a partir de {source_schema}..."
             )
@@ -1251,7 +1355,11 @@ def main() -> None:
                 "Ambiente pronto para operação em PostgreSQL."
             )
         elif args.subcmd == "optimize":
-            schema_name = sanitize_schema_name(args.schema or args.username)
+            schema_name = (
+                sanitize_schema_name(args.schema)
+                if args.schema
+                else _resolve_user_target_schema(username=args.username)
+            )
             if loaded_env_path is not None:
                 print(f".env carregado: {loaded_env_path}")
             print(f"Schema alvo: {schema_name}")

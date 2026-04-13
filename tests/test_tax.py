@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from opcoes.tax import compute_tax
+from opcoes.tax import build_position_tax_events, compute_tax
 
 
 def test_compute_tax_filters_real_and_simulated(monkeypatch) -> None:
     rows = [
         {
             "trade_type": "swing",
+            "status": "closed",
             "trade_date": "2026-01-05",
             "qty": 10,
             "entry_price": 10.0,
@@ -22,6 +23,7 @@ def test_compute_tax_filters_real_and_simulated(monkeypatch) -> None:
         },
         {
             "trade_type": "swing",
+            "status": "closed",
             "trade_date": "2026-01-05",
             "qty": 10,
             "entry_price": 10.0,
@@ -64,6 +66,7 @@ def test_compute_tax_carries_losses_forward_between_months(monkeypatch) -> None:
             "ticker": "LOSS3",
             "underlying": "LOSS3",
             "trade_type": "swing",
+            "status": "closed",
             "qty": 10,
             "entry_price": 10.0,
             "fees": 0.0,
@@ -81,6 +84,7 @@ def test_compute_tax_carries_losses_forward_between_months(monkeypatch) -> None:
             "ticker": "GAIN4",
             "underlying": "GAIN4",
             "trade_type": "swing",
+            "status": "closed",
             "qty": 10,
             "entry_price": 10.0,
             "fees": 0.0,
@@ -98,6 +102,7 @@ def test_compute_tax_carries_losses_forward_between_months(monkeypatch) -> None:
             "ticker": "GAIN5",
             "underlying": "GAIN5",
             "trade_type": "swing",
+            "status": "closed",
             "qty": 10,
             "entry_price": 10.0,
             "fees": 0.0,
@@ -136,3 +141,34 @@ def test_compute_tax_carries_losses_forward_between_months(monkeypatch) -> None:
     assert mar.swing_ir == 10.5
     assert mar.total_irrf == 2.0
     assert mar.net_ir_due == 8.5
+
+
+def test_build_position_tax_events_requires_closed_status_for_exit_event() -> None:
+    open_position = {
+        "id": 10,
+        "ticker": "ABCD4",
+        "underlying": "ABCD4",
+        "trade_type": "swing",
+        "status": "open",
+        "qty": 100,
+        "entry_price": 10.0,
+        "fees": 2.0,
+        "partial_date": None,
+        "partial_price": None,
+        "partial_qty": 0,
+        "exit_date": "2026-04-20",
+        "exit_price": 12.0,
+        "irrf": 0.0,
+        "side": "long",
+        "is_simulated": False,
+    }
+
+    assert build_position_tax_events(open_position) == []
+
+    closed_position = dict(open_position)
+    closed_position["status"] = "closed"
+    events = build_position_tax_events(closed_position)
+
+    assert len(events) == 1
+    assert events[0].phase == "close"
+    assert events[0].amount == 198.0

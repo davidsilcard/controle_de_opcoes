@@ -90,6 +90,93 @@ def test_login_rate_limit_blocks_repeated_failures(monkeypatch) -> None:
     assert "Muitas tentativas de login" in third.get_data(as_text=True)
 
 
+@pytest.mark.requires_postgres
+def test_login_rate_limit_ignores_forged_forwarded_for(monkeypatch) -> None:
+    monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
+    monkeypatch.setenv("OPCOES_LOGIN_MAX_ATTEMPTS", "1")
+    monkeypatch.setenv("OPCOES_LOGIN_BLOCK_SECONDS", "120")
+    monkeypatch.setenv("OPCOES_LOGIN_WINDOW_SECONDS", "120")
+
+    create_user(username="alice", password="SenhaForte123!")
+    app = create_app()
+    client = app.test_client()
+    csrf_token = _login_csrf_token(client)
+
+    first = client.post(
+        "/login",
+        data={
+            "username": "alice",
+            "password": "senha-errada",
+            "next": "/positions",
+            "_csrf_token": csrf_token,
+        },
+        headers={"X-Forwarded-For": "198.51.100.10"},
+    )
+    assert first.status_code == 429
+
+    second = client.post(
+        "/login",
+        data={
+            "username": "alice",
+            "password": "SenhaForte123!",
+            "next": "/positions",
+            "_csrf_token": csrf_token,
+        },
+        headers={"X-Forwarded-For": "203.0.113.20"},
+    )
+    assert second.status_code == 429
+    assert "Muitas tentativas de login" in second.get_data(as_text=True)
+
+
+@pytest.mark.requires_postgres
+def test_login_rate_limit_is_shared_between_app_instances(monkeypatch) -> None:
+    monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
+    monkeypatch.setenv("OPCOES_LOGIN_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("OPCOES_LOGIN_BLOCK_SECONDS", "120")
+    monkeypatch.setenv("OPCOES_LOGIN_WINDOW_SECONDS", "120")
+
+    create_user(username="alice", password="SenhaForte123!")
+    app_one = create_app()
+    app_two = create_app()
+    client_one = app_one.test_client()
+    client_two = app_two.test_client()
+    csrf_one = _login_csrf_token(client_one)
+    csrf_two = _login_csrf_token(client_two)
+
+    first = client_one.post(
+        "/login",
+        data={
+            "username": "alice",
+            "password": "senha-errada",
+            "next": "/positions",
+            "_csrf_token": csrf_one,
+        },
+    )
+    assert first.status_code == 200
+
+    second = client_two.post(
+        "/login",
+        data={
+            "username": "alice",
+            "password": "senha-errada",
+            "next": "/positions",
+            "_csrf_token": csrf_two,
+        },
+    )
+    assert second.status_code == 429
+
+    third = client_one.post(
+        "/login",
+        data={
+            "username": "alice",
+            "password": "SenhaForte123!",
+            "next": "/positions",
+            "_csrf_token": csrf_one,
+        },
+    )
+    assert third.status_code == 429
+
+
 def test_https_security_headers_are_applied(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
 
