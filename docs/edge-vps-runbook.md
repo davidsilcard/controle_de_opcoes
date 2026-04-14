@@ -60,8 +60,8 @@ docker compose logs -f edge
 
 Observacao:
 
-- o helper `deploy/scripts/opcoes-compose-vps.sh` agora exporta `OPCOES_EDGE_BIND`
-- isso permite deixar a porta do `edge` configurada no ambiente da VPS, por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
+- o helper `deploy/scripts/opcoes-compose-vps.sh` agora le `OPCOES_EDGE_BIND` do arquivo definido em `OPCOES_APP_ENV_FILE`
+- isso permite deixar a porta do `edge` configurada diretamente no `/etc/controle_de_opcoes/app.env`, por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
 
 ## Caddy
 

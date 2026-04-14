@@ -562,7 +562,8 @@ deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes
 Observacao:
 
 - o helper `deploy/scripts/opcoes-compose-vps.sh` exporta `OPCOES_APP_ENV_FILE`, `OPCOES_WEB_BIND` e `OPCOES_EDGE_BIND`
-- isso permite fixar portas diferentes para `web` e `edge` no `/etc/controle_de_opcoes/app.env`
+- antes de chamar o Compose, ele le `OPCOES_WEB_BIND` e `OPCOES_EDGE_BIND` do arquivo apontado por `OPCOES_APP_ENV_FILE`
+- isso permite fixar portas diferentes para `web` e `edge` diretamente no `/etc/controle_de_opcoes/app.env`
 - em VPS com outra aplicacao ocupando `127.0.0.1:8001`, use por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
 
 ### Agendamento do scraper na VPS com systemd
