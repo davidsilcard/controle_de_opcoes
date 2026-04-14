@@ -228,6 +228,15 @@ A partir da baixa da posicao:
 uv run python -m opcoes.web
 ```
 
+Atualizacao parcial da interface:
+
+- a aplicacao continua em `Flask`, mas agora as telas `Posicoes` e `Covered Call` usam blocos `HTMX` so para leitura dinamica.
+- os formularios `POST` continuam server-rendered, o que reduz risco operacional para cadastro, baixa e auditoria.
+- os blocos ao vivo consultam rotas parciais internas a cada `15s`:
+  - `/positions/partial/live`
+  - `/covered-call/partial/live`
+- isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA.
+
 ### Edge API publica
 
 Servico separado para `api.moven.cloud`, com cache curto, bearer token e WebSocket:

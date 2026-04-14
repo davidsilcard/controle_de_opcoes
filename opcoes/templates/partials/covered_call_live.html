@@ -1,0 +1,248 @@
+{% if inventory_summary %}
+  <div class="card mb-4 border-0 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
+          <p class="text-muted small mb-0">
+            Visão operacional do estoque aberto para a covered call. O sistema usa o saldo livre para validar novas vendas e mantém o vínculo legado apenas para compatibilidade.
+          </p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Ativo</th>
+              <th>Modo</th>
+              <th class="text-end">Total</th>
+              <th class="text-end">Reservado</th>
+              <th class="text-end">Livre</th>
+              <th class="text-end">PM informado</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in inventory_summary %}
+              <tr>
+                <td class="fw-semibold">{{ item.ticker }}</td>
+                <td>{% if item.is_simulated %}Simulado{% else %}Real{% endif %}</td>
+                <td class="text-end">{{ item.shares_total }}</td>
+                <td class="text-end">{{ item.shares_reserved }}</td>
+                <td class="text-end">{{ item.shares_free }}</td>
+                <td class="text-end">
+                  {% if item.avg_price is not none %}
+                    R$ {{ "%.2f"|format(item.avg_price) }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.coverage_status == 'insufficient' %}
+                    <span class="badge text-bg-danger">Reserva maior que estoque</span>
+                  {% elif item.price_status == 'review' %}
+                    <span class="badge text-bg-warning">PM a revisar</span>
+                  {% else %}
+                    <span class="badge text-bg-success">Ok</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="row mb-4">
+  <div class="col-md-4 mb-3 mb-md-0">
+    <div class="card">
+      <div class="card-header">Cotação {{ underlying }}</div>
+      <div class="card-body">
+        <div class="text-muted small">Spot de referência</div>
+        <div class="fs-5">
+          {% if underlying_quote and underlying_quote.price is not none %}
+            R$ {{ "%.2f"|format(underlying_quote.price) }}
+            <div class="text-muted small">
+              {{ underlying_quote.market_status_label or 'Snapshot' }}
+              {% if underlying_quote.market_price_source %}
+                · {{ underlying_quote.market_price_source|upper }}
+              {% endif %}
+            </div>
+          {% else %}
+            -
+          {% endif %}
+        </div>
+        <div class="text-muted small mt-2">Data do preço</div>
+        <div>
+          {% if underlying_quote and underlying_quote.price_date %}
+            {{ underlying_quote.price_date }}
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">Estoque {{ underlying }} consolidado (real)</div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-4">
+            <div class="text-muted small">{{ underlying }} total</div>
+            <div class="fs-5">{{ stock_real.shares_total }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">Reservadas (calls)</div>
+            <div class="fs-5">{{ stock_real.shares_covered }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">Livres para nova venda</div>
+            <div class="fs-5">{{ stock_real.shares_free }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">Estoque {{ underlying }} consolidado (simulado)</div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-4">
+            <div class="text-muted small">{{ underlying }} total</div>
+            <div class="fs-5">{{ stock_sim.shares_total }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">Reservadas (calls)</div>
+            <div class="fs-5">{{ stock_sim.shares_covered }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">Livres para nova venda</div>
+            <div class="fs-5">{{ stock_sim.shares_free }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (real)</h2>
+{% if not covered_real %}
+  <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições reais.</p>
+{% else %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-striped align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Ticker</th>
+          <th>Venc.</th>
+          <th class="text-end">Qtd</th>
+          <th class="text-end">Último</th>
+          <th class="text-end">Spot</th>
+          <th class="text-end">Extr.% Spot</th>
+          <th class="text-end">% p/ 2x</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pos in covered_real %}
+          <tr>
+            <td>{{ pos.ticker }}</td>
+            <td>{{ pos.vencimento or '-' }}</td>
+            <td class="text-end">{{ pos.open_qty }}</td>
+            <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.extrinsic_pct_spot is not none %}{{ "%.2f"|format(pos.extrinsic_pct_spot) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (simulado)</h2>
+{% if not covered_sim %}
+  <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições simuladas.</p>
+{% else %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-striped align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Ticker</th>
+          <th>Venc.</th>
+          <th class="text-end">Qtd</th>
+          <th class="text-end">Último</th>
+          <th class="text-end">Spot</th>
+          <th class="text-end">Extr.% Spot</th>
+          <th class="text-end">% p/ 2x</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pos in covered_sim %}
+          <tr>
+            <td>{{ pos.ticker }}</td>
+            <td>{{ pos.vencimento or '-' }}</td>
+            <td class="text-end">{{ pos.open_qty }}</td>
+            <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.extrinsic_pct_spot is not none %}{{ "%.2f"|format(pos.extrinsic_pct_spot) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<h2 class="h5 mt-4">Sugestões de novas calls para {{ underlying }}</h2>
+{% if not suggestions %}
+  <p class="text-muted small">
+    {% if filters.only_target_hits %}
+      Nenhuma sugestão bate a meta com os filtros atuais.
+    {% else %}
+      Nenhuma sugestão encontrada com os filtros atuais.
+    {% endif %}
+  </p>
+{% else %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-striped align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Ticker</th>
+          <th>Venc.</th>
+          <th class="text-end">Strike</th>
+          <th class="text-end">Spot</th>
+          <th class="text-end">Dist. Strike%</th>
+          <th class="text-end">Extr.% Spot</th>
+          <th class="text-end">Prêmio ref.</th>
+          <th class="text-center">Meta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for opp in suggestions %}
+          <tr class="{% if opp.target_hit %}table-success{% endif %}">
+            <td>{{ opp.ticker }}</td>
+            <td>{{ opp.vencimento }}</td>
+            <td class="text-end">{% if opp.strike is not none %}{{ "%.2f"|format(opp.strike) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if opp.underlying_price is not none %}{{ "%.2f"|format(opp.underlying_price) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if opp.dist_perc_strike is not none %}{{ "%.2f"|format(opp.dist_perc_strike) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if opp.extrinsic_pct_spot is not none %}{{ "%.2f"|format(opp.extrinsic_pct_spot) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if opp.premium_ref is not none %}{{ "%.2f"|format(opp.premium_ref) }}{% else %}-{% endif %}</td>
+            <td class="text-center">
+              {% if opp.target_hit %}
+                <span class="badge text-bg-success">Atinge</span>
+              {% elif opp.strike_target_hit %}
+                <span class="badge text-bg-secondary">Quase</span>
+              {% else %}
+                <span class="badge text-bg-light">Não</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

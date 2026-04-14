@@ -93,6 +93,106 @@ CSRF_FIELD_NAME = "_csrf_token"
 LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
+def _build_positions_page_context(
+    *,
+    ticker_contains: str,
+    underlying_contains: str,
+    strategy_tag: str,
+    trade_type: str,
+    status: str,
+    is_simulated_raw: str,
+    result_year_raw: str,
+    result_month_raw: str,
+    market_data_client: MarketDataClient,
+) -> dict[str, Any]:
+    include_closed = True
+    only_closed = False
+    if status == "open":
+        include_closed = False
+    elif status == "closed":
+        only_closed = True
+
+    is_simulated = None
+    if is_simulated_raw in {"0", "1"}:
+        is_simulated = is_simulated_raw == "1"
+
+    result_year = None
+    if result_year_raw:
+        try:
+            result_year = int(result_year_raw)
+        except ValueError:
+            result_year = None
+
+    result_month = None
+    if result_month_raw:
+        try:
+            month_candidate = int(result_month_raw)
+        except ValueError:
+            month_candidate = None
+        if month_candidate is not None and 1 <= month_candidate <= 12:
+            result_month = month_candidate
+
+    positions = list_positions(
+        include_closed=include_closed,
+        only_closed=only_closed,
+        ticker_contains=ticker_contains or None,
+        underlying_contains=underlying_contains or None,
+        strategy_tag=strategy_tag or None,
+        trade_type=trade_type or None,
+        is_simulated=is_simulated,
+    )
+    positions = enrich_positions_with_live_market_data(
+        positions,
+        client=market_data_client,
+    )
+    position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+    premium_ids = finance.get_premium_position_ids(position_ids)
+    for pos in positions:
+        pos_id = pos.get("id")
+        pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
+        pos["market_status_label"] = market_status_label(pos.get("market_status"))
+        pos["underlying_market_status_label"] = market_status_label(
+            pos.get("underlying_market_status")
+        )
+    positions_view = _hide_replaced_legacy_stock_positions(positions)
+    realized_summary = summarize_realized_positions(
+        ticker_contains=ticker_contains or None,
+        underlying_contains=underlying_contains or None,
+        strategy_tag=strategy_tag or None,
+        trade_type=trade_type or None,
+        is_simulated=is_simulated,
+        selected_year=result_year,
+        selected_month=result_month,
+    )
+    inventory_summary = _build_inventory_overview(positions)
+    return {
+        "positions": positions_view,
+        "filter_ticker": ticker_contains,
+        "filter_underlying": underlying_contains,
+        "filter_strategy_tag": strategy_tag,
+        "filter_trade_type": trade_type,
+        "filter_status": status,
+        "filter_is_simulated": is_simulated_raw,
+        "realized_summary": realized_summary,
+        "inventory_summary": inventory_summary,
+    }
+
+
+def _build_covered_call_page_context(
+    *,
+    args: Any,
+    market_data_client: MarketDataClient,
+) -> dict[str, Any]:
+    ctx = get_covered_call_context(args, market_data_client=market_data_client)
+    ctx["inventory_summary"] = _build_inventory_overview(
+        list_positions(include_closed=False),
+        underlying_filter=ctx.get("underlying"),
+    )
+    ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
+    ctx["holding_error"] = (args.get("holding_error") or "").strip()
+    return ctx
+
+
 def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -585,14 +685,19 @@ def create_app() -> Flask:
 
     @app.route("/covered-call")
     def covered_call() -> str:
-        ctx = get_covered_call_context(request.args, market_data_client=market_data_client)
-        ctx["inventory_summary"] = _build_inventory_overview(
-            list_positions(include_closed=False),
-            underlying_filter=ctx.get("underlying"),
+        ctx = _build_covered_call_page_context(
+            args=request.args,
+            market_data_client=market_data_client,
         )
-        ctx["holding_notice"] = (request.args.get("holding_notice") or "").strip()
-        ctx["holding_error"] = (request.args.get("holding_error") or "").strip()
         return render_template("covered_call.html", **ctx)
+
+    @app.route("/covered-call/partial/live")
+    def covered_call_partial_live() -> str:
+        ctx = _build_covered_call_page_context(
+            args=request.args,
+            market_data_client=market_data_client,
+        )
+        return render_template("partials/covered_call_live.html", **ctx)
 
     @app.route("/cash-covered-put")
     def cash_covered_put() -> str:
@@ -1187,83 +1292,48 @@ def create_app() -> Flask:
         result_year_raw = (request.args.get("result_year") or "").strip()
         result_month_raw = (request.args.get("result_month") or "").strip()
 
-        include_closed = True
-        only_closed = False
-        if status == "open":
-            include_closed = False
-        elif status == "closed":
-            only_closed = True
-
-        is_simulated = None
-        if is_simulated_raw in {"0", "1"}:
-            is_simulated = is_simulated_raw == "1"
-
-        result_year = None
-        if result_year_raw:
-            try:
-                result_year = int(result_year_raw)
-            except ValueError:
-                result_year = None
-
-        result_month = None
-        if result_month_raw:
-            try:
-                month_candidate = int(result_month_raw)
-            except ValueError:
-                month_candidate = None
-            if month_candidate is not None and 1 <= month_candidate <= 12:
-                result_month = month_candidate
-
         next_url = request.full_path
         if next_url.endswith("?"):
             next_url = request.path
 
-        positions = list_positions(
-            include_closed=include_closed,
-            only_closed=only_closed,
-            ticker_contains=ticker_contains or None,
-            underlying_contains=underlying_contains or None,
-            strategy_tag=strategy_tag or None,
-            trade_type=trade_type or None,
-            is_simulated=is_simulated,
+        ctx = _build_positions_page_context(
+            ticker_contains=ticker_contains,
+            underlying_contains=underlying_contains,
+            strategy_tag=strategy_tag,
+            trade_type=trade_type,
+            status=status,
+            is_simulated_raw=is_simulated_raw,
+            result_year_raw=result_year_raw,
+            result_month_raw=result_month_raw,
+            market_data_client=market_data_client,
         )
-        positions = enrich_positions_with_live_market_data(
-            positions,
-            client=market_data_client,
+        ctx["next_url"] = next_url
+        return render_template("positions.html", **ctx)
+
+    @app.route("/positions/partial/live")
+    def positions_partial_live() -> str:
+        ticker_contains = (request.args.get("ticker") or "").strip().upper()
+        underlying_contains = (request.args.get("underlying") or "").strip().upper()
+        strategy_tag = (request.args.get("strategy_tag") or "").strip()
+        trade_type = (request.args.get("trade_type") or "").strip().lower()
+        status = (request.args.get("status") or "all").strip().lower()
+        is_simulated_raw = (request.args.get("is_simulated") or "").strip()
+        result_year_raw = (request.args.get("result_year") or "").strip()
+        result_month_raw = (request.args.get("result_month") or "").strip()
+        next_url = request.args.get("next_url") or "/positions"
+        ctx = _build_positions_page_context(
+            ticker_contains=ticker_contains,
+            underlying_contains=underlying_contains,
+            strategy_tag=strategy_tag,
+            trade_type=trade_type,
+            status=status,
+            is_simulated_raw=is_simulated_raw,
+            result_year_raw=result_year_raw,
+            result_month_raw=result_month_raw,
+            market_data_client=market_data_client,
         )
-        position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
-        premium_ids = finance.get_premium_position_ids(position_ids)
-        for pos in positions:
-            pos_id = pos.get("id")
-            pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
-            pos["market_status_label"] = market_status_label(pos.get("market_status"))
-            pos["underlying_market_status_label"] = market_status_label(
-                pos.get("underlying_market_status")
-            )
-        positions_view = _hide_replaced_legacy_stock_positions(positions)
-        realized_summary = summarize_realized_positions(
-            ticker_contains=ticker_contains or None,
-            underlying_contains=underlying_contains or None,
-            strategy_tag=strategy_tag or None,
-            trade_type=trade_type or None,
-            is_simulated=is_simulated,
-            selected_year=result_year,
-            selected_month=result_month,
-        )
-        inventory_summary = _build_inventory_overview(positions)
-        return render_template(
-            "positions.html",
-            positions=positions_view,
-            filter_ticker=ticker_contains,
-            filter_underlying=underlying_contains,
-            filter_strategy_tag=strategy_tag,
-            filter_trade_type=trade_type,
-            filter_status=status,
-            filter_is_simulated=is_simulated_raw,
-            realized_summary=realized_summary,
-            inventory_summary=inventory_summary,
-            next_url=next_url,
-        )
+        ctx["next_url"] = next_url
+        return render_template("partials/positions_live.html", **ctx)
 
     @app.route("/audit")
     def audit_view() -> str:

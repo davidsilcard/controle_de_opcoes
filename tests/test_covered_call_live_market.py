@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from opcoes.strategies.covered_call import get_covered_call_context
+from opcoes.web import create_app
 
 
 class FakeMarketClient:
@@ -142,3 +143,154 @@ def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
     assert ctx["covered_real"][0]["underlying_price"] == 48.9
     assert ctx["suggestions"][0]["premium_ref"] == 0.1
     assert ctx["suggestions"][0]["market_status_label"] == "Ao vivo"
+
+
+def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "opcoes.web._build_covered_call_page_context",
+        lambda **_kwargs: {
+            "underlying": "PETR4",
+            "filters": {
+                "min_extrinsic": "0.0",
+                "min_days": "1",
+                "max_days": "30",
+                "min_dist_strike": "0.0",
+                "target_upside_pct": "0.0",
+                "only_target_hits": False,
+            },
+            "holding_notice": "",
+            "holding_error": "",
+            "stock_real": {
+                "shares_total": 100,
+                "shares_covered": 100,
+                "shares_free": 0,
+                "free_avg_price": 45.0,
+                "free_min_price": 45.0,
+                "free_max_price": 45.0,
+            },
+            "stock_sim": {
+                "shares_total": 0,
+                "shares_covered": 0,
+                "shares_free": 0,
+                "free_avg_price": None,
+                "free_min_price": None,
+                "free_max_price": None,
+            },
+            "inventory_summary": [],
+            "underlying_quote": {"price": 48.9, "price_date": "2026-04-14", "market_status_label": "Ao vivo", "market_price_source": "last"},
+            "covered_real": [],
+            "covered_sim": [],
+            "suggestions": [],
+            "buyback_target_pct": 70.0,
+            "lots_real": [],
+            "lots_sim": [],
+            "call_summary_real": [],
+            "call_summary_sim": [],
+            "monthly_premiums": [],
+            "monthly_operational_result": [],
+            "simulated_monthly_premiums": [],
+            "simulated_monthly_operational_result": [],
+            "buyback_candidates_real": [],
+            "buyback_candidates_simulated": [],
+            "sell_target": {"base_price": None, "target_price": None},
+            "underlying_quick_filter": [],
+        },
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/covered-call?underlying=PETR4")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="covered-call-live"' in html
+    assert 'hx-get="/covered-call/partial/live?' in html
+
+
+def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "opcoes.web._build_covered_call_page_context",
+        lambda **_kwargs: {
+            "underlying": "PETR4",
+            "filters": {
+                "min_extrinsic": "0.0",
+                "min_days": "1",
+                "max_days": "30",
+                "min_dist_strike": "0.0",
+                "target_upside_pct": "0.0",
+                "only_target_hits": False,
+            },
+            "holding_notice": "",
+            "holding_error": "",
+            "stock_real": {
+                "shares_total": 100,
+                "shares_covered": 100,
+                "shares_free": 0,
+                "free_avg_price": 45.0,
+                "free_min_price": 45.0,
+                "free_max_price": 45.0,
+            },
+            "stock_sim": {
+                "shares_total": 0,
+                "shares_covered": 0,
+                "shares_free": 0,
+                "free_avg_price": None,
+                "free_min_price": None,
+                "free_max_price": None,
+            },
+            "inventory_summary": [
+                {
+                    "ticker": "PETR4",
+                    "is_simulated": False,
+                    "shares_total": 100,
+                    "shares_reserved": 100,
+                    "shares_free": 0,
+                    "avg_price": 45.0,
+                    "coverage_status": "ok",
+                    "price_status": "ok",
+                }
+            ],
+            "underlying_quote": {"price": 48.9, "price_date": "2026-04-14", "market_status_label": "Ao vivo", "market_price_source": "last"},
+            "covered_real": [],
+            "covered_sim": [],
+            "suggestions": [
+                {
+                    "ticker": "PETRD999",
+                    "vencimento": "17/04/2026",
+                    "strike": 49.0,
+                    "underlying_price": 48.9,
+                    "dist_perc_strike": 0.2,
+                    "extrinsic_pct_spot": 0.1,
+                    "premium_ref": 0.12,
+                    "target_hit": True,
+                    "strike_target_hit": True,
+                }
+            ],
+            "buyback_target_pct": 70.0,
+            "lots_real": [],
+            "lots_sim": [],
+            "call_summary_real": [],
+            "call_summary_sim": [],
+            "monthly_premiums": [],
+            "monthly_operational_result": [],
+            "simulated_monthly_premiums": [],
+            "simulated_monthly_operational_result": [],
+            "buyback_candidates_real": [],
+            "buyback_candidates_simulated": [],
+            "sell_target": {"base_price": None, "target_price": None},
+            "underlying_quick_filter": [],
+        },
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/covered-call/partial/live?underlying=PETR4")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Cotação PETR4" in html
+    assert "PETRD999" in html
