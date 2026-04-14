@@ -14,7 +14,12 @@ from fastapi.responses import JSONResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
-from .mt5_gateway import AsyncMt5GatewayClient, Mt5GatewayClient, Mt5GatewayError
+from .mt5_gateway import (
+    AsyncMt5GatewayClient,
+    Mt5GatewayClient,
+    Mt5GatewayError,
+    iter_successful_quote_items,
+)
 from .runtime_env import load_dotenv_once
 
 
@@ -205,7 +210,7 @@ def create_app(
         }
         if missing:
             batch = client.get_quotes_batch(missing, include_raw=include_raw)
-            fresh_items = batch.get("items", [])
+            fresh_items = list(iter_successful_quote_items(batch))
             cache_obj.set_many(fresh_items)
             for item in fresh_items:
                 key = str(item.get("requested_symbol") or item.get("symbol") or "").upper()
@@ -229,18 +234,25 @@ def create_app(
         client: Mt5GatewayClient = Depends(get_gateway_client),
         cache_obj: QuoteCache = Depends(get_cache),
     ) -> JSONResponse:
+        normalized_symbol = str(symbol or "").strip().upper()
         try:
-            items = load_quotes(
-                client=client,
-                cache_obj=cache_obj,
-                symbols=[symbol],
-                include_raw=include_raw,
-            )
+            if include_raw:
+                payload = client.get_quote(normalized_symbol, include_raw=True)
+                return JSONResponse(payload)
+            cached_items, _missing = cache_obj.get_many([normalized_symbol])
+            if cached_items:
+                return JSONResponse(cached_items[0])
+            payload = client.get_quote(normalized_symbol, include_raw=False)
         except Mt5GatewayError as exc:
             raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
-        if not items:
+        if not isinstance(payload, dict):
             raise HTTPException(status_code=404, detail="Quote nao encontrado.")
-        return JSONResponse(items[0])
+        if payload.get("ok") is False:
+            error_payload = payload.get("error")
+            detail = error_payload if isinstance(error_payload, dict) else {"message": "Quote nao encontrado."}
+            raise HTTPException(status_code=404, detail=detail)
+        cache_obj.set_many([payload])
+        return JSONResponse(payload)
 
     @app.post("/v1/quotes/batch")
     def get_quotes_batch(
@@ -250,15 +262,12 @@ def create_app(
         cache_obj: QuoteCache = Depends(get_cache),
     ) -> JSONResponse:
         try:
-            items = load_quotes(
-                client=client,
-                cache_obj=cache_obj,
-                symbols=payload.symbols,
-                include_raw=payload.include_raw,
-            )
+            result = client.get_quotes_batch(payload.symbols, include_raw=payload.include_raw)
         except Mt5GatewayError as exc:
             raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
-        return JSONResponse({"count": len(items), "items": items})
+        if not payload.include_raw:
+            cache_obj.set_many(list(iter_successful_quote_items(result)))
+        return JSONResponse(result)
 
     @app.get("/v1/symbols/search")
     def search_symbols(
@@ -281,6 +290,18 @@ def create_app(
     ) -> JSONResponse:
         try:
             result = client.preview_order(payload.model_dump(exclude_none=True))
+        except Mt5GatewayError as exc:
+            raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
+        return JSONResponse(result)
+
+    @app.post("/v1/orders")
+    def send_order(
+        payload: OrderPreviewRequest,
+        _subject: str = Depends(verify_token),
+        client: Mt5GatewayClient = Depends(get_gateway_client),
+    ) -> JSONResponse:
+        try:
+            result = client.send_order(payload.model_dump(exclude_none=True))
         except Mt5GatewayError as exc:
             raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
         return JSONResponse(result)
@@ -345,7 +366,7 @@ def create_app(
                     if missing:
                         try:
                             batch = await get_async_gateway_client().get_quotes_batch(missing, include_raw=False)
-                            fresh_items = batch.get("items", [])
+                            fresh_items = list(iter_successful_quote_items(batch))
                             cache.set_many(fresh_items)
                             for item in fresh_items:
                                 key = str(item.get("requested_symbol") or item.get("symbol") or "").upper()

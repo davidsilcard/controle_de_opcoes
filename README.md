@@ -247,9 +247,29 @@ Variaveis minimas para a edge:
 
 ```bash
 MT5_GATEWAY_BASE_URL=http://100.64.0.10:8000
-MT5_GATEWAY_KEY_ID=edge-1
+MT5_GATEWAY_KEY_ID=edge=1
 MT5_GATEWAY_SHARED_SECRET=troque-por-um-segredo-forte
+MT5_GATEWAY_SCOPES=quotes:read,symbols:read,orders:preview
 OPCOES_EDGE_API_TOKENS=excel=troque-este-token,app=troque-outro-token
+```
+
+Contrato atual do `mt5-gateway` consumido pela edge:
+
+- autenticacao HMAC com `X-Key-Id`, `X-Timestamp`, `X-Nonce` e `X-Signature`
+- `GET /ready` agora e enxuto e nao deve mais ser usado como fonte de dados sensiveis de conta/terminal
+- `POST /internal/v1/quotes/batch` pode retornar sucesso parcial; a edge preserva itens com erro no batch publico e cacheia apenas os itens validos
+- `POST /internal/v1/orders/preview` fica separado de `POST /internal/v1/orders`
+- o endpoint publico `POST /v1/orders` so deve ser usado quando a chave tiver `orders:send` e o gateway estiver com envio real habilitado
+
+Exemplo rapido de uso do cliente interno:
+
+```python
+from opcoes.mt5_gateway import Mt5GatewayClient
+
+client = Mt5GatewayClient()
+print(client.ready())
+print(client.get_quote("PETR4"))
+print(client.get_quotes_batch(["PETR4", "VALE3"]))
 ```
 
 Fluxo recomendado:
@@ -538,6 +558,12 @@ Para evitar repetir essas variaveis na VPS, use o helper versionado:
 deploy/scripts/opcoes-compose-vps.sh up -d --build
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
+
+Observacao:
+
+- o helper `deploy/scripts/opcoes-compose-vps.sh` exporta `OPCOES_APP_ENV_FILE`, `OPCOES_WEB_BIND` e `OPCOES_EDGE_BIND`
+- isso permite fixar portas diferentes para `web` e `edge` no `/etc/controle_de_opcoes/app.env`
+- em VPS com outra aplicacao ocupando `127.0.0.1:8001`, use por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
 
 ### Agendamento do scraper na VPS com systemd
 

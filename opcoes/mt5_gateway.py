@@ -7,7 +7,8 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
+from urllib.parse import urlencode
 
 import httpx
 
@@ -33,6 +34,16 @@ class Mt5GatewayConfig:
     key_id: str
     shared_secret: str
     timeout_seconds: float = 10.0
+    scopes: frozenset[str] = frozenset()
+
+
+def parse_gateway_scopes(raw: str | None) -> frozenset[str]:
+    values = {
+        item.strip()
+        for item in (raw or "").split(",")
+        if item and item.strip()
+    }
+    return frozenset(values)
 
 
 def load_gateway_config_from_env() -> Mt5GatewayConfig:
@@ -41,6 +52,7 @@ def load_gateway_config_from_env() -> Mt5GatewayConfig:
     key_id = (os.getenv("MT5_GATEWAY_KEY_ID") or "").strip()
     shared_secret = (os.getenv("MT5_GATEWAY_SHARED_SECRET") or "").strip()
     timeout_raw = (os.getenv("MT5_GATEWAY_TIMEOUT_SECONDS") or "10").strip()
+    scopes = parse_gateway_scopes(os.getenv("MT5_GATEWAY_SCOPES"))
     try:
         timeout_seconds = float(timeout_raw)
     except ValueError:
@@ -57,6 +69,7 @@ def load_gateway_config_from_env() -> Mt5GatewayConfig:
         key_id=key_id,
         shared_secret=shared_secret,
         timeout_seconds=max(timeout_seconds, 1.0),
+        scopes=scopes,
     )
 
 
@@ -93,9 +106,11 @@ def build_hmac_headers(
     path: str,
     query: str = "",
     body: bytes = b"",
+    timestamp: str | None = None,
+    nonce: str | None = None,
 ) -> dict[str, str]:
-    timestamp = str(int(time.time()))
-    nonce = uuid.uuid4().hex
+    timestamp = timestamp or str(int(time.time()))
+    nonce = nonce or uuid.uuid4().hex
     canonical_message = build_canonical_message(
         method=method,
         path=path,
@@ -123,6 +138,92 @@ def _json_bytes(payload: Mapping[str, Any] | None) -> bytes:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def _normalized_symbol(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _build_query_string(params: Mapping[str, Any] | None = None) -> str:
+    if not params:
+        return ""
+    pairs: list[tuple[str, str]] = []
+    for key, value in params.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        pairs.append((str(key), rendered))
+    return urlencode(pairs)
+
+
+def normalize_quotes_batch_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = payload.get("results")
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    normalized_items: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, Mapping):
+            continue
+        requested_symbol = _normalized_symbol(
+            raw_item.get("requested_symbol")
+            or raw_item.get("symbol")
+            or raw_item.get("requested")
+            or raw_item.get("request_symbol")
+        )
+        quote_payload = raw_item.get("quote")
+        error_payload = raw_item.get("error")
+        is_ok = raw_item.get("ok")
+
+        if isinstance(quote_payload, Mapping):
+            item = dict(quote_payload)
+            item["requested_symbol"] = _normalized_symbol(
+                item.get("requested_symbol") or requested_symbol or item.get("symbol")
+            )
+            item["symbol"] = _normalized_symbol(item.get("symbol") or requested_symbol)
+            item["ok"] = True if is_ok is None else bool(is_ok)
+            normalized_items.append(item)
+            continue
+
+        if is_ok is False or isinstance(error_payload, Mapping):
+            item = dict(raw_item)
+            item["requested_symbol"] = requested_symbol
+            item["symbol"] = _normalized_symbol(item.get("symbol") or requested_symbol)
+            item["ok"] = False
+            if not isinstance(error_payload, Mapping):
+                item["error"] = {"message": str(error_payload or "Quote indisponivel.")}
+            normalized_items.append(item)
+            continue
+
+        item = dict(raw_item)
+        item["requested_symbol"] = _normalized_symbol(
+            item.get("requested_symbol") or requested_symbol or item.get("symbol")
+        )
+        item["symbol"] = _normalized_symbol(item.get("symbol") or requested_symbol)
+        item["ok"] = True if is_ok is None else bool(is_ok)
+        normalized_items.append(item)
+
+    success_count = sum(1 for item in normalized_items if item.get("ok", True))
+    error_count = len(normalized_items) - success_count
+    normalized = dict(payload)
+    normalized["items"] = normalized_items
+    normalized["count"] = len(normalized_items)
+    normalized["success_count"] = success_count
+    normalized["error_count"] = error_count
+    normalized["partial"] = bool(payload.get("partial")) or (success_count > 0 and error_count > 0)
+    return normalized
+
+
+def iter_successful_quote_items(payload: Mapping[str, Any]) -> Iterable[dict[str, Any]]:
+    normalized = normalize_quotes_batch_payload(payload)
+    for item in normalized.get("items", []):
+        if isinstance(item, dict) and item.get("ok", True):
+            yield item
+
+
 class Mt5GatewayClient:
     def __init__(
         self,
@@ -145,9 +246,30 @@ class Mt5GatewayClient:
         response = self._client.get("/health")
         return self._decode_response(response)
 
+    def health(self) -> dict[str, Any]:
+        return self.get_health()
+
+    def ready(self) -> dict[str, Any]:
+        response = self._client.get("/ready")
+        return self._decode_response(response)
+
+    def has_scope(self, scope: str) -> bool:
+        configured_scopes = self.config.scopes
+        return not configured_scopes or scope in configured_scopes
+
+    def _require_scope(self, scope: str) -> None:
+        if self.has_scope(scope):
+            return
+        raise Mt5GatewayError(
+            f"A chave configurada nao possui o escopo obrigatorio: {scope}.",
+            status_code=403,
+            payload={"error": {"message": "scope_forbidden", "scope": scope}},
+        )
+
     def get_quote(self, symbol: str, *, include_raw: bool = False) -> dict[str, Any]:
-        path = f"/internal/v1/quotes/{symbol.strip().upper()}"
-        query = f"include_raw={'true' if include_raw else 'false'}"
+        self._require_scope("quotes:read")
+        path = f"/internal/v1/quotes/{_normalized_symbol(symbol)}"
+        query = _build_query_string({"include_raw": include_raw})
         response = self._request("GET", path, query=query)
         return self._decode_response(response)
 
@@ -157,23 +279,33 @@ class Mt5GatewayClient:
         *,
         include_raw: bool = False,
     ) -> dict[str, Any]:
+        self._require_scope("quotes:read")
         path = "/internal/v1/quotes/batch"
         payload = {
-            "symbols": [symbol.strip().upper() for symbol in symbols],
+            "symbols": [_normalized_symbol(symbol) for symbol in symbols],
             "include_raw": include_raw,
         }
         response = self._request("POST", path, json_payload=payload)
-        return self._decode_response(response)
+        decoded = self._decode_response(response)
+        return normalize_quotes_batch_payload(decoded)
 
     def search_symbols(self, query: str, *, limit: int = 20) -> dict[str, Any]:
+        self._require_scope("symbols:read")
         text = query.strip().upper()
         path = "/internal/v1/symbols/search"
-        query_string = f"q={text}&limit={int(limit)}"
+        query_string = _build_query_string({"q": text, "limit": int(limit)})
         response = self._request("GET", path, query=query_string)
         return self._decode_response(response)
 
     def preview_order(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_scope("orders:preview")
         path = "/internal/v1/orders/preview"
+        response = self._request("POST", path, json_payload=dict(payload))
+        return self._decode_response(response)
+
+    def send_order(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_scope("orders:send")
+        path = "/internal/v1/orders"
         response = self._request("POST", path, json_payload=dict(payload))
         return self._decode_response(response)
 
@@ -254,13 +386,20 @@ class AsyncMt5GatewayClient:
         *,
         include_raw: bool = False,
     ) -> dict[str, Any]:
+        if self.config.scopes and "quotes:read" not in self.config.scopes:
+            raise Mt5GatewayError(
+                "A chave configurada nao possui o escopo obrigatorio: quotes:read.",
+                status_code=403,
+                payload={"error": {"message": "scope_forbidden", "scope": "quotes:read"}},
+            )
         path = "/internal/v1/quotes/batch"
         payload = {
-            "symbols": [symbol.strip().upper() for symbol in symbols],
+            "symbols": [_normalized_symbol(symbol) for symbol in symbols],
             "include_raw": include_raw,
         }
         response = await self._request("POST", path, json_payload=payload)
-        return Mt5GatewayClient._decode_response(response)
+        decoded = Mt5GatewayClient._decode_response(response)
+        return normalize_quotes_batch_payload(decoded)
 
     async def _request(
         self,
@@ -295,6 +434,9 @@ __all__ = [
     "Mt5GatewayError",
     "build_canonical_message",
     "build_hmac_headers",
+    "iter_successful_quote_items",
     "load_gateway_config_from_env",
+    "normalize_quotes_batch_payload",
+    "parse_gateway_scopes",
     "sha256_hex",
 ]

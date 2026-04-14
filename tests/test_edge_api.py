@@ -8,24 +8,54 @@ from opcoes.edge import EdgeSettings, create_app
 class FakeGatewayClient:
     def __init__(self) -> None:
         self.batch_calls = 0
+        self.quote_calls = 0
+        self.send_calls = 0
 
     def close(self) -> None:
         return None
 
+    def get_quote(self, symbol: str, *, include_raw: bool = False) -> dict:
+        self.quote_calls += 1
+        return {
+            "requested_symbol": symbol,
+            "symbol": symbol,
+            "bid": 10.0,
+            "ask": 10.1,
+            "last": 10.05,
+        }
+
     def get_quotes_batch(self, symbols: list[str], *, include_raw: bool = False) -> dict:
         self.batch_calls += 1
+        items: list[dict] = []
+        for symbol in symbols:
+            if symbol == "FAIL3":
+                items.append(
+                    {
+                        "requested_symbol": symbol,
+                        "symbol": symbol,
+                        "ok": False,
+                        "error": {"code": "symbol_not_found", "message": "Simbolo nao encontrado."},
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "requested_symbol": symbol,
+                        "symbol": symbol,
+                        "bid": 10.0,
+                        "ask": 10.1,
+                        "last": 10.05,
+                        "ok": True,
+                    }
+                )
         return {
-            "count": len(symbols),
-            "items": [
-                {
-                    "requested_symbol": symbol,
-                    "symbol": symbol,
-                    "bid": 10.0,
-                    "ask": 10.1,
-                    "last": 10.05,
-                }
-                for symbol in symbols
-            ],
+            "count": len(items),
+            "success_count": sum(1 for item in items if item.get("ok", True)),
+            "error_count": sum(1 for item in items if not item.get("ok", True)),
+            "partial": any(not item.get("ok", True) for item in items) and any(
+                item.get("ok", True) for item in items
+            ),
+            "items": items,
         }
 
     def search_symbols(self, query: str, *, limit: int = 20) -> dict:
@@ -37,6 +67,10 @@ class FakeGatewayClient:
 
     def preview_order(self, payload: dict) -> dict:
         return {"requested_symbol": payload["symbol"], "check_completed": True}
+
+    def send_order(self, payload: dict) -> dict:
+        self.send_calls += 1
+        return {"requested_symbol": payload["symbol"], "accepted": True}
 
 
 class FakeAsyncGatewayClient:
@@ -50,6 +84,9 @@ class FakeAsyncGatewayClient:
         self.batch_calls += 1
         return {
             "count": len(symbols),
+            "success_count": len(symbols),
+            "error_count": 0,
+            "partial": False,
             "items": [
                 {
                     "requested_symbol": symbol,
@@ -57,6 +94,7 @@ class FakeAsyncGatewayClient:
                     "bid": 20.0,
                     "ask": 20.1,
                     "last": 20.05,
+                    "ok": True,
                 }
                 for symbol in symbols
             ],
@@ -88,7 +126,7 @@ def test_edge_quotes_require_bearer_token() -> None:
     assert response.status_code == 401
 
 
-def test_edge_quotes_use_cache() -> None:
+def test_edge_single_quote_uses_gateway_and_cache() -> None:
     client, gateway_client, _async_gateway_client = build_app()
     headers = {"Authorization": "Bearer token-123"}
 
@@ -97,7 +135,34 @@ def test_edge_quotes_use_cache() -> None:
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert gateway_client.quote_calls == 1
+    assert gateway_client.batch_calls == 0
+
+
+def test_edge_batch_keeps_partial_items_and_caches_only_successes() -> None:
+    client, gateway_client, _async_gateway_client = build_app()
+    headers = {"Authorization": "Bearer token-123"}
+
+    response = client.post(
+        "/v1/quotes/batch",
+        headers=headers,
+        json={"symbols": ["PETR4", "FAIL3"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["success_count"] == 1
+    assert payload["error_count"] == 1
+    assert payload["partial"] is True
+    assert payload["items"][0]["requested_symbol"] == "PETR4"
+    assert payload["items"][1]["requested_symbol"] == "FAIL3"
+    assert payload["items"][1]["ok"] is False
+
+    single = client.get("/v1/quotes/PETR4", headers=headers)
+    assert single.status_code == 200
     assert gateway_client.batch_calls == 1
+    assert gateway_client.quote_calls == 0
 
 
 def test_edge_websocket_streams_snapshot() -> None:

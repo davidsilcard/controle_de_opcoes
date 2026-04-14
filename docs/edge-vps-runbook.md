@@ -23,8 +23,9 @@ DATABASE_URL=postgresql://usuario:senha@host.docker.internal:5432/mercado_opcoes
 OPCOES_SECRET_KEY=troque-por-uma-chave-longa-e-forte
 
 MT5_GATEWAY_BASE_URL=http://100.64.0.10:8000
-MT5_GATEWAY_KEY_ID=edge-1
+MT5_GATEWAY_KEY_ID=edge=1
 MT5_GATEWAY_SHARED_SECRET=troque-por-um-segredo-forte
+MT5_GATEWAY_SCOPES=quotes:read,symbols:read,orders:preview
 MT5_GATEWAY_TIMEOUT_SECONDS=10
 
 OPCOES_EDGE_API_TOKENS=excel=troque-este-token,app=troque-outro-token
@@ -56,6 +57,11 @@ export OPCOES_EDGE_BIND=127.0.0.1:8001:8001
 deploy/scripts/opcoes-compose-vps.sh up -d --build
 docker compose logs -f edge
 ```
+
+Observacao:
+
+- o helper `deploy/scripts/opcoes-compose-vps.sh` agora exporta `OPCOES_EDGE_BIND`
+- isso permite deixar a porta do `edge` configurada no ambiente da VPS, por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
 
 ## Caddy
 
@@ -102,6 +108,7 @@ sudo systemctl reload caddy
 - mantenha o relogio do Windows e da VPS sincronizados por NTP
 - nao exponha o `mt5-gateway` diretamente na internet
 - mantenha `MT5_ENABLE_ORDER_SEND=0` no Windows ate fechar o fluxo de ordens
+- `GET /ready` do gateway agora so sinaliza prontidao e conexao do MT5; nao espere mais detalhes sensiveis de conta/terminal nesse endpoint
 - a edge usa cache em memoria; em multi-worker esse cache nao e compartilhado
 - para WebSocket, prefira uma unica instancia/worker da edge
 
@@ -115,5 +122,6 @@ sudo systemctl reload caddy
 6. publicar `opcoes.moven.cloud` e `api.moven.cloud` no Caddy
 7. testar:
    - `https://api.moven.cloud/health`
+   - `http://100.64.0.10:8000/ready`
    - `POST /v1/ws/token`
    - `GET /v1/quotes/PETR4`
