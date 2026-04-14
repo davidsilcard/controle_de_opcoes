@@ -93,6 +93,97 @@ CSRF_FIELD_NAME = "_csrf_token"
 LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
+def _looks_like_equity_ticker_global(ticker: str | None) -> bool:
+    text = (ticker or "").strip().upper()
+    if not text:
+        return False
+    return re.fullmatch(r"[A-Z]{4}\d{1,2}", text) is not None
+
+
+def _inventory_key_for_position_global(pos: dict[str, Any]) -> str:
+    ticker = (pos.get("ticker") or "").strip().upper()
+    underlying = (pos.get("underlying") or "").strip().upper()
+    strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+    trade_type = (pos.get("trade_type") or "").strip().lower()
+    side = (pos.get("side") or "").strip().lower()
+    if not ticker:
+        return ""
+    if side == "short":
+        if infer_option_type(ticker) == "CALL" and strategy_tag == "covered_call":
+            return underlying or ""
+        return ""
+    if strategy_tag == "ranking":
+        return ""
+    if strategy_tag == "estoque" or trade_type == "stock":
+        return underlying or ticker
+    if underlying and ticker == underlying:
+        return underlying
+    if _looks_like_equity_ticker_global(ticker) and not _is_option_ticker_global(ticker):
+        return underlying or ticker
+    return ""
+
+
+def _is_option_ticker_global(ticker: str | None) -> bool:
+    return infer_option_type(ticker or "") in {"CALL", "PUT"}
+
+
+def _is_inventory_stock_position_global(pos: dict[str, Any]) -> bool:
+    ticker = (pos.get("ticker") or "").strip().upper()
+    if not ticker or _is_option_ticker_global(ticker):
+        return False
+    side = (pos.get("side") or "").strip().lower()
+    if side == "short":
+        return False
+    strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+    trade_type = (pos.get("trade_type") or "").strip().lower()
+    if strategy_tag == "ranking":
+        return False
+    underlying = (pos.get("underlying") or "").strip().upper()
+    if strategy_tag == "estoque" or trade_type == "stock":
+        return True
+    if underlying and ticker == underlying:
+        return True
+    if _looks_like_equity_ticker_global(ticker) and not underlying:
+        return True
+    return False
+
+
+def _hide_replaced_legacy_stock_positions_global(
+    positions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    explicit_holdings = {
+        ((item.get("ticker") or "").strip().upper(), bool(item.get("is_simulated") or 0))
+        for item in list_holdings()
+    }
+    if not explicit_holdings:
+        return positions
+
+    visible: list[dict[str, Any]] = []
+    for pos in positions:
+        key = _inventory_key_for_position_global(pos)
+        mode = bool(pos.get("is_simulated") or 0)
+        if (
+            key
+            and _is_inventory_stock_position_global(pos)
+            and (pos.get("status") or "").strip().lower() == "open"
+            and (key.strip().upper(), mode) in explicit_holdings
+        ):
+            continue
+        visible.append(pos)
+    return visible
+
+
+def _build_inventory_overview_global(
+    positions: list[dict[str, Any]],
+    *,
+    underlying_filter: str | None = None,
+) -> list[dict[str, Any]]:
+    return list_holding_snapshots(
+        underlying_filter=underlying_filter,
+        positions_open=positions,
+    )
+
+
 def _build_positions_page_context(
     *,
     ticker_contains: str,
@@ -154,7 +245,7 @@ def _build_positions_page_context(
         pos["underlying_market_status_label"] = market_status_label(
             pos.get("underlying_market_status")
         )
-    positions_view = _hide_replaced_legacy_stock_positions(positions)
+    positions_view = _hide_replaced_legacy_stock_positions_global(positions)
     realized_summary = summarize_realized_positions(
         ticker_contains=ticker_contains or None,
         underlying_contains=underlying_contains or None,
@@ -164,7 +255,7 @@ def _build_positions_page_context(
         selected_year=result_year,
         selected_month=result_month,
     )
-    inventory_summary = _build_inventory_overview(positions)
+    inventory_summary = _build_inventory_overview_global(positions)
     return {
         "positions": positions_view,
         "filter_ticker": ticker_contains,
@@ -184,7 +275,7 @@ def _build_covered_call_page_context(
     market_data_client: MarketDataClient,
 ) -> dict[str, Any]:
     ctx = get_covered_call_context(args, market_data_client=market_data_client)
-    ctx["inventory_summary"] = _build_inventory_overview(
+    ctx["inventory_summary"] = _build_inventory_overview_global(
         list_positions(include_closed=False),
         underlying_filter=ctx.get("underlying"),
     )
