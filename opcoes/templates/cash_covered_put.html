@@ -77,7 +77,7 @@
         <div class="small">
           A put {{ latest_assignment_summary.option_ticker }} foi encerrada em {{ latest_assignment_summary.assignment_date or '-' }}.
           O caixa recebeu um debito de R$ {{ "%.2f"|format((latest_assignment_summary.assignment_amount or 0)|abs) }}
-          e a aplicacao criou um lote de {{ latest_assignment_summary.stock_ticker }}
+          e a aplicacao atualizou o estoque consolidado de {{ latest_assignment_summary.stock_ticker }}
           com {{ latest_assignment_summary.stock_qty }} acoes
           {% if latest_assignment_summary.stock_avg_price is not none %}
             a R$ {{ "%.2f"|format(latest_assignment_summary.stock_avg_price) }}
@@ -90,7 +90,7 @@
           liquido R$ {{ "%.2f"|format(latest_assignment_summary.net_option_cash or 0.0) }}.
         </div>
         <div class="small mt-2">
-          Proximo passo: revise o lote em <a href="/covered-call?underlying={{ underlying }}">Covered Call</a>
+          Proximo passo: revise o estoque consolidado em <a href="/covered-call?underlying={{ underlying }}">Covered Call</a>
           ou <a href="/positions?underlying={{ underlying }}">Posicoes</a> e confira o reflexo em
           <a href="/audit?mode={{ 'simulated' if latest_assignment_summary.is_simulated else 'real' }}&include_closed=1">Auditoria</a>.
         </div>

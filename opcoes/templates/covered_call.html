@@ -114,6 +114,170 @@
         </div>
       </form>
 
+      {% if holding_error %}
+        <div class="alert alert-danger mb-4">{{ holding_error }}</div>
+      {% endif %}
+      {% if holding_notice %}
+        <div class="alert alert-success mb-4">{{ holding_notice }}</div>
+      {% endif %}
+
+      <div class="card mb-4 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1">Cadastro do estoque consolidado</h2>
+              <p class="text-muted small mb-0">
+                A covered call agora usa um único estoque por ativo e por modo. Informe a quantidade atual na corretora e o preço médio que o cliente deseja controlar.
+              </p>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-lg-6">
+              <form method="post" action="/holdings/upsert" class="border rounded p-3 h-100 bg-light-subtle">
+                {{ csrf_input() }}
+                <input type="hidden" name="underlying" value="{{ underlying }}">
+                <input type="hidden" name="is_simulated" value="0">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h3 class="h6 mb-0">Estoque real</h3>
+                  <span class="badge text-bg-success">Garantia oficial</span>
+                </div>
+                <div class="row g-2">
+                  <div class="col-sm-6">
+                    <label class="form-label small">Quantidade atual</label>
+                    <input name="quantity" type="number" min="0" class="form-control form-control-sm" value="{{ stock_real.shares_total }}">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label small">Preço médio informado</label>
+                    <input
+                      name="avg_price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      class="form-control form-control-sm"
+                      value="{% if stock_real.free_avg_price is not none %}{{ '%.2f'|format(stock_real.free_avg_price) }}{% endif %}"
+                    >
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small">Notas</label>
+                    <input name="notes" class="form-control form-control-sm" placeholder="Ex.: saldo conforme corretora">
+                  </div>
+                  <div class="col-12">
+                    <div class="small text-muted">
+                      Reservado agora: <strong>{{ stock_real.shares_covered }}</strong> ações.
+                      Livre para nova call: <strong>{{ stock_real.shares_free }}</strong>.
+                    </div>
+                  </div>
+                  <div class="col-12 text-end">
+                    <button class="btn btn-primary btn-sm" type="submit">Salvar estoque real</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div class="col-lg-6">
+              <form method="post" action="/holdings/upsert" class="border rounded p-3 h-100 bg-warning-subtle">
+                {{ csrf_input() }}
+                <input type="hidden" name="underlying" value="{{ underlying }}">
+                <input type="hidden" name="is_simulated" value="1">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h3 class="h6 mb-0">Estoque simulado</h3>
+                  <span class="badge text-bg-warning">Cenário</span>
+                </div>
+                <div class="row g-2">
+                  <div class="col-sm-6">
+                    <label class="form-label small">Quantidade atual</label>
+                    <input name="quantity" type="number" min="0" class="form-control form-control-sm" value="{{ stock_sim.shares_total }}">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label small">Preço médio informado</label>
+                    <input
+                      name="avg_price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      class="form-control form-control-sm"
+                      value="{% if stock_sim.free_avg_price is not none %}{{ '%.2f'|format(stock_sim.free_avg_price) }}{% endif %}"
+                    >
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small">Notas</label>
+                    <input name="notes" class="form-control form-control-sm" placeholder="Ex.: cenário para estudar rolagem">
+                  </div>
+                  <div class="col-12">
+                    <div class="small text-muted">
+                      Reservado agora: <strong>{{ stock_sim.shares_covered }}</strong> ações.
+                      Livre para nova call: <strong>{{ stock_sim.shares_free }}</strong>.
+                    </div>
+                  </div>
+                  <div class="col-12 text-end">
+                    <button class="btn btn-outline-dark btn-sm" type="submit">Salvar estoque simulado</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if inventory_summary %}
+        <div class="card mb-4 border-0 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
+                <p class="text-muted small mb-0">
+                  Visão operacional do estoque aberto para a covered call. O sistema usa o saldo livre para validar novas vendas e mantém o vínculo legado apenas para compatibilidade.
+                </p>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Ativo</th>
+                    <th>Modo</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Reservado</th>
+                    <th class="text-end">Livre</th>
+                    <th class="text-end">PM informado</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in inventory_summary %}
+                    <tr>
+                      <td class="fw-semibold">{{ item.ticker }}</td>
+                      <td>{% if item.is_simulated %}Simulado{% else %}Real{% endif %}</td>
+                      <td class="text-end">{{ item.shares_total }}</td>
+                      <td class="text-end">{{ item.shares_reserved }}</td>
+                      <td class="text-end">{{ item.shares_free }}</td>
+                      <td class="text-end">
+                        {% if item.avg_price is not none %}
+                          R$ {{ "%.2f"|format(item.avg_price) }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if item.coverage_status == 'insufficient' %}
+                          <span class="badge text-bg-danger">Reserva maior que estoque</span>
+                        {% elif item.price_status == 'review' %}
+                          <span class="badge text-bg-warning">PM a revisar</span>
+                        {% else %}
+                          <span class="badge text-bg-success">Ok</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="text-muted small mb-4">
+          Os quadros abaixo seguem a leitura legada por posições/lotes e ficam aqui apenas como apoio de compatibilidade.
+        </p>
+      {% endif %}
+
       <div class="row mb-4">
         <div class="col-md-4 mb-3 mb-md-0">
           <div class="card">
@@ -140,7 +304,7 @@
         </div>
         <div class="col-md-4">
           <div class="card">
-            <div class="card-header">Estoque {{ underlying }} (real)</div>
+            <div class="card-header">Estoque {{ underlying }} consolidado (real)</div>
             <div class="card-body">
               <div class="row">
                 <div class="col-4">
@@ -148,11 +312,11 @@
                   <div class="fs-5">{{ stock_real.shares_total }}</div>
                 </div>
                 <div class="col-4">
-                  <div class="text-muted small">Cobertas (calls)</div>
+                  <div class="text-muted small">Reservadas (calls)</div>
                   <div class="fs-5">{{ stock_real.shares_covered }}</div>
                 </div>
                 <div class="col-4">
-                  <div class="text-muted small">Livres p/ calls</div>
+                  <div class="text-muted small">Livres para nova venda</div>
                   <div class="fs-5">{{ stock_real.shares_free }}</div>
                 </div>
               </div>
@@ -181,7 +345,7 @@
         </div>
         <div class="col-md-4">
           <div class="card">
-            <div class="card-header">Estoque {{ underlying }} (simulado)</div>
+            <div class="card-header">Estoque {{ underlying }} consolidado (simulado)</div>
             <div class="card-body">
               <div class="row">
                 <div class="col-4">
@@ -189,11 +353,11 @@
                   <div class="fs-5">{{ stock_sim.shares_total }}</div>
                 </div>
                 <div class="col-4">
-                  <div class="text-muted small">Cobertas (calls)</div>
+                  <div class="text-muted small">Reservadas (calls)</div>
                   <div class="fs-5">{{ stock_sim.shares_covered }}</div>
                 </div>
                 <div class="col-4">
-                  <div class="text-muted small">Livres p/ calls</div>
+                  <div class="text-muted small">Livres para nova venda</div>
                   <div class="fs-5">{{ stock_sim.shares_free }}</div>
                 </div>
               </div>
@@ -307,7 +471,7 @@
         </div>
       </div>
 
-      <h2 class="h5 mt-4">Lotes de {{ underlying }} (real)</h2>
+      <h2 class="h5 mt-4">Lotes legados de {{ underlying }} (real)</h2>
       {% if not lots_real %}
         <p class="text-muted small">Nenhum lote de {{ underlying }} real cadastrado.</p>
       {% else %}
@@ -437,7 +601,7 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Lotes de {{ underlying }} (simulado)</h2>
+      <h2 class="h5 mt-4">Lotes legados de {{ underlying }} (simulado)</h2>
       {% if not lots_sim %}
         <p class="text-muted small">Nenhum lote de {{ underlying }} simulado cadastrado.</p>
       {% else %}
@@ -551,7 +715,7 @@
                           Expirou
                         </button>
                       </form>
-                      {% if pos.strike is not none and pos.parent_position_id is not none %}
+                      {% if pos.strike is not none and pos.id and pos.open_qty %}
                         <form method="post" action="/finance/callaway" class="d-inline">
                           {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
@@ -657,7 +821,7 @@
                           Expirou
                         </button>
                       </form>
-                      {% if pos.strike is not none and pos.parent_position_id is not none %}
+                      {% if pos.strike is not none and pos.id and pos.open_qty %}
                         <form method="post" action="/finance/callaway" class="d-inline">
                           {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
@@ -687,9 +851,9 @@
         Use esse painel como apoio para encontrar strikes/vencimentos para suas covered calls.
       </p>
       <div class="alert alert-info small">
-        Base de alvo = maior entre preço médio livre e spot.
+        Base de alvo = maior entre o preço médio informado do estoque e o spot.
         {% if sell_target.base_price is not none and sell_target.target_price is not none %}
-          Preço médio livre:
+          Preço médio do estoque:
           {% if sell_target.avg_free_price is not none %}R$ {{ "%.2f"|format(sell_target.avg_free_price) }}{% else %}-{% endif %}
           | Piso seguro de strike:
           {% if sell_target.strike_floor_price is not none %}R$ {{ "%.2f"|format(sell_target.strike_floor_price) }}{% else %}-{% endif %}
@@ -703,8 +867,8 @@
           Sem base suficiente para calcular a meta (faltam preço médio livre e spot).
         {% endif %}
         <div class="mt-2">
-          Proteção didática: a lista oculta calls com strike abaixo do maior preço de entrada livre do estoque,
-          para não sugerir uma venda coberta que possa travar saída nominal abaixo do custo de algum lote.
+          Proteção didática: a lista oculta calls com strike abaixo do maior preço de referência do estoque,
+          para não sugerir uma venda coberta que possa travar saída nominal abaixo do custo informado pelo cliente.
         </div>
       </div>
       {% if not suggestions %}

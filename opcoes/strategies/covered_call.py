@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List, Mapping, Tuple
 
 from .. import finance
+from ..holdings import list_holding_snapshots
 from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..settings import get_covered_call_settings, update_covered_call_settings
@@ -112,6 +113,7 @@ def _stock_reference_underlying(pos: Mapping[str, Any]) -> str:
 def _build_underlying_quick_filter(
     positions_open: List[Dict],
     current_underlying: str,
+    holding_snapshots: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     rows: Dict[str, Dict[str, Any]] = {}
 
@@ -159,6 +161,25 @@ def _build_underlying_quick_filter(
     if selected:
         _ensure_row(selected)
 
+    for snapshot in holding_snapshots or []:
+        ticker = (snapshot.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        item = _ensure_row(ticker)
+        if snapshot.get("is_simulated"):
+            item["qty_simulated"] = max(
+                int(item.get("qty_simulated") or 0),
+                int(snapshot.get("shares_total") or 0),
+            )
+        else:
+            item["qty_real"] = max(
+                int(item.get("qty_real") or 0),
+                int(snapshot.get("shares_total") or 0),
+            )
+        item["qty_total"] = int(item["qty_real"] + item["qty_simulated"])
+        if int(snapshot.get("shares_reserved") or 0) > 0:
+            item["has_open_calls"] = True
+
     ordered = sorted(
         rows.values(),
         key=lambda item: (
@@ -170,7 +191,12 @@ def _build_underlying_quick_filter(
     return ordered
 
 
-def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, Any], List[Dict], List[Dict]]:
+def _bova_coverage(
+    positions: List[Dict],
+    underlying: str,
+    *,
+    holding_snapshot: Dict[str, Any] | None = None,
+) -> Tuple[Dict[str, Any], List[Dict], List[Dict]]:
     """Replica a lógica original de _bova_coverage de web.py.
 
     - Lotes do ativo-objeto: referencia normalizada do lote == underlying
@@ -248,13 +274,23 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
 
     # Resumo agregado
     shares_total = sum(l["open_qty"] for l in lot_infos)
-    shares_covered = sum(l["covered"] for l in lot_infos)
-    shares_free = sum(l["free"] for l in lot_infos)
+    shares_covered = sum(int(c.get("open_qty") or c.get("qty") or 0) for c in call_positions)
+    shares_free = max(shares_total - shares_covered, 0)
 
     free_min = None
     free_max = None
-    free_sum = 0.0
-    if shares_free > 0:
+    free_avg = None
+    if holding_snapshot is not None and int(holding_snapshot.get("shares_total") or 0) > 0:
+        shares_total = int(holding_snapshot.get("shares_total") or 0)
+        shares_covered = int(holding_snapshot.get("shares_reserved") or 0)
+        shares_free = max(int(holding_snapshot.get("shares_free") or 0), 0)
+        avg_price = holding_snapshot.get("avg_price")
+        if avg_price is not None:
+            free_min = float(avg_price)
+            free_max = float(avg_price)
+            free_avg = float(avg_price)
+    elif shares_free > 0:
+        free_sum = 0.0
         for l in lot_infos:
             f = l["free"]
             if f <= 0:
@@ -265,7 +301,7 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
                 free_min = price
             if free_max is None or price > free_max:
                 free_max = price
-    free_avg = (free_sum / shares_free) if shares_free > 0 else None
+        free_avg = (free_sum / shares_free) if shares_free > 0 else None
 
     stock_summary: Dict[str, Any] = {
         "shares_total": int(shares_total),
@@ -282,9 +318,11 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
 def _call_cashflow_summaries(
     call_positions: List[Dict],
     lots: List[Dict],
+    *,
+    avg_cost_fallback: float | None = None,
 ) -> List[Dict]:
     total_shares = sum(l.get("open_qty") or 0 for l in lots)
-    avg_cost_global = None
+    avg_cost_global = avg_cost_fallback
     if total_shares > 0:
         cost_sum = sum((l.get("open_qty") or 0) * (l.get("entry_price") or 0.0) for l in lots)
         if cost_sum:
@@ -452,6 +490,7 @@ def calculate_covered_call_strategy(
     buyback_target_pct: float,
     target_upside_pct: float,
     only_target_hits: bool,
+    holding_snapshots: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     """
     Pure strategy logic for Covered Call.
@@ -460,8 +499,21 @@ def calculate_covered_call_strategy(
     positions_real = [p for p in positions_open if not p.get("is_simulated")]
     positions_simulated = [p for p in positions_open if p.get("is_simulated")]
 
-    stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
-    stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
+    holding_map = {
+        (str(item.get("ticker") or "").strip().upper(), bool(item.get("is_simulated"))): item
+        for item in (holding_snapshots or [])
+        if (item.get("ticker") or "").strip()
+    }
+    stock_real, lots_real, covered_real = _bova_coverage(
+        positions_real,
+        underlying,
+        holding_snapshot=holding_map.get((underlying, False)),
+    )
+    stock_sim, lots_sim, covered_sim = _bova_coverage(
+        positions_simulated,
+        underlying,
+        holding_snapshot=holding_map.get((underlying, True)),
+    )
 
     spot_price = _parse_float(quote.get("price") if quote else None)
     avg_free_price = stock_real.get("free_avg_price")
@@ -477,12 +529,24 @@ def calculate_covered_call_strategy(
     target_price = None
     if base_price is not None:
         target_price = base_price * (1.0 + (float(target_upside_pct or 0.0) / 100.0))
-    strike_floor_price = stock_real.get("free_max_price")
+    strike_floor_price = stock_real.get("free_avg_price")
+    if strike_floor_price is None:
+        strike_floor_price = stock_sim.get("free_avg_price")
+    if strike_floor_price is None:
+        strike_floor_price = stock_real.get("free_max_price")
     if strike_floor_price is None:
         strike_floor_price = stock_sim.get("free_max_price")
 
-    call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
-    call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
+    call_summary_real = _call_cashflow_summaries(
+        covered_real,
+        lots_real,
+        avg_cost_fallback=stock_real.get("free_avg_price"),
+    )
+    call_summary_sim = _call_cashflow_summaries(
+        covered_sim,
+        lots_sim,
+        avg_cost_fallback=stock_sim.get("free_avg_price"),
+    )
     covered_real = _apply_buyback_metrics(covered_real, buyback_target_pct=buyback_target_pct)
     covered_sim = _apply_buyback_metrics(covered_sim, buyback_target_pct=buyback_target_pct)
 
@@ -630,7 +694,15 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
 
     # IO / Data Fetching
     positions_open = list_positions(include_closed=False)
-    underlying_quick_filter = _build_underlying_quick_filter(positions_open, underlying)
+    holding_snapshots = list_holding_snapshots(
+        underlying_filter=underlying or None,
+        positions_open=positions_open,
+    )
+    underlying_quick_filter = _build_underlying_quick_filter(
+        positions_open,
+        underlying,
+        holding_snapshots,
+    )
     # We fetch rows here instead of inside the helper
     options_rows = fetch_latest_underlying_options(underlying=underlying)
     quote = fetch_latest_underlying_quote(underlying)
@@ -658,6 +730,7 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         buyback_target_pct=defaults.buyback_target_pct,
         target_upside_pct=target_upside_pct,
         only_target_hits=only_target_hits,
+        holding_snapshots=holding_snapshots,
     )
 
     # Visão financeira didática para cliente:

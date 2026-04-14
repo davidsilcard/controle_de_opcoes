@@ -103,6 +103,65 @@
         </div>
       </form>
 
+      {% if inventory_summary %}
+        <section class="mb-4">
+          <div class="card border-0 shadow-sm">
+            <div class="card-body">
+              <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
+                  <p class="text-muted small mb-0">
+                    Resumo visual do estoque aberto usado para orientar a covered call. A reserva vem das calls abertas e a linha de estoque continua sendo mantida pelo cliente.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Ativo</th>
+                      <th>Modo</th>
+                      <th class="text-end">Total</th>
+                      <th class="text-end">Reservado</th>
+                      <th class="text-end">Livre</th>
+                      <th class="text-end">PM informado</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in inventory_summary %}
+                      <tr>
+                        <td class="fw-semibold">{{ item.ticker }}</td>
+                        <td>{% if item.is_simulated %}Simulado{% else %}Real{% endif %}</td>
+                        <td class="text-end">{{ item.shares_total }}</td>
+                        <td class="text-end">{{ item.shares_reserved }}</td>
+                        <td class="text-end">{{ item.shares_free }}</td>
+                        <td class="text-end">
+                          {% if item.avg_price is not none %}
+                            R$ {{ "%.2f"|format(item.avg_price) }}
+                          {% else %}
+                            -
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if item.coverage_status == 'insufficient' %}
+                            <span class="badge text-bg-danger">Reserva maior que estoque</span>
+                          {% elif item.price_status == 'review' %}
+                            <span class="badge text-bg-warning">PM a revisar</span>
+                          {% else %}
+                            <span class="badge text-bg-success">Ok</span>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      {% endif %}
+
       <section class="mb-4">
         <div class="card border-0 shadow-sm">
           <div class="card-body">
@@ -389,17 +448,17 @@
                   </select>
                 </div>
                 <div class="col-md-3">
-                  <label class="form-label small">Lote pai (ID)</label>
+                  <label class="form-label small">Vínculo legado (ID)</label>
                   <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="opcional">
                   <div class="form-text">
-                    Em call coberta, informe aqui o ID do lote da acao que cobre a venda.
+                    Mantido por compatibilidade com posições antigas. A nova covered call usa o estoque consolidado do ativo.
                   </div>
                 </div>
                 <div class="col-12">
                   <div class="alert alert-warning py-2 small mb-0" role="alert">
                     Venda de call coberta: use <strong>Posicao = Vendida</strong>, <strong>Estrategia = Covered Call</strong>,
                     marque <strong>Registrar premio no caixa</strong> se quiser refletir o credito liquido, e informe o
-                    <strong>Lote pai (ID)</strong> da acao em garantia.
+                    <strong>estoque consolidado</strong> do ativo. O vínculo legado fica opcional.
                   </div>
                 </div>
                 <div class="col-12">
@@ -430,7 +489,7 @@
                 <th>Tipo</th>
                 <th>Posição</th>
                 <th>Estratégia</th>
-                <th>Lote pai</th>
+                <th>Vínculo legado</th>
                 <th>Simulado?</th>
                 <th>Data</th>
                 <th>Venc.</th>

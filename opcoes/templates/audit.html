@@ -53,6 +53,63 @@
         </div>
       </form>
 
+      {% if inventory_summary %}
+        <div class="card mb-4 border-0 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
+                <p class="text-muted small mb-0">
+                  Panorama de estoque aberto para conferir total, reserva e saldo livre. A leitura legada por lote continua aparecendo apenas como referência histórica.
+                </p>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Ativo</th>
+                    <th>Modo</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Reservado</th>
+                    <th class="text-end">Livre</th>
+                    <th class="text-end">PM informado</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in inventory_summary %}
+                    <tr>
+                      <td class="fw-semibold">{{ item.ticker }}</td>
+                      <td>{% if item.is_simulated %}Simulado{% else %}Real{% endif %}</td>
+                      <td class="text-end">{{ item.shares_total }}</td>
+                      <td class="text-end">{{ item.shares_reserved }}</td>
+                      <td class="text-end">{{ item.shares_free }}</td>
+                      <td class="text-end">
+                        {% if item.avg_price is not none %}
+                          R$ {{ "%.2f"|format(item.avg_price) }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if item.coverage_status == 'insufficient' %}
+                          <span class="badge text-bg-danger">Reserva maior que estoque</span>
+                        {% elif item.price_status == 'review' %}
+                          <span class="badge text-bg-warning">PM a revisar</span>
+                        {% else %}
+                          <span class="badge text-bg-success">Ok</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
       <div class="row g-3 mb-4">
         <div class="col-md-4">
           <div class="card h-100">
@@ -264,7 +321,7 @@
               <th class="text-end">Qtd</th>
               <th class="text-end">Entrada</th>
               <th class="text-end">Taxas</th>
-              <th>Lote gerado</th>
+              <th>Vínculo estoque/legado</th>
               <th class="text-end">Prêmio esp.</th>
               <th class="text-end">Prêmio caixa</th>
               <th class="text-end">Dif. prêmio</th>
@@ -441,7 +498,7 @@
 
       <p class="text-muted small">
         Este relatório separa o caixa da operação (`Prêmio + DARF + Recompra + Exercício`)
-        do resultado realizado fiscal da baixa da posição.
+        do resultado realizado fiscal da baixa da posição. O vínculo por lote segue como compatibilidade histórica; o estoque consolidado vira a referência operacional.
       </p>
     </div>
 

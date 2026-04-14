@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ..holdings import get_holding_snapshot, list_holding_events
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..utils import infer_option_type, parse_ptbr_number
 from .. import finance
@@ -162,17 +163,6 @@ def _build_latest_assignment_summary(
         is_simulated=is_simulated,
     )
 
-    children_by_parent: Dict[int, List[Dict[str, Any]]] = {}
-    for pos in positions_all:
-        parent_id = pos.get("parent_position_id")
-        if parent_id is None:
-            continue
-        try:
-            key = int(parent_id)
-        except (TypeError, ValueError):
-            continue
-        children_by_parent.setdefault(key, []).append(pos)
-
     candidates: List[Dict[str, Any]] = []
     for pos in positions_all:
         if not _is_put_option_position(pos):
@@ -193,29 +183,21 @@ def _build_latest_assignment_summary(
         if pos_id <= 0:
             continue
 
-        child_lots = [
-            child
-            for child in children_by_parent.get(pos_id, [])
-            if (child.get("ticker") or "").strip().upper() == underlying_norm
-        ]
-        stock_qty = 0
-        stock_cost = 0.0
-        stock_status = "aberto"
-        for child in child_lots:
-            try:
-                qty = int(child.get("qty") or 0)
-            except (TypeError, ValueError):
-                qty = 0
-            try:
-                price = float(child.get("entry_price") or 0.0)
-            except (TypeError, ValueError):
-                price = 0.0
-            stock_qty += qty
-            stock_cost += qty * price
-            if (child.get("status") or "").strip().lower() == "closed":
-                stock_status = "fechado"
-
-        avg_price = (stock_cost / stock_qty) if stock_qty > 0 else None
+        holding_events = list_holding_events(
+            ticker=underlying_norm,
+            event_type="PUT_ASSIGNMENT",
+            is_simulated=is_simulated,
+            related_position_id=pos_id,
+            limit=1,
+        )
+        latest_event = holding_events[0] if holding_events else None
+        stock_qty = int(latest_event.get("qty_delta") or 0) if latest_event else 0
+        avg_price = (
+            latest_event.get("price_reference")
+            if latest_event and latest_event.get("price_reference") is not None
+            else latest_event.get("avg_price_after") if latest_event else None
+        )
+        stock_status = "consolidado"
         sums = ledger_sums.get(pos_id, {})
         assignment_amount = sums.get(finance.TransactionType.ASSIGNMENT.value)
         premium_amount = sums.get(finance.TransactionType.PREMIUM.value)
@@ -223,6 +205,15 @@ def _build_latest_assignment_summary(
 
         if assignment_amount is None and stock_qty > 0 and avg_price is not None:
             assignment_amount = -round(stock_qty * avg_price, 2)
+
+        if stock_qty <= 0:
+            snapshot = get_holding_snapshot(
+                ticker=underlying_norm,
+                is_simulated=bool(pos.get("is_simulated")),
+            )
+            stock_qty = int(snapshot.get("shares_total") or 0)
+            if avg_price is None:
+                avg_price = snapshot.get("avg_price")
 
         candidates.append(
             {

@@ -4,6 +4,7 @@ import re
 import pytest
 
 from opcoes import finance, portfolio
+from opcoes.holdings import upsert_holding
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
 
@@ -245,6 +246,14 @@ def test_register_premium_ignores_non_option_ticker() -> None:
 def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
     _ensure_snapshot_tables()
 
+    upsert_holding(
+        ticker="TEST3",
+        quantity=300,
+        avg_price=10.0,
+        is_simulated=False,
+        notes="Estoque inicial para covered call",
+    )
+
     app = create_app()
     app.testing = True
     client = app.test_client()
@@ -261,7 +270,7 @@ def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
             "trade_type": "swing",
             "side": "long",
             "strategy_tag": "covered_call",
-            "parent_position_id": "27",
+            "parent_position_id": "",
             "record_premium": "1",
             "reserve_darf": "1",
             "is_simulated": "0",
@@ -274,7 +283,7 @@ def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
     pos = positions[0]
     assert pos["side"] == "short"
     assert pos["strategy_tag"] == "covered_call"
-    assert pos["parent_position_id"] == 27
+    assert pos["parent_position_id"] is None
 
     txs = [t for t in finance.get_transactions(limit=50) if t.position_id == pos["id"]]
     assert len(txs) == 2
@@ -282,6 +291,37 @@ def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
     darf = next(t for t in txs if t.type == finance.TransactionType.DARF)
     assert abs(premium.amount - 26.99) < 1e-6
     assert abs(darf.amount - (-4.05)) < 1e-6
+
+
+def test_add_covered_call_without_stock_is_blocked() -> None:
+    _ensure_snapshot_tables()
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    res = client.post(
+        "/positions/add",
+        data={
+            "ticker": "TESTC123",
+            "underlying": "TEST3",
+            "qty": "300",
+            "entry_price": "0.09",
+            "fees": "0.01",
+            "trade_date": "2026-03-10",
+            "trade_type": "swing",
+            "side": "short",
+            "strategy_tag": "covered_call",
+            "record_premium": "1",
+            "reserve_darf": "1",
+            "is_simulated": "0",
+        },
+    )
+    assert res.status_code in (302, 303)
+    assert "/covered-call?underlying=TEST3" in (res.headers.get("Location") or "")
+
+    positions = portfolio.list_positions(include_closed=True, ticker="TESTC123")
+    assert positions == []
 
 
 def test_covered_call_page_uses_stock_underlying_reference_for_mismatched_lot_ticker() -> None:

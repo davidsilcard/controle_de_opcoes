@@ -194,6 +194,17 @@ uv run python -m opcoes.cli position add --ticker BBASP226 --underlying BBAS3 --
 
 Depois do cadastro, recalcule o premio/DARF na tela de posicoes e valide em `/audit` se o premio liquido bate com a nota.
 
+Na interface, a tela `Covered Call` passou a destacar o estoque consolidado por ativo com total, reservado e livre. O campo de vinculacao legada continua disponivel apenas como compatibilidade historica para posicoes antigas, nao como referencia principal para novas vendas cobertas.
+
+Fluxo operacional novo para garantia de `Covered Call`:
+
+- o cliente nao precisa mais lancar compras separadas da mesma acao para montar a garantia.
+- a tela `Covered Call` agora tem um formulario proprio para salvar o `estoque consolidado` por ativo e por modo (`real` ou `simulado`).
+- o usuario informa manualmente `quantidade atual` e `preco medio`; a aplicacao usa esse saldo como fonte oficial da garantia.
+- novas calls cobertas sao bloqueadas quando a quantidade vendida ultrapassa o saldo livre, com mensagem explicando o motivo.
+- em `PUT` exercida, a aplicacao aumenta o estoque consolidado e sinaliza revisao do preco medio quando necessario.
+- em `CALL` exercida, a aplicacao reduz o estoque consolidado automaticamente e gera um historico fechado para manter a trilha de auditoria/resultado.
+
 Baixa e conferencia visual do resultado realizado:
 
 - na tela `/positions`, preencha `Data saida`, `Preco saida` e `Motivo`, depois clique em `Salvar`.
@@ -703,7 +714,9 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 - cadastro web de `covered_call`/`cash_put` agora normaliza a perna da opcao como `Vendida` no backend e reforca a orientacao do formulario para evitar registro incoerente.
 - painel de `covered_call` agora usa o ativo-base normalizado dos lotes em estoque, evitando sumir cobertura quando o ticker da acao foi digitado errado mas o `underlying` esta correto.
-- fluxo de PUT exercida agora destaca, na tela de `cash-covered-put`, o debito do exercicio, o lote de acoes gerado e os proximos passos de conferencia.
+- fluxo de `covered_call` agora usa estoque consolidado por ativo como referencia operacional, sem depender do `lote pai` para validar garantia.
+- fluxo de PUT exercida agora destaca, na tela de `cash-covered-put`, o debito do exercicio, a atualizacao do estoque consolidado e os proximos passos de conferencia.
+- exercicio de CALL agora baixa o estoque consolidado automaticamente e preserva historico fechado para auditoria fiscal.
 - inferencia de ticker agora nao confunde acoes como `BBAS3` com opcoes, evitando que lotes em estoque aparecam indevidamente na lista de `Cash-Covered Put`.
 - auditoria agora inclui o impacto de `ASSIGN` no caixa, reconcilia o lote criado no exercicio da PUT e mostra o liquido total da operacao incluindo exercicio.
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.

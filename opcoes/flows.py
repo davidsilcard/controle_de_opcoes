@@ -4,7 +4,12 @@ from typing import Optional
 
 from .db import db_transaction
 from .finance import TransactionType, add_transaction, sync_position_closure_effects
-from .portfolio import add_position, close_position, get_position, update_position
+from .holdings import (
+    HoldingValidationError,
+    apply_call_exercise_to_holding,
+    apply_put_assignment_to_holding,
+)
+from .portfolio import add_position, close_position, get_position
 from .utils import infer_option_type
 
 
@@ -46,18 +51,13 @@ def assign_put(
         sync_position_closure_effects(position_id=position_id, conn=conn)
 
         if pos:
-            add_position(
+            apply_put_assignment_to_holding(
                 ticker=pos["underlying"],
-                underlying=pos["underlying"],
-                trade_date=date,
                 qty=int(qty),
-                entry_price=float(strike),
-                fees=0.0,
-                trade_type="stock",
-                notes=f"Exercício da opção {pos['ticker']}",
+                strike=float(strike),
+                date=date,
                 is_simulated=is_simulated,
-                parent_position_id=position_id,
-                strategy_tag="covered_call",
+                related_position_id=position_id,
                 conn=conn,
             )
 
@@ -90,80 +90,51 @@ def callaway(
         if qty <= 0 or strike is None:
             raise FlowError("Quantidade ou strike inválido.", underlying=underlying)
 
-        lot_id = call_pos.get("parent_position_id")
-        if lot_id is None:
-            raise FlowError("Sem vínculo com lote.", underlying=underlying)
-
-        lot_pos = get_position(int(lot_id), conn=conn)
-        if not lot_pos:
-            raise FlowError("Lote não encontrado.", underlying=underlying)
-
-        if (lot_pos.get("status") or "").strip().lower() != "open":
-            raise FlowError("Lote não está aberto.", underlying=underlying)
-
-        if bool(lot_pos.get("is_simulated") or 0) != is_simulated:
-            raise FlowError("Modo (real/simulado) divergente.", underlying=underlying)
-
-        lot_ticker = (lot_pos.get("ticker") or "").strip().upper()
-        if underlying and lot_ticker and lot_ticker != underlying:
-            raise FlowError("Underlying divergente.", underlying=underlying)
-
-        try:
-            lot_open_qty = int(lot_pos.get("open_qty") or lot_pos.get("qty") or 0)
-        except (TypeError, ValueError):
-            lot_open_qty = 0
-
-        if lot_open_qty < qty:
-            raise FlowError("Quantidade do lote insuficiente.", underlying=underlying)
-
         try:
             strike_val = float(strike)
         except (TypeError, ValueError):
             raise FlowError("Strike inválido.", underlying=underlying)
-
-        if lot_open_qty == qty:
-            close_position(
-                position_id=int(lot_id),
-                exit_date=date,
-                exit_price=strike_val,
-                exit_reason="Exercício",
+        try:
+            holding_result = apply_call_exercise_to_holding(
+                ticker=underlying,
+                qty=qty,
+                strike=strike_val,
+                date=date,
+                is_simulated=is_simulated,
+                related_position_id=position_id,
                 conn=conn,
             )
-        else:
-            existing_partial_qty = int(lot_pos.get("partial_qty") or 0)
-            existing_partial_price = lot_pos.get("partial_price")
-            total_qty = int(lot_pos.get("qty") or 0)
-            new_partial_qty = existing_partial_qty + qty
-            if new_partial_qty > total_qty:
-                raise FlowError("Quantidade parcial excede lote.", underlying=underlying)
+        except HoldingValidationError as exc:
+            raise FlowError(str(exc), underlying=underlying) from exc
 
-            new_partial_price = strike_val
-            if existing_partial_qty > 0 and existing_partial_price is not None:
-                try:
-                    new_partial_price = (
-                        (float(existing_partial_price) * existing_partial_qty) + (strike_val * qty)
-                    ) / new_partial_qty
-                except Exception:
-                    new_partial_price = strike_val
-
-            update_position(
-                position_id=int(lot_id),
-                partial_qty=new_partial_qty,
-                partial_price=float(new_partial_price),
-                partial_date=date,
-                exit_reason="Exercício",
-                conn=conn,
+        consumed_avg_price = holding_result.get("consumed_avg_price")
+        if consumed_avg_price is None:
+            raise FlowError(
+                "Preco medio do estoque consolidado indisponivel para registrar o exercicio.",
+                underlying=underlying,
             )
-            if new_partial_qty == total_qty:
-                close_position(
-                    position_id=int(lot_id),
-                    exit_date=date,
-                    exit_price=strike_val,
-                    exit_reason="Exercício",
-                    conn=conn,
-                )
-
-        sync_position_closure_effects(position_id=int(lot_id), conn=conn)
+        stock_history_id = add_position(
+            ticker=underlying,
+            underlying=underlying,
+            trade_date=date,
+            qty=int(qty),
+            entry_price=float(consumed_avg_price or 0.0),
+            fees=0.0,
+            trade_type="stock",
+            side="long",
+            notes=f"Baixa automática do estoque consolidado no exercício da call {call_pos.get('ticker')}",
+            is_simulated=is_simulated,
+            strategy_tag="covered_call",
+            conn=conn,
+        )
+        close_position(
+            position_id=stock_history_id,
+            exit_date=date,
+            exit_price=strike_val,
+            exit_reason="Exercício",
+            conn=conn,
+        )
+        sync_position_closure_effects(position_id=stock_history_id, conn=conn)
 
         close_position(
             position_id=position_id,

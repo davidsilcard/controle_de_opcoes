@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 from secrets import compare_digest, token_urlsafe
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from flask import Flask, g, redirect, render_template, request, session, url_for
@@ -67,6 +67,14 @@ from .strategies import (
     get_ranking_context,
 )
 from .flows import FlowError, assign_put, callaway
+from .holdings import (
+    HoldingValidationError,
+    get_holding_snapshot,
+    list_holding_events,
+    list_holding_snapshots,
+    list_holdings,
+    upsert_holding,
+)
 from . import finance, darf
 from .tax import (
     build_position_tax_events,
@@ -572,6 +580,12 @@ def create_app() -> Flask:
     @app.route("/covered-call")
     def covered_call() -> str:
         ctx = get_covered_call_context(request.args)
+        ctx["inventory_summary"] = _build_inventory_overview(
+            list_positions(include_closed=False),
+            underlying_filter=ctx.get("underlying"),
+        )
+        ctx["holding_notice"] = (request.args.get("holding_notice") or "").strip()
+        ctx["holding_error"] = (request.args.get("holding_error") or "").strip()
         return render_template("covered_call.html", **ctx)
 
     @app.route("/cash-covered-put")
@@ -829,7 +843,16 @@ def create_app() -> Flask:
         strike = _parse_form_float(form.get("strike"))
         qty = int(form.get("qty"))
         date = form.get("date") or datetime.date.today().isoformat()
-        assign_put(position_id=position_id, strike=strike, qty=qty, date=date)
+        try:
+            assign_put(position_id=position_id, strike=strike, qty=qty, date=date)
+        except HoldingValidationError:
+            pos = get_position(position_id)
+            underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
+            return redirect(
+                url_for("cash_covered_put", underlying=underlying)
+                if underlying
+                else url_for("cash_covered_put")
+            )
         return redirect(url_for("cash_covered_put"))
 
     @app.post("/finance/callaway")
@@ -1203,6 +1226,7 @@ def create_app() -> Flask:
         for pos in positions:
             pos_id = pos.get("id")
             pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
+        positions_view = _hide_replaced_legacy_stock_positions(positions)
         realized_summary = summarize_realized_positions(
             ticker_contains=ticker_contains or None,
             underlying_contains=underlying_contains or None,
@@ -1212,9 +1236,10 @@ def create_app() -> Flask:
             selected_year=result_year,
             selected_month=result_month,
         )
+        inventory_summary = _build_inventory_overview(positions)
         return render_template(
             "positions.html",
-            positions=positions,
+            positions=positions_view,
             filter_ticker=ticker_contains,
             filter_underlying=underlying_contains,
             filter_strategy_tag=strategy_tag,
@@ -1222,6 +1247,7 @@ def create_app() -> Flask:
             filter_status=status,
             filter_is_simulated=is_simulated_raw,
             realized_summary=realized_summary,
+            inventory_summary=inventory_summary,
             next_url=next_url,
         )
 
@@ -1245,16 +1271,7 @@ def create_app() -> Flask:
                 p for p in positions_all if bool(p.get("is_simulated")) == is_simulated
             ]
 
-        children_by_parent: dict[int, list[dict]] = {}
-        for pos in positions_all:
-            parent_id = pos.get("parent_position_id")
-            if parent_id is None:
-                continue
-            try:
-                key = int(parent_id)
-            except (TypeError, ValueError):
-                continue
-            children_by_parent.setdefault(key, []).append(pos)
+        inventory_summary = _build_inventory_overview(positions_all)
 
         ledger_sums = finance.get_ledger_sums_by_position(
             types=[
@@ -1315,6 +1332,7 @@ def create_app() -> Flask:
             status_norm = (pos.get("status") or "").strip().lower()
             exit_price_raw = pos.get("exit_price")
             exit_price = float(exit_price_raw) if exit_price_raw is not None else None
+            is_simulated_pos = bool(pos.get("is_simulated"))
 
             expected_premium = None
             expected_darf = None
@@ -1347,24 +1365,50 @@ def create_app() -> Flask:
                     and status_norm == "closed"
                     and "exerc" in ((pos.get("exit_reason") or "").strip().lower())
                 ):
-                    child_positions = children_by_parent.get(pid, [])
-                    stock_children = [
-                        child
-                        for child in child_positions
-                        if (child.get("ticker") or "").strip().upper()
-                        == (underlying or "").strip().upper()
-                    ]
-                    if stock_children:
-                        total_stock_cost = 0.0
-                        for child in stock_children:
-                            child_qty = int(child.get("qty") or 0)
-                            child_price = float(child.get("entry_price") or 0.0)
-                            assignment_stock_qty += child_qty
-                            total_stock_cost += child_qty * child_price
-                        if assignment_stock_qty > 0:
-                            assignment_stock_ticker = (underlying or "").strip().upper()
-                            assignment_stock_price = total_stock_cost / assignment_stock_qty
-                            expected_assignment = -round(total_stock_cost, 2)
+                    holding_events = list_holding_events(
+                        ticker=underlying,
+                        event_type="PUT_ASSIGNMENT",
+                        is_simulated=is_simulated_pos,
+                        related_position_id=pid,
+                        limit=1,
+                    )
+                    if holding_events:
+                        event = holding_events[0]
+                        assignment_stock_qty = int(event.get("qty_delta") or 0)
+                        assignment_stock_ticker = event.get("ticker") or underlying
+                        assignment_stock_price = (
+                            event.get("price_reference")
+                            if event.get("price_reference") is not None
+                            else event.get("avg_price_after")
+                        )
+                        if (
+                            assignment_stock_qty > 0
+                            and assignment_stock_price is not None
+                        ):
+                            expected_assignment = -round(
+                                float(assignment_stock_price) * assignment_stock_qty,
+                                2,
+                            )
+                    else:
+                        matching_inventory = [
+                            item
+                            for item in inventory_summary
+                            if item.get("ticker") == (underlying or "").strip().upper()
+                            and bool(item.get("is_simulated")) == is_simulated_pos
+                        ]
+                        if matching_inventory:
+                            matched = matching_inventory[0]
+                            assignment_stock_qty = int(matched.get("shares_total") or 0)
+                            assignment_stock_ticker = matched.get("ticker")
+                            assignment_stock_price = matched.get("avg_price")
+                            if (
+                                assignment_stock_qty > 0
+                                and assignment_stock_price is not None
+                            ):
+                                expected_assignment = -round(
+                                    float(assignment_stock_price) * assignment_stock_qty,
+                                    2,
+                                )
 
             actual_premium = ledger_sums.get(pid, {}).get(
                 finance.TransactionType.PREMIUM.value
@@ -1544,6 +1588,7 @@ def create_app() -> Flask:
             mode=mode,
             include_closed=include_closed,
             orphan_rows=orphan_rows,
+            inventory_summary=inventory_summary,
         )
 
     @app.post("/positions/add")
@@ -1574,6 +1619,24 @@ def create_app() -> Flask:
             side=side_raw,
             strategy_tag=strategy_tag_raw,
         )
+        try:
+            _validate_covered_call_stock(
+                ticker=ticker,
+                underlying=underlying,
+                qty=qty,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status="open",
+                is_simulated=is_simulated,
+            )
+        except HoldingValidationError as exc:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=exc.ticker or underlying or ticker,
+                    holding_error=str(exc),
+                )
+            )
         if fees_input:
             fees = _parse_form_float(fees_input)
         else:
@@ -1812,6 +1875,30 @@ def create_app() -> Flask:
             exit_date = None
             exit_price = None
             exit_reason = None
+        try:
+            persisted_pos = get_position(position_id)
+            _validate_covered_call_stock(
+                ticker=ticker,
+                underlying=underlying,
+                qty=int(form["qty"]) if form.get("qty") else 0,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status=status or "open",
+                is_simulated=(
+                    form.get("is_simulated") == "1"
+                    if form.get("is_simulated") is not None
+                    else bool((persisted_pos or {}).get("is_simulated") or 0)
+                ),
+                current_position_id=position_id,
+            )
+        except HoldingValidationError as exc:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=exc.ticker or underlying or ticker,
+                    holding_error=str(exc),
+                )
+            )
         update_position(
             position_id=position_id,
             ticker=ticker or None,
@@ -1841,6 +1928,48 @@ def create_app() -> Flask:
         )
         finance.sync_position_closure_effects(position_id=position_id)
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
+
+    @app.post("/holdings/upsert")
+    def upsert_holding_view():
+        form = request.form
+        ticker = _resolve_underlying_for_position(
+            ticker=form.get("ticker") or form.get("underlying") or "",
+            underlying=form.get("underlying") or form.get("ticker") or "",
+        )
+        quantity = int(form.get("quantity") or 0)
+        avg_price = _parse_form_float(form.get("avg_price"))
+        is_simulated = form.get("is_simulated") == "1"
+        notes = (form.get("notes") or "").strip() or None
+        event_date = _parse_form_date(form.get("event_date")) or datetime.date.today().isoformat()
+        try:
+            snapshot = upsert_holding(
+                ticker=ticker,
+                quantity=quantity,
+                avg_price=avg_price,
+                is_simulated=is_simulated,
+                notes=notes,
+                event_date=event_date,
+            )
+        except HoldingValidationError as exc:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=exc.ticker or ticker,
+                    holding_error=str(exc),
+                )
+            )
+        mode_label = "simulado" if is_simulated else "real"
+        avg_display = float(snapshot.get("avg_price") or 0.0) if int(snapshot.get("shares_total") or 0) > 0 else 0.0
+        return redirect(
+            url_for(
+                "covered_call",
+                underlying=ticker,
+                holding_notice=(
+                    f"Estoque consolidado {mode_label} de {ticker} salvo: "
+                    f"{int(snapshot.get('shares_total') or 0)} acoes a PM R$ {avg_display:.2f}."
+                ),
+            )
+        )
 
     @app.post("/positions/delete/<int:position_id>")
     def delete_position_view(position_id: int):
@@ -1959,6 +2088,149 @@ def create_app() -> Flask:
         if not row:
             return None
         return float(parse_ptbr_number(row.get("last_strike")) or 0.0)
+
+    def _inventory_key_for_position(pos: dict[str, Any]) -> str:
+        ticker = (pos.get("ticker") or "").strip().upper()
+        underlying = (pos.get("underlying") or "").strip().upper()
+        strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+        trade_type = (pos.get("trade_type") or "").strip().lower()
+        side = (pos.get("side") or "").strip().lower()
+        if not ticker:
+            return ""
+        if side == "short":
+            if infer_option_type(ticker) == "CALL" and strategy_tag == "covered_call":
+                return underlying or ""
+            return ""
+        if strategy_tag == "ranking":
+            return ""
+        if strategy_tag == "estoque" or trade_type == "stock":
+            return underlying or ticker
+        if underlying and ticker == underlying:
+            return underlying
+        if _looks_like_equity_ticker(ticker) and not _is_option_ticker(ticker):
+            return underlying or ticker
+        return ""
+
+    def _is_inventory_stock_position(pos: dict[str, Any]) -> bool:
+        ticker = (pos.get("ticker") or "").strip().upper()
+        if not ticker or _is_option_ticker(ticker):
+            return False
+        side = (pos.get("side") or "").strip().lower()
+        if side == "short":
+            return False
+        strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+        trade_type = (pos.get("trade_type") or "").strip().lower()
+        if strategy_tag == "ranking":
+            return False
+        underlying = (pos.get("underlying") or "").strip().upper()
+        if strategy_tag == "estoque" or trade_type == "stock":
+            return True
+        if underlying and ticker == underlying:
+            return True
+        if _looks_like_equity_ticker(ticker) and not underlying:
+            return True
+        return False
+
+    def _is_inventory_reserved_call(pos: dict[str, Any]) -> bool:
+        ticker = (pos.get("ticker") or "").strip().upper()
+        underlying = (pos.get("underlying") or "").strip().upper()
+        if not ticker or not underlying:
+            return False
+        if infer_option_type(ticker) != "CALL":
+            return False
+        if (pos.get("side") or "").strip().lower() != "short":
+            return False
+        if (pos.get("strategy_tag") or "").strip().lower() != "covered_call":
+            return False
+        return True
+
+    def _hide_replaced_legacy_stock_positions(
+        positions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        explicit_holdings = {
+            ((item.get("ticker") or "").strip().upper(), bool(item.get("is_simulated") or 0))
+            for item in list_holdings()
+        }
+        if not explicit_holdings:
+            return positions
+
+        visible: list[dict[str, Any]] = []
+        for pos in positions:
+            key = _inventory_key_for_position(pos)
+            mode = bool(pos.get("is_simulated") or 0)
+            if (
+                key
+                and _is_inventory_stock_position(pos)
+                and (pos.get("status") or "").strip().lower() == "open"
+                and (key.strip().upper(), mode) in explicit_holdings
+            ):
+                continue
+            visible.append(pos)
+        return visible
+
+    def _build_inventory_overview(
+        positions: list[dict[str, Any]],
+        *,
+        underlying_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return list_holding_snapshots(
+            underlying_filter=underlying_filter,
+            positions_open=positions,
+        )
+
+    def _validate_covered_call_stock(
+        *,
+        ticker: str,
+        underlying: str,
+        qty: int,
+        side: str | None,
+        strategy_tag: str | None,
+        status: str | None,
+        is_simulated: bool,
+        current_position_id: int | None = None,
+    ) -> None:
+        if (status or "open").strip().lower() != "open":
+            return
+        if (side or "").strip().lower() != "short":
+            return
+        if (strategy_tag or "").strip().lower() != "covered_call":
+            return
+        if infer_option_type(ticker or "") != "CALL":
+            return
+
+        normalized_underlying = (underlying or "").strip().upper()
+        if not normalized_underlying:
+            raise HoldingValidationError(
+                "Nao foi possivel identificar o ativo-base da covered call.",
+                ticker=normalized_underlying or None,
+            )
+
+        snapshot = get_holding_snapshot(
+            ticker=normalized_underlying,
+            is_simulated=is_simulated,
+            exclude_position_id=current_position_id,
+        )
+        total_qty = int(snapshot.get("shares_total") or 0)
+        free_qty = int(snapshot.get("shares_free") or 0)
+        reserved_qty = int(snapshot.get("shares_reserved") or 0)
+
+        if total_qty <= 0:
+            raise HoldingValidationError(
+                (
+                    f"Nao foi possivel cadastrar a covered call de {normalized_underlying}: "
+                    "primeiro informe o estoque consolidado do ativo na tela de Covered Call."
+                ),
+                ticker=normalized_underlying,
+            )
+        if int(qty or 0) > free_qty:
+            raise HoldingValidationError(
+                (
+                    f"Nao foi possivel salvar a venda coberta de {normalized_underlying}: "
+                    f"estoque total {total_qty}, ja reservado {reserved_qty}, livre {free_qty} e "
+                    f"quantidade da call {int(qty or 0)}. O cliente nao pode vender call a descoberto."
+                ),
+                ticker=normalized_underlying,
+            )
 
     def _auto_fees(
         *,
