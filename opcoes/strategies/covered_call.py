@@ -5,6 +5,13 @@ from typing import Any, Dict, List, Mapping, Tuple
 
 from .. import finance
 from ..holdings import list_holding_snapshots
+from ..market_data import (
+    MarketDataClient,
+    enrich_option_rows_with_live_market_data,
+    enrich_positions_with_live_market_data,
+    enrich_underlying_quote_with_live_market_data,
+    market_status_label,
+)
 from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..settings import get_covered_call_settings, update_covered_call_settings
@@ -613,6 +620,9 @@ def calculate_covered_call_strategy(
             "score_total": _parse_float(r["score_total"]),
             "premium_ref": premium,
             "premium_source": premium_source,
+            "market_status": r.get("market_status"),
+            "market_time_utc": r.get("market_time_utc"),
+            "underlying_market_status": r.get("underlying_market_status"),
             "effective_sale_price": effective_sale_price,
             "target_hit": target_hit,
             "strike_target_hit": strike_target_hit,
@@ -681,7 +691,11 @@ def calculate_covered_call_strategy(
     }
 
 
-def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
+def get_covered_call_context(
+    args: Mapping[str, Any],
+    *,
+    market_data_client: MarketDataClient | None = None,
+) -> Dict[str, Any]:
     defaults = get_covered_call_settings()
 
     underlying = (args.get("underlying") or defaults.underlying).strip().upper()
@@ -694,6 +708,10 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
 
     # IO / Data Fetching
     positions_open = list_positions(include_closed=False)
+    positions_open = enrich_positions_with_live_market_data(
+        positions_open,
+        client=market_data_client,
+    )
     holding_snapshots = list_holding_snapshots(
         underlying_filter=underlying or None,
         positions_open=positions_open,
@@ -705,7 +723,17 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     )
     # We fetch rows here instead of inside the helper
     options_rows = fetch_latest_underlying_options(underlying=underlying)
+    options_rows = enrich_option_rows_with_live_market_data(
+        options_rows,
+        underlying=underlying,
+        client=market_data_client,
+    )
     quote = fetch_latest_underlying_quote(underlying)
+    quote = enrich_underlying_quote_with_live_market_data(
+        quote,
+        underlying=underlying,
+        client=market_data_client,
+    )
 
     if args:
         update_covered_call_settings(
@@ -774,4 +802,15 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     ctx["simulated_monthly_premiums"] = simulated_monthly_premiums
     ctx["monthly_operational_result"] = monthly_operational_result
     ctx["simulated_monthly_operational_result"] = simulated_monthly_operational_result
+    if ctx.get("underlying_quote"):
+        ctx["underlying_quote"]["market_status_label"] = market_status_label(
+            ctx["underlying_quote"].get("market_status")
+        )
+    for key in ("covered_real", "covered_sim", "suggestions"):
+        for item in ctx.get(key, []) or []:
+            if isinstance(item, dict):
+                item["market_status_label"] = market_status_label(item.get("market_status"))
+                item["underlying_market_status_label"] = market_status_label(
+                    item.get("underlying_market_status")
+                )
     return ctx

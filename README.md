@@ -272,6 +272,29 @@ print(client.get_quote("PETR4"))
 print(client.get_quotes_batch(["PETR4", "VALE3"]))
 ```
 
+Camada interna de market data ao vivo:
+
+- a aplicacao web principal continua dona das formulas e das decisoes didaticas
+- o `mt5-gateway` segue como fonte bruta de mercado
+- o `opcoes-edge` distribui quotes com cache curto e autenticacao interna
+- `Posicoes` e `Covered Call` agora tentam usar quotes ao vivo no backend a cada carregamento da pagina
+- se o edge ou o gateway falharem, a UI volta para os snapshots sem quebrar a tela
+
+Variaveis opcionais para a camada live do backend:
+
+```bash
+OPCOES_EDGE_BASE_URL=http://127.0.0.1:8011
+OPCOES_MARKET_DATA_TOKEN=token-interno-opcional
+OPCOES_MARKET_DATA_TIMEOUT_SECONDS=5
+OPCOES_MARKET_DATA_STALE_AFTER_SECONDS=60
+```
+
+Observacoes:
+
+- se `OPCOES_MARKET_DATA_TOKEN` nao for definido, a aplicacao tenta reutilizar o token `app` de `OPCOES_EDGE_API_TOKENS`
+- a marcacao padrao usa `last` para acoes e regra hibrida para opcoes: `ask` em posicoes vendidas e `bid` em posicoes compradas, com fallback para `last`
+- a UI marca cada preco como `Ao vivo`, `Atrasado`, `Snapshot` ou `Offline`
+
 Fluxo recomendado:
 
 - `opcoes.moven.cloud` continua na app Flask
@@ -283,6 +306,30 @@ Arquivos principais:
 - `opcoes/mt5_gateway.py`
 - `opcoes/edge.py`
 - `docs/edge-vps-runbook.md`
+
+### Teste de estresse da API
+
+Para medir throughput, latencia e taxa de erro da API live, use:
+
+```bash
+uv run python -m opcoes.stress_api --mode quote --symbol PETR4 --requests 200 --concurrency 20
+```
+
+Exemplos uteis:
+
+```bash
+uv run python -m opcoes.stress_api --mode health --base-url http://127.0.0.1:8011 --requests 300 --concurrency 30
+uv run python -m opcoes.stress_api --mode batch --symbols PETR4,VALE3,ITUB4,BBAS3 --requests 150 --concurrency 15
+uv run python -m opcoes.stress_api --mode search --query PETR --limit 10 --requests 100 --concurrency 10
+uv run python -m opcoes.stress_api --mode quote --symbol PETR4 --requests 200 --concurrency 20 --json
+```
+
+Observacoes:
+
+- o comando tenta reutilizar o token `app` de `OPCOES_EDGE_API_TOKENS`
+- se preferir, informe `--token` ou configure `OPCOES_MARKET_DATA_TOKEN`
+- o resumo mostra `req/s`, `p50`, `p95`, `p99`, codigos HTTP e erros mais frequentes
+- para medir a stack completa em producao, aponte `--base-url` para o `opcoes-edge` publicado na VPS
 
 ## Deploy Docker no VPS
 
@@ -585,6 +632,126 @@ O script faz este ciclo:
 4. executa `fundamentus`
 5. executa `fundamentus-filter`
 6. aplica `retention` para remover market data envelhecida
+
+## Runbook Rápido da VPS
+
+### Atualizar a aplicação
+
+Quando houver `push` novo no GitHub e a VPS estiver com arquivos locais fora do Git, prefira atualizar apenas os arquivos desta aplicação em vez de usar `git pull` direto:
+
+```bash
+cd ~/apps/controle_de_opcoes
+git fetch origin
+git checkout origin/main -- README.md deploy/env/app.env.example deploy/scripts/opcoes-compose-vps.sh docs/edge-vps-runbook.md opcoes/edge.py opcoes/mt5_gateway.py tests/test_edge_api.py tests/test_mt5_gateway_client.py
+chmod +x deploy/scripts/opcoes-compose-vps.sh
+deploy/scripts/opcoes-compose-vps.sh up -d --build
+```
+
+### Subir e parar a stack
+
+Subir sem rebuild:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh up -d
+```
+
+Subir com rebuild:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh up -d --build
+```
+
+Parar:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh down
+```
+
+### Logs e status
+
+Containers e portas:
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+Logs da web:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh logs -f web
+```
+
+Logs do edge:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh logs -f edge
+```
+
+### Testes rápidos
+
+Web:
+
+```bash
+curl -i http://127.0.0.1:8000/login
+```
+
+Edge:
+
+```bash
+curl -i http://127.0.0.1:8011/health
+```
+
+Gateway MT5 pela tailnet:
+
+```bash
+curl -i http://100.70.177.96:8000/health
+curl -i http://100.70.177.96:8000/ready
+```
+
+Quote via edge com bearer token:
+
+```bash
+TOKEN=$(sudo sed -n 's/^OPCOES_EDGE_API_TOKENS=app=//p' /etc/controle_de_opcoes/app.env)
+curl -i -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8011/v1/quotes/PETR4
+```
+
+### Variáveis principais
+
+Arquivo principal de produção:
+
+```bash
+/etc/controle_de_opcoes/app.env
+```
+
+Valores importantes no ambiente atual:
+
+```env
+MT5_GATEWAY_BASE_URL=http://100.70.177.96:8000
+OPCOES_WEB_BIND=127.0.0.1:8000:8000
+OPCOES_EDGE_BIND=127.0.0.1:8011:8001
+```
+
+O helper `deploy/scripts/opcoes-compose-vps.sh` lê `OPCOES_WEB_BIND` e `OPCOES_EDGE_BIND` diretamente desse arquivo antes de chamar o Docker Compose.
+
+### Diagnóstico rápido
+
+Se o edge não subir:
+
+```bash
+sudo ss -ltnp | grep :8011
+```
+
+Se o gateway MT5 parar de responder:
+
+```bash
+tailscale status
+curl -i http://100.70.177.96:8000/health
+```
 
 Painel web:
 

@@ -75,6 +75,11 @@ from .holdings import (
     list_holdings,
     upsert_holding,
 )
+from .market_data import (
+    MarketDataClient,
+    enrich_positions_with_live_market_data,
+    market_status_label,
+)
 from . import finance, darf
 from .tax import (
     build_position_tax_events,
@@ -118,6 +123,7 @@ def create_app() -> Flask:
             )
     app.secret_key = secret_key
     ensure_bootstrap_user_from_env()
+    market_data_client = MarketDataClient()
     ranking_cache: dict[tuple, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
     ranking_cache_write_endpoints = {
@@ -579,7 +585,7 @@ def create_app() -> Flask:
 
     @app.route("/covered-call")
     def covered_call() -> str:
-        ctx = get_covered_call_context(request.args)
+        ctx = get_covered_call_context(request.args, market_data_client=market_data_client)
         ctx["inventory_summary"] = _build_inventory_overview(
             list_positions(include_closed=False),
             underlying_filter=ctx.get("underlying"),
@@ -1221,11 +1227,19 @@ def create_app() -> Flask:
             trade_type=trade_type or None,
             is_simulated=is_simulated,
         )
+        positions = enrich_positions_with_live_market_data(
+            positions,
+            client=market_data_client,
+        )
         position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
         premium_ids = finance.get_premium_position_ids(position_ids)
         for pos in positions:
             pos_id = pos.get("id")
             pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
+            pos["market_status_label"] = market_status_label(pos.get("market_status"))
+            pos["underlying_market_status_label"] = market_status_label(
+                pos.get("underlying_market_status")
+            )
         positions_view = _hide_replaced_legacy_stock_positions(positions)
         realized_summary = summarize_realized_positions(
             ticker_contains=ticker_contains or None,
