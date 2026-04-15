@@ -207,6 +207,8 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="covered-call-live"' in html
     assert 'hx-get="/covered-call/partial/live?' in html
+    assert "Cadastro do estoque consolidado" in html
+    assert 'action="/holdings/upsert"' in html
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
@@ -292,5 +294,61 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert "Painel ao vivo de covered call" in html
     assert "Cotação PETR4" in html
     assert "PETRD999" in html
+    assert "Cadastro do estoque consolidado" not in html
+
+
+def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> None:
+    update_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_positions",
+        lambda include_closed=False: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_holding_snapshots",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_options",
+        lambda underlying: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_quote",
+        lambda underlying: {"underlying": underlying, "price": 47.0, "price_date": "2026-04-14"},
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.get_covered_call_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "underlying": "PETR4",
+                "min_extrinsic": 0.0,
+                "min_days": 1,
+                "max_days": 30,
+                "min_dist_strike": 0.0,
+                "buyback_target_pct": 70.0,
+                "only_target_hits": False,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.finance.get_monthly_premiums",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.update_covered_call_settings",
+        lambda **kwargs: update_calls.append(kwargs),
+    )
+    monkeypatch.setattr("opcoes.web.list_positions", lambda include_closed=False: [])
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/covered-call/partial/live?underlying=PETR4&min_days=5")
+
+    assert response.status_code == 200
+    assert update_calls == []

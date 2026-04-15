@@ -236,6 +236,22 @@ Atualizacao parcial da interface:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
 - isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA.
+- a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
+- em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
+
+### Governanca de agents e skills
+
+As skills locais em `agents/.agents/skills` passaram a documentar um perfil recomendado de modelo e raciocinio. Como `agents/openai.yaml` hoje e voltado a metadata de interface, a recomendacao operacional fica registrada nas `SKILL.md`.
+
+Perfis adotados:
+
+- `orquestrador`: `gpt-5.4` com `high`
+- `arquiteto-software`: `gpt-5.4` com `high`
+- `arquiteto-seguranca`: `gpt-5.4` com `high`
+- `revisor-codigo`: `gpt-5.4` com `high`
+- `revisor-seguranca`: `gpt-5.4` com `high`
+- `diretor-ux`: `gpt-5.4-mini` com `medium`
+- `diretor-frontend-ui`: `gpt-5.4-mini` com `medium`
 
 ### Edge API publica
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
@@ -10,6 +11,8 @@ import httpx
 
 from .runtime_env import load_dotenv_once
 from .utils import infer_option_type
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -179,7 +182,15 @@ class MarketDataClient:
                 )
                 response.raise_for_status()
                 payload = response.json()
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "market_data_batch_failed",
+                    extra={
+                        "base_url": self.config.base_url,
+                        "chunk_size": len(chunk),
+                        "exception_type": exc.__class__.__name__,
+                    },
+                )
                 return results
             items = payload.get("items") if isinstance(payload, Mapping) else None
             if not isinstance(items, list):

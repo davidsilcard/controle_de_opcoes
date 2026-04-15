@@ -463,6 +463,51 @@ def get_holding_snapshot(
     }
 
 
+def validate_covered_call_availability(
+    *,
+    ticker: str,
+    qty: int,
+    is_simulated: bool,
+    exclude_position_id: int | None = None,
+    conn: Any | None = None,
+) -> dict[str, Any]:
+    normalized = _normalize_ticker(ticker)
+    if not normalized:
+        raise HoldingValidationError(
+            "Nao foi possivel identificar o ativo-base da covered call.",
+            ticker=None,
+        )
+
+    snapshot = get_holding_snapshot(
+        ticker=normalized,
+        is_simulated=is_simulated,
+        exclude_position_id=exclude_position_id,
+        conn=conn,
+    )
+    total_qty = int(snapshot.get("shares_total") or 0)
+    free_qty = int(snapshot.get("shares_free") or 0)
+    reserved_qty = int(snapshot.get("shares_reserved") or 0)
+
+    if total_qty <= 0:
+        raise HoldingValidationError(
+            (
+                f"Nao foi possivel cadastrar a covered call de {normalized}: "
+                "primeiro informe o estoque consolidado do ativo na tela de Covered Call."
+            ),
+            ticker=normalized,
+        )
+    if int(qty or 0) > free_qty:
+        raise HoldingValidationError(
+            (
+                f"Nao foi possivel salvar a venda coberta de {normalized}: "
+                f"estoque total {total_qty}, ja reservado {reserved_qty}, livre {free_qty} e "
+                f"quantidade da call {int(qty or 0)}. O cliente nao pode vender call a descoberto."
+            ),
+            ticker=normalized,
+        )
+    return snapshot
+
+
 def list_holding_snapshots(
     *,
     underlying_filter: str | None = None,
@@ -888,4 +933,5 @@ __all__ = [
     "list_holding_snapshots",
     "list_holdings",
     "upsert_holding",
+    "validate_covered_call_availability",
 ]

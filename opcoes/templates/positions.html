@@ -112,6 +112,19 @@
         {% include "partials/positions_live.html" %}
       </div>
 
+      <section class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <h2 class="h5 mb-1">Tabela editável de posições</h2>
+            <p class="text-muted small mb-0">
+              Esta grade não é atualizada automaticamente para proteger alterações ainda não salvas.
+            </p>
+          </div>
+          <span class="badge text-bg-warning">edição manual protegida</span>
+        </div>
+        {% include "partials/positions_table.html" %}
+      </section>
+
       <!-- Modal Add Position -->
       <div class="modal fade" id="modalAddPosition" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">

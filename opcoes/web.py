@@ -74,6 +74,7 @@ from .holdings import (
     list_holding_snapshots,
     list_holdings,
     upsert_holding,
+    validate_covered_call_availability,
 )
 from .market_data import (
     MarketDataClient,
@@ -273,12 +274,23 @@ def _build_covered_call_page_context(
     *,
     args: Any,
     market_data_client: MarketDataClient,
+    persist_settings: bool = True,
+    include_financial_sections: bool = True,
+    include_inventory_summary: bool = True,
 ) -> dict[str, Any]:
-    ctx = get_covered_call_context(args, market_data_client=market_data_client)
-    ctx["inventory_summary"] = _build_inventory_overview_global(
-        list_positions(include_closed=False),
-        underlying_filter=ctx.get("underlying"),
+    ctx = get_covered_call_context(
+        args,
+        market_data_client=market_data_client,
+        persist_settings=persist_settings,
+        include_financial_sections=include_financial_sections,
     )
+    if include_inventory_summary:
+        ctx["inventory_summary"] = _build_inventory_overview_global(
+            list_positions(include_closed=False),
+            underlying_filter=ctx.get("underlying"),
+        )
+    else:
+        ctx["inventory_summary"] = []
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
     return ctx
@@ -779,6 +791,9 @@ def create_app() -> Flask:
         ctx = _build_covered_call_page_context(
             args=request.args,
             market_data_client=market_data_client,
+            persist_settings=True,
+            include_financial_sections=True,
+            include_inventory_summary=True,
         )
         return render_template("covered_call.html", **ctx)
 
@@ -787,6 +802,9 @@ def create_app() -> Flask:
         ctx = _build_covered_call_page_context(
             args=request.args,
             market_data_client=market_data_client,
+            persist_settings=False,
+            include_financial_sections=False,
+            include_inventory_summary=False,
         )
         return render_template("partials/covered_call_live.html", **ctx)
 
@@ -1446,7 +1464,7 @@ def create_app() -> Flask:
                 p for p in positions_all if bool(p.get("is_simulated")) == is_simulated
             ]
 
-        inventory_summary = _build_inventory_overview(positions_all)
+        inventory_summary = _build_inventory_overview_global(positions_all)
 
         ledger_sums = finance.get_ledger_sums_by_position(
             types=[
@@ -2264,48 +2282,6 @@ def create_app() -> Flask:
             return None
         return float(parse_ptbr_number(row.get("last_strike")) or 0.0)
 
-    def _inventory_key_for_position(pos: dict[str, Any]) -> str:
-        ticker = (pos.get("ticker") or "").strip().upper()
-        underlying = (pos.get("underlying") or "").strip().upper()
-        strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
-        trade_type = (pos.get("trade_type") or "").strip().lower()
-        side = (pos.get("side") or "").strip().lower()
-        if not ticker:
-            return ""
-        if side == "short":
-            if infer_option_type(ticker) == "CALL" and strategy_tag == "covered_call":
-                return underlying or ""
-            return ""
-        if strategy_tag == "ranking":
-            return ""
-        if strategy_tag == "estoque" or trade_type == "stock":
-            return underlying or ticker
-        if underlying and ticker == underlying:
-            return underlying
-        if _looks_like_equity_ticker(ticker) and not _is_option_ticker(ticker):
-            return underlying or ticker
-        return ""
-
-    def _is_inventory_stock_position(pos: dict[str, Any]) -> bool:
-        ticker = (pos.get("ticker") or "").strip().upper()
-        if not ticker or _is_option_ticker(ticker):
-            return False
-        side = (pos.get("side") or "").strip().lower()
-        if side == "short":
-            return False
-        strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
-        trade_type = (pos.get("trade_type") or "").strip().lower()
-        if strategy_tag == "ranking":
-            return False
-        underlying = (pos.get("underlying") or "").strip().upper()
-        if strategy_tag == "estoque" or trade_type == "stock":
-            return True
-        if underlying and ticker == underlying:
-            return True
-        if _looks_like_equity_ticker(ticker) and not underlying:
-            return True
-        return False
-
     def _is_inventory_reserved_call(pos: dict[str, Any]) -> bool:
         ticker = (pos.get("ticker") or "").strip().upper()
         underlying = (pos.get("underlying") or "").strip().upper()
@@ -2318,40 +2294,6 @@ def create_app() -> Flask:
         if (pos.get("strategy_tag") or "").strip().lower() != "covered_call":
             return False
         return True
-
-    def _hide_replaced_legacy_stock_positions(
-        positions: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        explicit_holdings = {
-            ((item.get("ticker") or "").strip().upper(), bool(item.get("is_simulated") or 0))
-            for item in list_holdings()
-        }
-        if not explicit_holdings:
-            return positions
-
-        visible: list[dict[str, Any]] = []
-        for pos in positions:
-            key = _inventory_key_for_position(pos)
-            mode = bool(pos.get("is_simulated") or 0)
-            if (
-                key
-                and _is_inventory_stock_position(pos)
-                and (pos.get("status") or "").strip().lower() == "open"
-                and (key.strip().upper(), mode) in explicit_holdings
-            ):
-                continue
-            visible.append(pos)
-        return visible
-
-    def _build_inventory_overview(
-        positions: list[dict[str, Any]],
-        *,
-        underlying_filter: str | None = None,
-    ) -> list[dict[str, Any]]:
-        return list_holding_snapshots(
-            underlying_filter=underlying_filter,
-            positions_open=positions,
-        )
 
     def _validate_covered_call_stock(
         *,
@@ -2379,33 +2321,12 @@ def create_app() -> Flask:
                 "Nao foi possivel identificar o ativo-base da covered call.",
                 ticker=normalized_underlying or None,
             )
-
-        snapshot = get_holding_snapshot(
+        validate_covered_call_availability(
             ticker=normalized_underlying,
+            qty=int(qty or 0),
             is_simulated=is_simulated,
             exclude_position_id=current_position_id,
         )
-        total_qty = int(snapshot.get("shares_total") or 0)
-        free_qty = int(snapshot.get("shares_free") or 0)
-        reserved_qty = int(snapshot.get("shares_reserved") or 0)
-
-        if total_qty <= 0:
-            raise HoldingValidationError(
-                (
-                    f"Nao foi possivel cadastrar a covered call de {normalized_underlying}: "
-                    "primeiro informe o estoque consolidado do ativo na tela de Covered Call."
-                ),
-                ticker=normalized_underlying,
-            )
-        if int(qty or 0) > free_qty:
-            raise HoldingValidationError(
-                (
-                    f"Nao foi possivel salvar a venda coberta de {normalized_underlying}: "
-                    f"estoque total {total_qty}, ja reservado {reserved_qty}, livre {free_qty} e "
-                    f"quantidade da call {int(qty or 0)}. O cliente nao pode vender call a descoberto."
-                ),
-                ticker=normalized_underlying,
-            )
 
     def _auto_fees(
         *,

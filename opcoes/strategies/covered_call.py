@@ -695,6 +695,8 @@ def get_covered_call_context(
     args: Mapping[str, Any],
     *,
     market_data_client: MarketDataClient | None = None,
+    persist_settings: bool = True,
+    include_financial_sections: bool = True,
 ) -> Dict[str, Any]:
     defaults = get_covered_call_settings()
 
@@ -735,7 +737,7 @@ def get_covered_call_context(
         client=market_data_client,
     )
 
-    if args:
+    if args and persist_settings:
         update_covered_call_settings(
             underlying=underlying,
             min_extrinsic=min_extrinsic,
@@ -764,30 +766,35 @@ def get_covered_call_context(
     # Visão financeira didática para cliente:
     # - prêmio líquido fiscal: PREMIUM + DARF
     # - resultado operacional: PREMIUM + DARF + recompra (BUY)
-    monthly_premiums = finance.get_monthly_premiums(
-        include_darf=True,
-        include_buyback=False,
-        is_simulated=False,
-        strategy_tag="covered_call",
-    )
-    simulated_monthly_premiums = finance.get_monthly_premiums(
-        include_darf=True,
-        include_buyback=False,
-        is_simulated=True,
-        strategy_tag="covered_call",
-    )
-    monthly_operational_result = finance.get_monthly_premiums(
-        include_darf=True,
-        include_buyback=True,
-        is_simulated=False,
-        strategy_tag="covered_call",
-    )
-    simulated_monthly_operational_result = finance.get_monthly_premiums(
-        include_darf=True,
-        include_buyback=True,
-        is_simulated=True,
-        strategy_tag="covered_call",
-    )
+    monthly_premiums: list[dict[str, Any]] = []
+    simulated_monthly_premiums: list[dict[str, Any]] = []
+    monthly_operational_result: list[dict[str, Any]] = []
+    simulated_monthly_operational_result: list[dict[str, Any]] = []
+    if include_financial_sections:
+        monthly_premiums = finance.get_monthly_premiums(
+            include_darf=True,
+            include_buyback=False,
+            is_simulated=False,
+            strategy_tag="covered_call",
+        )
+        simulated_monthly_premiums = finance.get_monthly_premiums(
+            include_darf=True,
+            include_buyback=False,
+            is_simulated=True,
+            strategy_tag="covered_call",
+        )
+        monthly_operational_result = finance.get_monthly_premiums(
+            include_darf=True,
+            include_buyback=True,
+            is_simulated=False,
+            strategy_tag="covered_call",
+        )
+        simulated_monthly_operational_result = finance.get_monthly_premiums(
+            include_darf=True,
+            include_buyback=True,
+            is_simulated=True,
+            strategy_tag="covered_call",
+        )
 
     ctx["filters"] = {
         "min_extrinsic": min_extrinsic,

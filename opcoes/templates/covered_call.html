@@ -121,16 +121,6 @@
         <div class="alert alert-success mb-4">{{ holding_notice }}</div>
       {% endif %}
 
-      <div
-        id="covered-call-live"
-        hx-get="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
-        hx-trigger="load, every 15s"
-        hx-swap="innerHTML"
-      >
-        {% include "partials/covered_call_live.html" %}
-      </div>
-
-      <div class="d-none">
       <div class="card mb-4 border-0 shadow-sm">
         <div class="card-body">
           <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
@@ -226,6 +216,15 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div
+        id="covered-call-live"
+        hx-get="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
+        hx-trigger="load, every 15s"
+        hx-swap="innerHTML"
+      >
+        {% include "partials/covered_call_live.html" %}
       </div>
 
       {% if inventory_summary %}
@@ -1010,7 +1009,6 @@
           </table>
         </div>
       {% endif %}
-      </div>
         </div>
         <aside class="col-lg-3 col-xl-2">
           <div class="card cc-sidebar">
