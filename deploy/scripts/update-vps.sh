@@ -7,8 +7,38 @@ BRANCH="${BRANCH:-main}"
 COMPOSE_HELPER="${COMPOSE_HELPER:-${APP_DIR}/deploy/scripts/opcoes-compose-vps.sh}"
 WEB_CHECK_URL="${WEB_CHECK_URL:-http://127.0.0.1:8000/login}"
 EDGE_CHECK_URL="${EDGE_CHECK_URL:-http://127.0.0.1:8011/health}"
+SMOKE_RETRIES="${SMOKE_RETRIES:-20}"
+SMOKE_SLEEP_SECONDS="${SMOKE_SLEEP_SECONDS:-2}"
 
 cd "$APP_DIR"
+
+wait_for_url() {
+  local label="$1"
+  local url="$2"
+  local mode="${3:-body}"
+  local attempt=1
+
+  while (( attempt <= SMOKE_RETRIES )); do
+    if [[ "$mode" == "head" ]]; then
+      if curl -fsS -I "$url" >/dev/null 2>&1; then
+        echo "$label ok -> $url"
+        return 0
+      fi
+    else
+      if curl -fsS "$url" >/dev/null 2>&1; then
+        echo "$label ok -> $url"
+        return 0
+      fi
+    fi
+
+    echo "$label ainda indisponivel (tentativa ${attempt}/${SMOKE_RETRIES}); aguardando ${SMOKE_SLEEP_SECONDS}s..."
+    sleep "$SMOKE_SLEEP_SECONDS"
+    attempt=$((attempt + 1))
+  done
+
+  echo "$label falhou apos ${SMOKE_RETRIES} tentativas: $url" >&2
+  return 1
+}
 
 if [[ ! -f ".git/HEAD" ]]; then
   echo "Repositorio Git nao encontrado em $APP_DIR" >&2
@@ -33,10 +63,9 @@ echo "[3/5] Validando containers..."
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 echo "[4/5] Smoke test web..."
-curl -fsS -I "$WEB_CHECK_URL" >/dev/null
-echo "web ok -> $WEB_CHECK_URL"
+wait_for_url "web" "$WEB_CHECK_URL" "head"
 
 echo "[5/5] Smoke test edge..."
+wait_for_url "edge" "$EDGE_CHECK_URL" "body"
 curl -fsS "$EDGE_CHECK_URL"
-echo
 echo "Deploy concluido com sucesso."

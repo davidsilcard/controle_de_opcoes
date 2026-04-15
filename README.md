@@ -673,6 +673,7 @@ O script:
 - falha cedo se a worktree estiver suja
 - roda `git fetch` + `git pull --ff-only`
 - rebuilda a stack Docker
+- espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
 
 Importante:
