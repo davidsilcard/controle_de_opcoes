@@ -235,6 +235,8 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert html.count("Calls de PETR4 em aberto (real)") == 2
     assert html.count("Sugestões de novas calls para PETR4") == 1
     assert "Recompra" in html
+    assert "Atenção operacional" in html
+    assert "<details class=\"card border-0 shadow-sm cc-audit-details\" open>" in html
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:

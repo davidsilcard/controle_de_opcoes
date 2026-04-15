@@ -240,6 +240,7 @@ Atualizacao parcial da interface:
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
 - em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
 - a auditoria da `Covered Call` preserva o detalhamento rico de `calls em aberto`, incluindo `recompra`, `% do prêmio`, `extrínseco`, `% p/ 2x`, `P/L` e ações operacionais.
+- quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
 
 ### Governanca de agents e skills
 

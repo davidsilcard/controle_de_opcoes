@@ -1,15 +1,34 @@
 <section class="mb-4">
-  <details class="card border-0 shadow-sm">
+  <details class="card border-0 shadow-sm cc-audit-details" {% if covered_real or covered_sim %}open{% endif %}>
     <summary class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3 cc-details-summary">
       <div>
         <h2 class="h5 mb-1">Auditoria e detalhes operacionais</h2>
         <p class="text-muted small mb-0">
-          Esta área reúne os quadros legados, financeiros e operacionais para conferência. O fluxo principal da decisão fica concentrado no painel ao vivo acima.
+          Esta área reúne os quadros legados, financeiros e operacionais para conferência.
+          Aqui ficam os detalhes de recompra, P/L, lotes legados e ações operacionais das calls abertas.
         </p>
       </div>
-      <span class="badge text-bg-light">Abrir detalhes</span>
+      <div class="text-end">
+        {% if covered_real %}
+          <div class="badge text-bg-primary cc-audit-summary-badge">Auditoria aberta</div>
+          <div class="small text-muted mt-1">Há call real em aberto neste ativo.</div>
+        {% else %}
+          <div class="badge text-bg-light cc-audit-summary-badge">Abrir detalhes</div>
+          <div class="small text-muted mt-1">Use quando quiser conferir o operacional.</div>
+        {% endif %}
+      </div>
     </summary>
     <div class="card-body border-top">
+      {% if covered_real %}
+        <div class="alert alert-primary mb-4" role="alert">
+          <div class="fw-semibold mb-1">Atenção operacional</div>
+          <div class="small mb-0">
+            As métricas de <strong>Recompra</strong>, <strong>P/L</strong>, <strong>P/L%</strong> e os botões de
+            <strong>Expirou</strong> e <strong>Exercido</strong> estão logo abaixo, na tabela de calls abertas reais.
+          </div>
+        </div>
+      {% endif %}
+
       {% if inventory_summary %}
         <div class="card mb-4 border-0 bg-light-subtle">
           <div class="card-body">
