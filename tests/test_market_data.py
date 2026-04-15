@@ -202,7 +202,7 @@ def test_enrich_underlying_quote_with_live_market_data_preserves_snapshot_metada
 def test_market_display_helpers_format_source_and_timestamp() -> None:
     assert market_source_label("last") == "Ultimo"
     assert market_source_label("ask") == "Ask"
-    assert format_market_timestamp_label("2026-04-15T13:59:24Z") == "15/04 10:59:24"
+    assert format_market_timestamp_label("2026-04-15T13:59:24Z") == "15/04 13:59:24"
     assert format_market_timestamp_label("2026-04-15") == "15/04/2026"
 
 

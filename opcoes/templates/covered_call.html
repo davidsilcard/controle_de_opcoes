@@ -30,6 +30,9 @@
         min-width: 9rem;
         text-align: center;
       }
+      .cc-market-time {
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body class="bg-light">
@@ -245,5 +248,37 @@
       </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+    <script>
+      function formatCoveredCallMarketTimes(root) {
+        const scope = root || document;
+        const nodes = scope.querySelectorAll("[data-local-datetime]");
+        for (const node of nodes) {
+          const raw = (node.getAttribute("data-local-datetime") || "").trim();
+          if (!raw) continue;
+          if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            const [year, month, day] = raw.split("-");
+            node.textContent = `${day}/${month}/${year}`;
+            node.title = raw;
+            continue;
+          }
+          const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+          if (!match) {
+            node.textContent = raw;
+            continue;
+          }
+          const [, year, month, day, hour, minute, second] = match;
+          node.textContent = `${day}/${month} ${hour}:${minute}:${second || "00"}`;
+          node.title = raw;
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        formatCoveredCallMarketTimes(document);
+      });
+
+      document.body.addEventListener("htmx:afterSwap", function (event) {
+        formatCoveredCallMarketTimes(event.target);
+      });
+    </script>
   </body>
 </html>

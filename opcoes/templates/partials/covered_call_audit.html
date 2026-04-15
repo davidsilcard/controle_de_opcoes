@@ -266,7 +266,9 @@
                         {% endif %}
                       </div>
                       {% if pos.market_time_display %}
-                        <div class="text-muted small">{{ pos.market_time_display }}</div>
+                        <div class="text-muted small cc-market-time">
+                          <span data-local-datetime="{{ pos.market_time_utc or pos.market_time_display }}">{{ pos.market_time_display }}</span>
+                        </div>
                       {% endif %}
                     {% else %}-{% endif %}
                   </td>
@@ -288,7 +290,9 @@
                       {{ "%.2f"|format(pos.underlying_price) }}
                       <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
                       {% if pos.underlying_market_time_display %}
-                        <div class="text-muted small">{{ pos.underlying_market_time_display }}</div>
+                        <div class="text-muted small cc-market-time">
+                          <span data-local-datetime="{{ pos.underlying_market_time_utc or pos.underlying_market_time_display }}">{{ pos.underlying_market_time_display }}</span>
+                        </div>
                       {% endif %}
                     {% else %}-{% endif %}
                   </td>
@@ -389,7 +393,9 @@
                         {% endif %}
                       </div>
                       {% if pos.market_time_display %}
-                        <div class="text-muted small">{{ pos.market_time_display }}</div>
+                        <div class="text-muted small cc-market-time">
+                          <span data-local-datetime="{{ pos.market_time_utc or pos.market_time_display }}">{{ pos.market_time_display }}</span>
+                        </div>
                       {% endif %}
                     {% else %}-{% endif %}
                   </td>
@@ -411,7 +417,9 @@
                       {{ "%.2f"|format(pos.underlying_price) }}
                       <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
                       {% if pos.underlying_market_time_display %}
-                        <div class="text-muted small">{{ pos.underlying_market_time_display }}</div>
+                        <div class="text-muted small cc-market-time">
+                          <span data-local-datetime="{{ pos.underlying_market_time_utc or pos.underlying_market_time_display }}">{{ pos.underlying_market_time_display }}</span>
+                        </div>
                       {% endif %}
                     {% else %}-{% endif %}
                   </td>

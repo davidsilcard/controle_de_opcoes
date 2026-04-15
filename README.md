@@ -243,6 +243,7 @@ Atualizacao parcial da interface:
 - quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
 - os paineis ao vivo agora mostram de forma explicita a origem do preco (`Ao vivo`, `Atrasado` ou `Snapshot`), a referencia usada (`Bid`, `Ask`, `Ultimo` ou `Snapshot`) e o horario/data util da ultima atualizacao.
 - quando a cotacao ao vivo nao estiver disponivel, a aplicacao continua usando o snapshot local, mas sem confundir esse fallback com status `Offline` quando ja existe um preco valido na base.
+- quando o gateway informar timestamps com sufixo UTC (`Z`), a UI passa a exibir o horario "de parede" recebido na cotacao, sem deslocar 3 horas por conversao automatica de fuso; o valor bruto continua acessivel no `title` do campo para auditoria.
 
 ### Governanca de agents e skills
 
