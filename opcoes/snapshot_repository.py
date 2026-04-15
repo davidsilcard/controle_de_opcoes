@@ -107,6 +107,7 @@ def fetch_latest_underlying_options(
             rows = conn.execute(
                 """
                 SELECT
+                    snapshot_date,
                     ticker,
                     underlying,
                     option_type,

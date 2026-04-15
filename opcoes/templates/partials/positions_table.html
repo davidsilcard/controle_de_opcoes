@@ -88,10 +88,13 @@
                   {{ "%.2f"|format(pos.last_price) }}
                   <div class="text-muted small">
                     {{ pos.market_status_label or 'Snapshot' }}
-                    {% if pos.market_price_source %}
-                      · {{ pos.market_price_source|upper }}
+                    {% if pos.market_source_label %}
+                      · {{ pos.market_source_label }}
                     {% endif %}
                   </div>
+                  {% if pos.market_time_display %}
+                    <div class="text-muted small">{{ pos.market_time_display }}</div>
+                  {% endif %}
                 {% else %}
                   -
                 {% endif %}

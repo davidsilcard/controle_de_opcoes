@@ -261,10 +261,13 @@
                       {{ "%.2f"|format(pos.last_price) }}
                       <div class="text-muted small">
                         {{ pos.market_status_label or 'Snapshot' }}
-                        {% if pos.market_price_source %}
-                          · {{ pos.market_price_source|upper }}
+                        {% if pos.market_source_label %}
+                          · {{ pos.market_source_label }}
                         {% endif %}
                       </div>
+                      {% if pos.market_time_display %}
+                        <div class="text-muted small">{{ pos.market_time_display }}</div>
+                      {% endif %}
                     {% else %}-{% endif %}
                   </td>
                   <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
@@ -284,6 +287,9 @@
                     {% if pos.underlying_price is not none %}
                       {{ "%.2f"|format(pos.underlying_price) }}
                       <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
+                      {% if pos.underlying_market_time_display %}
+                        <div class="text-muted small">{{ pos.underlying_market_time_display }}</div>
+                      {% endif %}
                     {% else %}-{% endif %}
                   </td>
                   <td class="text-end">
@@ -378,10 +384,13 @@
                       {{ "%.2f"|format(pos.last_price) }}
                       <div class="text-muted small">
                         {{ pos.market_status_label or 'Snapshot' }}
-                        {% if pos.market_price_source %}
-                          · {{ pos.market_price_source|upper }}
+                        {% if pos.market_source_label %}
+                          · {{ pos.market_source_label }}
                         {% endif %}
                       </div>
+                      {% if pos.market_time_display %}
+                        <div class="text-muted small">{{ pos.market_time_display }}</div>
+                      {% endif %}
                     {% else %}-{% endif %}
                   </td>
                   <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
@@ -401,6 +410,9 @@
                     {% if pos.underlying_price is not none %}
                       {{ "%.2f"|format(pos.underlying_price) }}
                       <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
+                      {% if pos.underlying_market_time_display %}
+                        <div class="text-muted small">{{ pos.underlying_market_time_display }}</div>
+                      {% endif %}
                     {% else %}-{% endif %}
                   </td>
                   <td class="text-end">

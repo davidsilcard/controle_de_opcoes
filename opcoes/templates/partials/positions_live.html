@@ -292,8 +292,11 @@
                   <td>{{ pos.strategy_tag or '-' }}</td>
                   <td>
                     {{ pos.market_status_label or 'Snapshot' }}
-                    {% if pos.market_price_source %}
-                      <span class="text-muted small">· {{ pos.market_price_source|upper }}</span>
+                    {% if pos.market_source_label %}
+                      <span class="text-muted small">· {{ pos.market_source_label }}</span>
+                    {% endif %}
+                    {% if pos.market_time_display %}
+                      <div class="text-muted small">{{ pos.market_time_display }}</div>
                     {% endif %}
                   </td>
                   <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>

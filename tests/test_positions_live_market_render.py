@@ -60,6 +60,7 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
                 "pl_pct": 35.0,
                 "market_status": "live",
                 "market_price_source": "ask",
+                "market_time_utc": "2026-04-14T13:00:00Z",
                 "underlying_market_status": "live",
             }
         ],
@@ -112,7 +113,8 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Ao vivo" in html
-    assert "ASK" in html
+    assert "Ask" in html
+    assert "14/04 10:00:00" in html
     assert "0.12" in html
     assert 'id="positions-live"' in html
     assert 'hx-get="/positions/partial/live?' in html

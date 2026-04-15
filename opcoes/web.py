@@ -79,6 +79,8 @@ from .holdings import (
 from .market_data import (
     MarketDataClient,
     enrich_positions_with_live_market_data,
+    format_market_timestamp_label,
+    market_source_label,
     market_status_label,
 )
 from . import finance, darf
@@ -243,8 +245,17 @@ def _build_positions_page_context(
         pos_id = pos.get("id")
         pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
         pos["market_status_label"] = market_status_label(pos.get("market_status"))
+        pos["market_source_label"] = market_source_label(pos.get("market_price_source"))
+        pos["market_time_display"] = format_market_timestamp_label(
+            pos.get("market_time_utc") or pos.get("last_snapshot_date")
+        )
         pos["underlying_market_status_label"] = market_status_label(
             pos.get("underlying_market_status")
+        )
+        pos["underlying_market_time_display"] = format_market_timestamp_label(
+            pos.get("underlying_market_time_utc")
+            or pos.get("underlying_price_date")
+            or pos.get("last_snapshot_date")
         )
     positions_view = _hide_replaced_legacy_stock_positions_global(positions)
     realized_summary = summarize_realized_positions(

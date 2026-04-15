@@ -140,9 +140,110 @@ def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
     assert ctx["underlying_quote"]["market_status_label"] == "Ao vivo"
     assert ctx["covered_real"][0]["last_price"] == 0.12
     assert ctx["covered_real"][0]["market_price_source"] == "ask"
+    assert ctx["covered_real"][0]["market_source_label"] == "Ask"
     assert ctx["covered_real"][0]["underlying_price"] == 48.9
     assert ctx["suggestions"][0]["premium_ref"] == 0.1
     assert ctx["suggestions"][0]["market_status_label"] == "Ao vivo"
+    assert ctx["underlying_quote"]["market_time_display"] == "14/04 10:00:00"
+
+
+def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_positions",
+        lambda include_closed=False: [
+            {
+                "id": 1,
+                "ticker": "GGBRD221",
+                "underlying": "GGBR4",
+                "trade_date": "2026-04-08",
+                "qty": 800,
+                "open_qty": 800,
+                "entry_price": 0.05,
+                "last_price": 0.1,
+                "underlying_price": 21.6,
+                "last_snapshot_date": "2026-04-15",
+                "status": "open",
+                "side": "short",
+                "trade_type": "swing",
+                "strategy_tag": "covered_call",
+                "is_simulated": 0,
+                "fees": 0.04,
+                "realized_pl": None,
+                "dias_uteis": 2,
+                "vencimento": "17/04/2026",
+                "strike": 22.03,
+                "pct_2x": 1.0,
+                "extrinsic_pct_spot": 0.46,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_holding_snapshots",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_options",
+        lambda underlying: [
+            {
+                "snapshot_date": "2026-04-15",
+                "ticker": "GGBRD261",
+                "underlying": underlying,
+                "option_type": "CALL",
+                "vencimento": "17/04/2026",
+                "dias_uteis": 2,
+                "strike": 26.03,
+                "underlying_price": 21.6,
+                "underlying_price_date": "2026-04-15",
+                "dist_perc_strike": 20.51,
+                "ultimo": 0.15,
+                "best_bid": 0.14,
+                "pct_2x": 1.0,
+                "score_total": 1.2,
+                "extrinsic_pct_spot": 0.69,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_quote",
+        lambda underlying: {
+            "snapshot_date": "2026-04-15",
+            "underlying": underlying,
+            "price": 21.6,
+            "price_date": "2026-04-15",
+        },
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.get_covered_call_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "underlying": "GGBR4",
+                "min_extrinsic": 0.0,
+                "min_days": 1,
+                "max_days": 30,
+                "min_dist_strike": 0.0,
+                "buyback_target_pct": 50.0,
+                "only_target_hits": False,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.finance.get_monthly_premiums",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.update_covered_call_settings",
+        lambda **_kwargs: None,
+    )
+
+    ctx = get_covered_call_context({"underlying": "GGBR4"}, market_data_client=FakeMarketClient({}))
+
+    assert ctx["underlying_quote"]["market_status_label"] == "Snapshot"
+    assert ctx["underlying_quote"]["market_source_label"] == "Snapshot"
+    assert ctx["covered_real"][0]["market_status_label"] == "Snapshot"
+    assert ctx["covered_real"][0]["underlying_market_status_label"] == "Snapshot"
+    assert ctx["covered_real"][0]["underlying_market_time_display"] == "15/04/2026"
 
 
 def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
@@ -187,12 +288,14 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
                     "open_qty": 100,
                     "last_price": 0.1,
                     "market_status_label": "Snapshot",
-                    "market_price_source": "last",
+                    "market_source_label": "Snapshot",
+                    "market_time_display": "15/04/2026",
                     "buyback_profit_per_share": -0.05,
                     "buyback_profit_pct": -100.0,
                     "buyback_target_hit": False,
                     "underlying_price": 48.9,
-                    "underlying_market_status_label": "Offline",
+                    "underlying_market_status_label": "Snapshot",
+                    "underlying_market_time_display": "15/04/2026",
                     "extrinsic_pct_spot": 0.46,
                     "pct_2x": 1.0,
                     "pl": -40.04,
@@ -237,6 +340,7 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert "Recompra" in html
     assert "Atenção operacional" in html
     assert "<details class=\"card border-0 shadow-sm cc-audit-details\" open>" in html
+    assert "15/04/2026" in html
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
@@ -282,7 +386,13 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
                     "price_status": "ok",
                 }
             ],
-            "underlying_quote": {"price": 48.9, "price_date": "2026-04-14", "market_status_label": "Ao vivo", "market_price_source": "last"},
+            "underlying_quote": {
+                "price": 48.9,
+                "price_date": "2026-04-14",
+                "market_status_label": "Ao vivo",
+                "market_source_label": "Ultimo",
+                "market_time_display": "14/04 10:00:00",
+            },
             "covered_real": [],
             "covered_sim": [],
             "suggestions": [
@@ -291,9 +401,12 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
                     "vencimento": "17/04/2026",
                     "strike": 49.0,
                     "underlying_price": 48.9,
+                    "underlying_market_status_label": "Ao vivo",
                     "dist_perc_strike": 0.2,
                     "extrinsic_pct_spot": 0.1,
                     "premium_ref": 0.12,
+                    "market_status_label": "Ao vivo",
+                    "market_source_label": "Bid",
                     "target_hit": True,
                     "strike_target_hit": True,
                 }
@@ -329,6 +442,8 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert "Cadastro do estoque consolidado" not in html
     assert "Auditoria e detalhes operacionais" not in html
     assert "Recompra" not in html
+    assert "Atualizado em 14/04 10:00:00" in html
+    assert "Ao vivo" in html
 
 
 def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> None:

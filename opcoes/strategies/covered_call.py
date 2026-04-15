@@ -10,6 +10,8 @@ from ..market_data import (
     enrich_option_rows_with_live_market_data,
     enrich_positions_with_live_market_data,
     enrich_underlying_quote_with_live_market_data,
+    format_market_timestamp_label,
+    market_source_label,
     market_status_label,
 )
 from ..portfolio import list_positions
@@ -813,11 +815,34 @@ def get_covered_call_context(
         ctx["underlying_quote"]["market_status_label"] = market_status_label(
             ctx["underlying_quote"].get("market_status")
         )
+        ctx["underlying_quote"]["market_source_label"] = market_source_label(
+            ctx["underlying_quote"].get("market_price_source")
+        )
+        ctx["underlying_quote"]["market_time_display"] = format_market_timestamp_label(
+            ctx["underlying_quote"].get("market_time_utc")
+            or ctx["underlying_quote"].get("price_date")
+            or ctx["underlying_quote"].get("snapshot_date")
+        )
     for key in ("covered_real", "covered_sim", "suggestions"):
         for item in ctx.get(key, []) or []:
             if isinstance(item, dict):
                 item["market_status_label"] = market_status_label(item.get("market_status"))
+                item["market_source_label"] = market_source_label(
+                    item.get("market_price_source") or item.get("market_premium_source")
+                )
+                item["market_time_display"] = format_market_timestamp_label(
+                    item.get("market_time_utc")
+                    or item.get("underlying_price_date")
+                    or item.get("snapshot_date")
+                    or item.get("last_snapshot_date")
+                )
                 item["underlying_market_status_label"] = market_status_label(
                     item.get("underlying_market_status")
+                )
+                item["underlying_market_time_display"] = format_market_timestamp_label(
+                    item.get("underlying_market_time_utc")
+                    or item.get("underlying_price_date")
+                    or item.get("snapshot_date")
+                    or item.get("last_snapshot_date")
                 )
     return ctx

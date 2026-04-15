@@ -3,8 +3,11 @@ from __future__ import annotations
 from opcoes.market_data import (
     enrich_option_rows_with_live_market_data,
     enrich_positions_with_live_market_data,
+    enrich_underlying_quote_with_live_market_data,
+    format_market_timestamp_label,
     load_market_data_config_from_env,
     market_price_for_position,
+    market_source_label,
 )
 
 
@@ -139,3 +142,59 @@ def test_enrich_option_rows_with_live_market_data_updates_premium_and_underlying
     assert enriched[0]["market_premium_source"] == "bid"
     assert enriched[0]["underlying_price"] == 48.9
     assert enriched[0]["market_status"] == "live"
+
+
+def test_enrich_positions_with_live_market_data_marks_snapshot_fallbacks() -> None:
+    positions = [
+        {
+            "id": 1,
+            "ticker": "GGBRD221",
+            "underlying": "GGBR4",
+            "status": "open",
+            "side": "short",
+            "qty": 800,
+            "open_qty": 800,
+            "entry_price": 0.05,
+            "fees": 0.04,
+            "realized_pl": None,
+            "last_price": 0.1,
+            "underlying_price": 21.6,
+            "last_snapshot_date": "2026-04-15",
+        }
+    ]
+
+    enriched = enrich_positions_with_live_market_data(positions, client=FakeMarketClient({}))
+    pos = enriched[0]
+
+    assert pos["market_status"] == "snapshot"
+    assert pos["market_price_source"] == "snapshot"
+    assert pos["market_time_utc"] == "2026-04-15"
+    assert pos["underlying_market_status"] == "snapshot"
+    assert pos["underlying_market_time_utc"] == "2026-04-15"
+
+
+def test_enrich_underlying_quote_with_live_market_data_preserves_snapshot_metadata() -> None:
+    quote = {
+        "underlying": "GGBR4",
+        "price": 21.6,
+        "price_date": "2026-04-15",
+        "snapshot_date": "2026-04-15",
+    }
+
+    enriched = enrich_underlying_quote_with_live_market_data(
+        quote,
+        underlying="GGBR4",
+        client=FakeMarketClient({}),
+    )
+
+    assert enriched is not None
+    assert enriched["market_status"] == "snapshot"
+    assert enriched["market_price_source"] == "snapshot"
+    assert enriched["market_time_utc"] == "2026-04-15"
+
+
+def test_market_display_helpers_format_source_and_timestamp() -> None:
+    assert market_source_label("last") == "Ultimo"
+    assert market_source_label("ask") == "Ask"
+    assert format_market_timestamp_label("2026-04-15T13:59:24Z") == "15/04 10:59:24"
+    assert format_market_timestamp_label("2026-04-15") == "15/04/2026"

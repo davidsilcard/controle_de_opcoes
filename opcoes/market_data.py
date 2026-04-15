@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -13,6 +14,7 @@ from .runtime_env import load_dotenv_once
 from .utils import infer_option_type
 
 logger = logging.getLogger(__name__)
+LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,24 @@ def _age_seconds(time_utc: Any) -> int | None:
     return max(int(delta.total_seconds()), 0)
 
 
+def _parse_market_timestamp(value: Any) -> dt.datetime | None:
+    parsed = _parse_iso_utc(value)
+    if parsed is not None:
+        return parsed
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed_date = dt.date.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt.datetime.combine(
+        parsed_date,
+        dt.time.min,
+        tzinfo=dt.timezone.utc,
+    )
+
+
 def _market_status(time_utc: Any, *, stale_after_seconds: int) -> str:
     age = _age_seconds(time_utc)
     if age is None:
@@ -147,6 +167,37 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def market_source_label(source: str | None) -> str | None:
+    normalized = (source or "").strip().lower()
+    if not normalized:
+        return None
+    mapping = {
+        "ask": "Ask",
+        "bid": "Bid",
+        "last": "Ultimo",
+        "snapshot": "Snapshot",
+    }
+    return mapping.get(normalized, normalized.upper())
+
+
+def format_market_timestamp_label(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if text:
+        try:
+            parsed_date = dt.date.fromisoformat(text)
+        except ValueError:
+            parsed_date = None
+        if parsed_date is not None and len(text) == 10:
+            return parsed_date.strftime("%d/%m/%Y")
+    parsed = _parse_market_timestamp(value)
+    if parsed is None:
+        return None
+    localized = parsed.astimezone(LOCAL_DISPLAY_TZ)
+    if localized.time() == dt.time.min:
+        return localized.strftime("%d/%m/%Y")
+    return localized.strftime("%d/%m %H:%M:%S")
 
 
 class MarketDataClient:
@@ -302,9 +353,21 @@ def enrich_positions_with_live_market_data(
 
     for pos in working:
         pos.setdefault("market_status", "snapshot")
-        pos.setdefault("market_price_source", None)
-        pos.setdefault("market_time_utc", None)
-        pos.setdefault("underlying_market_status", None)
+        if pos.get("last_price") is not None:
+            pos.setdefault("market_price_source", "snapshot")
+            pos.setdefault("market_time_utc", pos.get("last_snapshot_date"))
+        else:
+            pos.setdefault("market_price_source", None)
+            pos.setdefault("market_time_utc", None)
+        if pos.get("underlying_price") is not None:
+            pos.setdefault("underlying_market_status", "snapshot")
+            pos.setdefault(
+                "underlying_market_time_utc",
+                pos.get("underlying_price_date") or pos.get("last_snapshot_date"),
+            )
+        else:
+            pos.setdefault("underlying_market_status", None)
+            pos.setdefault("underlying_market_time_utc", None)
         if str(pos.get("status") or "").strip().lower() == "closed":
             continue
         ticker = str(pos.get("ticker") or "").strip().upper()
@@ -349,8 +412,13 @@ def enrich_underlying_quote_with_live_market_data(
         if quote is None:
             return None
         enriched = dict(quote)
-        enriched.setdefault("market_status", "snapshot")
-        enriched.setdefault("market_price_source", "snapshot")
+        if enriched.get("price") is not None:
+            enriched.setdefault("market_status", "snapshot")
+            enriched.setdefault("market_price_source", "snapshot")
+            enriched.setdefault(
+                "market_time_utc",
+                enriched.get("price_date") or enriched.get("snapshot_date"),
+            )
         return enriched
     enriched = dict(quote or {})
     enriched["underlying"] = normalized
@@ -385,6 +453,23 @@ def enrich_option_rows_with_live_market_data(
     output: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
+        if (
+            item.get("ultimo") is not None
+            or item.get("best_bid") is not None
+            or item.get("best_ask") is not None
+        ):
+            item.setdefault("market_status", "snapshot")
+            item.setdefault("market_premium_source", "snapshot")
+            item.setdefault(
+                "market_time_utc",
+                item.get("underlying_price_date") or item.get("snapshot_date"),
+            )
+        if item.get("underlying_price") is not None:
+            item.setdefault("underlying_market_status", "snapshot")
+            item.setdefault(
+                "underlying_market_time_utc",
+                item.get("underlying_price_date") or item.get("snapshot_date"),
+            )
         ticker = str(item.get("ticker") or "").strip().upper()
         quote = market_map.get(ticker)
         premium_ref, premium_source = market_price_for_suggestion(quote)
@@ -421,7 +506,9 @@ __all__ = [
     "enrich_positions_with_live_market_data",
     "enrich_underlying_quote_with_live_market_data",
     "load_market_data_config_from_env",
+    "format_market_timestamp_label",
     "market_price_for_position",
     "market_price_for_suggestion",
+    "market_source_label",
     "market_status_label",
 ]
