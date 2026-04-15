@@ -502,9 +502,7 @@ curl http://127.0.0.1:8000/login
 
 ```bash
 cd ~/apps/controle_de_opcoes
-git pull origin main
-deploy/scripts/opcoes-compose-vps.sh up -d --build
-deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
+bash deploy/scripts/update-vps.sh
 ```
 
 Se quiser acompanhar a subida logo depois:
@@ -663,14 +661,31 @@ O script faz este ciclo:
 
 ### Atualizar a aplicação
 
-Quando houver `push` novo no GitHub e a VPS estiver com arquivos locais fora do Git, prefira atualizar apenas os arquivos desta aplicação em vez de usar `git pull` direto:
+A forma recomendada agora é um comando unico:
 
 ```bash
 cd ~/apps/controle_de_opcoes
-git fetch origin
-git checkout origin/main -- README.md deploy/env/app.env.example deploy/scripts/opcoes-compose-vps.sh docs/edge-vps-runbook.md opcoes/edge.py opcoes/mt5_gateway.py tests/test_edge_api.py tests/test_mt5_gateway_client.py
-chmod +x deploy/scripts/opcoes-compose-vps.sh
-deploy/scripts/opcoes-compose-vps.sh up -d --build
+bash deploy/scripts/update-vps.sh
+```
+
+O script:
+
+- falha cedo se a worktree estiver suja
+- roda `git fetch` + `git pull --ff-only`
+- rebuilda a stack Docker
+- valida `web` e `edge`
+
+Importante:
+
+- `git pull` sozinho nao e suficiente, porque ele nao rebuilda os containers nem faz smoke test
+- usamos `bash deploy/scripts/update-vps.sh` em vez de executar o arquivo diretamente para nao depender do bit de execucao preservado apos `git pull` feito a partir de ambientes Windows
+
+Se a VPS estiver com arquivos locais fora do Git, limpe primeiro. O caso mais comum deve ser resolvido resetando o arquivo divergente para a versao do repositório:
+
+```bash
+cd ~/apps/controle_de_opcoes
+git checkout -- deploy/scripts/opcoes-compose-vps.sh
+bash deploy/scripts/update-vps.sh
 ```
 
 ### Subir e parar a stack
