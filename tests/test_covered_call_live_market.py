@@ -178,7 +178,28 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
             },
             "inventory_summary": [],
             "underlying_quote": {"price": 48.9, "price_date": "2026-04-14", "market_status_label": "Ao vivo", "market_price_source": "last"},
-            "covered_real": [],
+            "covered_real": [
+                {
+                    "id": 1,
+                    "ticker": "PETRD999",
+                    "vencimento": "17/04/2026",
+                    "dias_uteis": 2,
+                    "open_qty": 100,
+                    "last_price": 0.1,
+                    "market_status_label": "Snapshot",
+                    "market_price_source": "last",
+                    "buyback_profit_per_share": -0.05,
+                    "buyback_profit_pct": -100.0,
+                    "buyback_target_hit": False,
+                    "underlying_price": 48.9,
+                    "underlying_market_status_label": "Offline",
+                    "extrinsic_pct_spot": 0.46,
+                    "pct_2x": 1.0,
+                    "pl": -40.04,
+                    "pl_pct": -100.10,
+                    "strike": 49.0,
+                }
+            ],
             "covered_sim": [],
             "suggestions": [],
             "buyback_target_pct": 70.0,
@@ -211,8 +232,9 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert 'action="/holdings/upsert"' in html
     assert "Auditoria e detalhes operacionais" in html
     assert html.count("Painel ao vivo de covered call") == 1
-    assert html.count("Calls de PETR4 em aberto (real)") == 1
+    assert html.count("Calls de PETR4 em aberto (real)") == 2
     assert html.count("Sugestões de novas calls para PETR4") == 1
+    assert "Recompra" in html
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
@@ -304,6 +326,7 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert "PETRD999" in html
     assert "Cadastro do estoque consolidado" not in html
     assert "Auditoria e detalhes operacionais" not in html
+    assert "Recompra" not in html
 
 
 def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> None:

@@ -200,94 +200,239 @@
         </div>
       </div>
 
-      <h3 class="h5 mt-2">Calls em aberto com ações operacionais</h3>
-      <p class="text-muted small mb-2">Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.</p>
-      <div class="table-responsive mb-4">
-        <table class="table table-sm table-striped align-middle">
-          <thead class="table-light">
-            <tr>
-              <th>Ticker</th>
-              <th>Modo</th>
-              <th>Venc.</th>
-              <th class="text-end">Qtd</th>
-              <th class="text-end">Último</th>
-              <th class="text-end">Spot</th>
-              <th class="text-end">P/L</th>
-              <th class="text-end">P/L%</th>
-              <th class="text-end">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for pos in covered_real %}
+      <h3 class="h5 mt-2">Calls de {{ underlying }} em aberto (real)</h3>
+      <p class="text-muted small mb-2">
+        Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.
+      </p>
+      {% if buyback_candidates_real %}
+        <div class="alert alert-success small">
+          Meta atingida para recompra: {{ buyback_candidates_real | map(attribute='ticker') | join(', ') }}.
+        </div>
+      {% endif %}
+      {% if not covered_real %}
+        <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições reais.</p>
+      {% else %}
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
               <tr>
-                <td>{{ pos.ticker }}</td>
-                <td>Real</td>
-                <td>{{ pos.vencimento or '-' }}</td>
-                <td class="text-end">{{ pos.open_qty }}</td>
-                <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}</td>
-                <td class="text-end">
-                  {% if pos.id and pos.open_qty %}
-                    <form method="post" action="/finance/expire" class="d-inline">
-                      {{ csrf_input() }}
-                      <input type="hidden" name="position_id" value="{{ pos.id }}">
-                      <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                      <button type="submit" class="btn btn-outline-secondary btn-sm">Expirou</button>
-                    </form>
-                    {% if pos.strike is not none %}
-                      <form method="post" action="/finance/callaway" class="d-inline">
+                <th>Ticker</th>
+                <th>Venc.</th>
+                <th class="text-end">D. Úteis</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Último</th>
+                <th class="text-end" title="(Prêmio - Último) e % do prêmio">Recompra</th>
+                <th class="text-end">Spot</th>
+                <th class="text-end">Extr.% Spot</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">P/L</th>
+                <th class="text-end">P/L%</th>
+                <th class="text-end">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pos in covered_real %}
+                <tr>
+                  <td>{{ pos.ticker }}</td>
+                  <td>{{ pos.vencimento or '-' }}</td>
+                  <td class="text-end">{{ pos.dias_uteis or '-' }}</td>
+                  <td class="text-end">{{ pos.open_qty }}</td>
+                  <td class="text-end">
+                    {% if pos.last_price is not none %}
+                      {{ "%.2f"|format(pos.last_price) }}
+                      <div class="text-muted small">
+                        {{ pos.market_status_label or 'Snapshot' }}
+                        {% if pos.market_price_source %}
+                          · {{ pos.market_price_source|upper }}
+                        {% endif %}
+                      </div>
+                    {% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.buyback_profit_per_share is not none %}
+                      {{ "%.2f"|format(pos.buyback_profit_per_share) }}
+                      <div class="text-muted small">
+                        {% if pos.buyback_profit_pct is not none %}{{ "%.1f"|format(pos.buyback_profit_pct) }}%{% else %}-{% endif %}
+                        {% if pos.buyback_target_hit %}
+                          <span class="badge text-bg-success ms-1">Meta</span>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.underlying_price is not none %}
+                      {{ "%.2f"|format(pos.underlying_price) }}
+                      <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
+                    {% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.extrinsic_pct_spot is not none %}{{ "%.2f"|format(pos.extrinsic_pct_spot) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.pl and pos.pl > 0 %}text-success{% elif pos.pl and pos.pl < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.id and pos.open_qty %}
+                      <form method="post" action="/finance/expire" class="d-inline">
                         {{ csrf_input() }}
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <button type="submit" class="btn btn-outline-primary btn-sm">Exercido</button>
+                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
+                        <button
+                          type="submit"
+                          class="btn btn-outline-secondary btn-sm"
+                          onclick="return confirm('Confirmar expiração da call {{ pos.ticker }}? (fecha a 0 e libera ações)');"
+                        >
+                          Expirou
+                        </button>
                       </form>
+                      {% if pos.strike is not none and pos.id and pos.open_qty %}
+                        <form method="post" action="/finance/callaway" class="d-inline">
+                          {{ csrf_input() }}
+                          <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <button
+                            type="submit"
+                            class="btn btn-outline-primary btn-sm"
+                            onclick="return confirm('Confirmar exercício da call {{ pos.ticker }}?');"
+                          >
+                            Exercido
+                          </button>
+                        </form>
+                      {% endif %}
+                    {% else %}
+                      -
                     {% endif %}
-                  {% else %}
-                    -
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-            {% for pos in covered_sim %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      <h3 class="h5 mt-4">Calls de {{ underlying }} em aberto (simulado)</h3>
+      <p class="text-muted small mb-2">
+        Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.
+      </p>
+      {% if buyback_candidates_simulated %}
+        <div class="alert alert-warning small">
+          Meta atingida (simulado): {{ buyback_candidates_simulated | map(attribute='ticker') | join(', ') }}.
+        </div>
+      {% endif %}
+      {% if not covered_sim %}
+        <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições simuladas.</p>
+      {% else %}
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
               <tr>
-                <td>{{ pos.ticker }}</td>
-                <td>Simulado</td>
-                <td>{{ pos.vencimento or '-' }}</td>
-                <td class="text-end">{{ pos.open_qty }}</td>
-                <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}</td>
-                <td class="text-end">{% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}</td>
-                <td class="text-end">
-                  {% if pos.id and pos.open_qty %}
-                    <form method="post" action="/finance/expire" class="d-inline">
-                      {{ csrf_input() }}
-                      <input type="hidden" name="position_id" value="{{ pos.id }}">
-                      <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                      <button type="submit" class="btn btn-outline-secondary btn-sm">Expirou</button>
-                    </form>
-                    {% if pos.strike is not none %}
-                      <form method="post" action="/finance/callaway" class="d-inline">
+                <th>Ticker</th>
+                <th>Venc.</th>
+                <th class="text-end">D. Úteis</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Último</th>
+                <th class="text-end" title="(Prêmio - Último) e % do prêmio">Recompra</th>
+                <th class="text-end">Spot</th>
+                <th class="text-end">Extr.% Spot</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">P/L</th>
+                <th class="text-end">P/L%</th>
+                <th class="text-end">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pos in covered_sim %}
+                <tr>
+                  <td>{{ pos.ticker }}</td>
+                  <td>{{ pos.vencimento or '-' }}</td>
+                  <td class="text-end">{{ pos.dias_uteis or '-' }}</td>
+                  <td class="text-end">{{ pos.open_qty }}</td>
+                  <td class="text-end">
+                    {% if pos.last_price is not none %}
+                      {{ "%.2f"|format(pos.last_price) }}
+                      <div class="text-muted small">
+                        {{ pos.market_status_label or 'Snapshot' }}
+                        {% if pos.market_price_source %}
+                          · {{ pos.market_price_source|upper }}
+                        {% endif %}
+                      </div>
+                    {% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.buyback_profit_per_share is not none %}
+                      {{ "%.2f"|format(pos.buyback_profit_per_share) }}
+                      <div class="text-muted small">
+                        {% if pos.buyback_profit_pct is not none %}{{ "%.1f"|format(pos.buyback_profit_pct) }}%{% else %}-{% endif %}
+                        {% if pos.buyback_target_hit %}
+                          <span class="badge text-bg-warning ms-1">Meta</span>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.underlying_price is not none %}
+                      {{ "%.2f"|format(pos.underlying_price) }}
+                      <div class="text-muted small">{{ pos.underlying_market_status_label or 'Snapshot' }}</div>
+                    {% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.extrinsic_pct_spot is not none %}{{ "%.2f"|format(pos.extrinsic_pct_spot) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.pl and pos.pl > 0 %}text-success{% elif pos.pl and pos.pl < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.id and pos.open_qty %}
+                      <form method="post" action="/finance/expire" class="d-inline">
                         {{ csrf_input() }}
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <button type="submit" class="btn btn-outline-primary btn-sm">Exercido</button>
+                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
+                        <button
+                          type="submit"
+                          class="btn btn-outline-secondary btn-sm"
+                          onclick="return confirm('Confirmar expiração da call {{ pos.ticker }} (simulado)? (fecha a 0 e libera ações)');"
+                        >
+                          Expirou
+                        </button>
                       </form>
+                      {% if pos.strike is not none and pos.id and pos.open_qty %}
+                        <form method="post" action="/finance/callaway" class="d-inline">
+                          {{ csrf_input() }}
+                          <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <button
+                            type="submit"
+                            class="btn btn-outline-primary btn-sm"
+                            onclick="return confirm('Confirmar exercício da call {{ pos.ticker }} (simulado)?');"
+                          >
+                            Exercido
+                          </button>
+                        </form>
+                      {% endif %}
+                    {% else %}
+                      -
                     {% endif %}
-                  {% else %}
-                    -
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-            {% if not covered_real and not covered_sim %}
-              <tr>
-                <td colspan="9" class="text-center text-muted">Nenhuma call aberta para auditoria operacional.</td>
-              </tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
     </div>
   </details>
 </section>

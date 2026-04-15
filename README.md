@@ -239,6 +239,7 @@ Atualizacao parcial da interface:
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
 - em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
+- a auditoria da `Covered Call` preserva o detalhamento rico de `calls em aberto`, incluindo `recompra`, `% do prêmio`, `extrínseco`, `% p/ 2x`, `P/L` e ações operacionais.
 
 ### Governanca de agents e skills
 
@@ -253,6 +254,7 @@ Perfis adotados:
 - `revisor-seguranca`: `gpt-5.4` com `high`
 - `diretor-ux`: `gpt-5.4-mini` com `medium`
 - `diretor-frontend-ui`: `gpt-5.4-mini` com `medium`
+- `perito-mercado-opcoes`: `gpt-5.4` com `high`
 
 ### Edge API publica
 
