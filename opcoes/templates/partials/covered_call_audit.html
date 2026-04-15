@@ -1,0 +1,293 @@
+<section class="mb-4">
+  <details class="card border-0 shadow-sm">
+    <summary class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3 cc-details-summary">
+      <div>
+        <h2 class="h5 mb-1">Auditoria e detalhes operacionais</h2>
+        <p class="text-muted small mb-0">
+          Esta área reúne os quadros legados, financeiros e operacionais para conferência. O fluxo principal da decisão fica concentrado no painel ao vivo acima.
+        </p>
+      </div>
+      <span class="badge text-bg-light">Abrir detalhes</span>
+    </summary>
+    <div class="card-body border-top">
+      {% if inventory_summary %}
+        <div class="card mb-4 border-0 bg-light-subtle">
+          <div class="card-body">
+            <h3 class="h6 mb-2">Estoque consolidado por ativo</h3>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Ativo</th>
+                    <th>Modo</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Reservado</th>
+                    <th class="text-end">Livre</th>
+                    <th class="text-end">PM informado</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in inventory_summary %}
+                    <tr>
+                      <td class="fw-semibold">{{ item.ticker }}</td>
+                      <td>{% if item.is_simulated %}Simulado{% else %}Real{% endif %}</td>
+                      <td class="text-end">{{ item.shares_total }}</td>
+                      <td class="text-end">{{ item.shares_reserved }}</td>
+                      <td class="text-end">{{ item.shares_free }}</td>
+                      <td class="text-end">
+                        {% if item.avg_price is not none %}R$ {{ "%.2f"|format(item.avg_price) }}{% else %}-{% endif %}
+                      </td>
+                      <td>
+                        {% if item.coverage_status == 'insufficient' %}
+                          <span class="badge text-bg-danger">Reserva maior que estoque</span>
+                        {% elif item.price_status == 'review' %}
+                          <span class="badge text-bg-warning">PM a revisar</span>
+                        {% else %}
+                          <span class="badge text-bg-success">Ok</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card h-100 border-success-subtle">
+            <div class="card-header">Prêmios líquidos (Real)</div>
+            <div class="card-body small">
+              {% if monthly_premiums %}
+                {% for m in monthly_premiums %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem prêmios reais registrados.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-primary-subtle">
+            <div class="card-header">Resultado líquido (Real)</div>
+            <div class="card-body small">
+              {% if monthly_operational_result %}
+                {% for m in monthly_operational_result %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem resultado operacional real registrado.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-warning-subtle">
+            <div class="card-header">Prêmios líquidos (Simulado)</div>
+            <div class="card-body small">
+              {% if simulated_monthly_premiums %}
+                {% for m in simulated_monthly_premiums %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem prêmios simulados registrados.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card h-100 border-warning-subtle">
+            <div class="card-header">Resultado líquido (Simulado)</div>
+            <div class="card-body small">
+              {% if simulated_monthly_operational_result %}
+                {% for m in simulated_monthly_operational_result %}
+                  <div class="d-flex justify-content-between">
+                    <span>{{ m.month }}</span>
+                    <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                      {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted mb-0">Sem resultado operacional simulado registrado.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4">
+        <div class="col-xl-6">
+          <h3 class="h6">Lotes legados de {{ underlying }} (real)</h3>
+          {% if not lots_real %}
+            <p class="text-muted small">Nenhum lote de {{ underlying }} cadastrado.</p>
+          {% else %}
+            <div class="table-responsive mb-4">
+              <table class="table table-sm table-striped align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>Data</th>
+                    <th class="text-end">Qtd total</th>
+                    <th class="text-end">Qtd coberta</th>
+                    <th class="text-end">Qtd livre</th>
+                    <th class="text-end">Preço entrada</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for lot in lots_real %}
+                    <tr>
+                      <td>{{ lot.trade_date }}</td>
+                      <td class="text-end">{{ lot.total_qty }}</td>
+                      <td class="text-end">{{ lot.covered_qty }}</td>
+                      <td class="text-end">{{ lot.free_qty }}</td>
+                      <td class="text-end">R$ {{ "%.2f"|format(lot.entry_price) }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+        <div class="col-xl-6">
+          <h3 class="h6">Lotes legados de {{ underlying }} (simulado)</h3>
+          {% if not lots_sim %}
+            <p class="text-muted small">Nenhum lote de {{ underlying }} simulado cadastrado.</p>
+          {% else %}
+            <div class="table-responsive mb-4">
+              <table class="table table-sm table-striped align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>Data</th>
+                    <th class="text-end">Qtd total</th>
+                    <th class="text-end">Qtd coberta</th>
+                    <th class="text-end">Qtd livre</th>
+                    <th class="text-end">Preço entrada</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for lot in lots_sim %}
+                    <tr>
+                      <td>{{ lot.trade_date }}</td>
+                      <td class="text-end">{{ lot.total_qty }}</td>
+                      <td class="text-end">{{ lot.covered_qty }}</td>
+                      <td class="text-end">{{ lot.free_qty }}</td>
+                      <td class="text-end">R$ {{ "%.2f"|format(lot.entry_price) }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <h3 class="h5 mt-2">Calls em aberto com ações operacionais</h3>
+      <p class="text-muted small mb-2">Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.</p>
+      <div class="table-responsive mb-4">
+        <table class="table table-sm table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Ticker</th>
+              <th>Modo</th>
+              <th>Venc.</th>
+              <th class="text-end">Qtd</th>
+              <th class="text-end">Último</th>
+              <th class="text-end">Spot</th>
+              <th class="text-end">P/L</th>
+              <th class="text-end">P/L%</th>
+              <th class="text-end">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pos in covered_real %}
+              <tr>
+                <td>{{ pos.ticker }}</td>
+                <td>Real</td>
+                <td>{{ pos.vencimento or '-' }}</td>
+                <td class="text-end">{{ pos.open_qty }}</td>
+                <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}</td>
+                <td class="text-end">
+                  {% if pos.id and pos.open_qty %}
+                    <form method="post" action="/finance/expire" class="d-inline">
+                      {{ csrf_input() }}
+                      <input type="hidden" name="position_id" value="{{ pos.id }}">
+                      <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
+                      <button type="submit" class="btn btn-outline-secondary btn-sm">Expirou</button>
+                    </form>
+                    {% if pos.strike is not none %}
+                      <form method="post" action="/finance/callaway" class="d-inline">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="position_id" value="{{ pos.id }}">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">Exercido</button>
+                      </form>
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            {% for pos in covered_sim %}
+              <tr>
+                <td>{{ pos.ticker }}</td>
+                <td>Simulado</td>
+                <td>{{ pos.vencimento or '-' }}</td>
+                <td class="text-end">{{ pos.open_qty }}</td>
+                <td class="text-end">{% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}</td>
+                <td class="text-end">{% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}</td>
+                <td class="text-end">
+                  {% if pos.id and pos.open_qty %}
+                    <form method="post" action="/finance/expire" class="d-inline">
+                      {{ csrf_input() }}
+                      <input type="hidden" name="position_id" value="{{ pos.id }}">
+                      <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
+                      <button type="submit" class="btn btn-outline-secondary btn-sm">Expirou</button>
+                    </form>
+                    {% if pos.strike is not none %}
+                      <form method="post" action="/finance/callaway" class="d-inline">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="position_id" value="{{ pos.id }}">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">Exercido</button>
+                      </form>
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not covered_real and not covered_sim %}
+              <tr>
+                <td colspan="9" class="text-center text-muted">Nenhuma call aberta para auditoria operacional.</td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+</section>

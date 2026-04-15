@@ -238,6 +238,7 @@ Atualizacao parcial da interface:
 - isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA.
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
+- em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
 
 ### Governanca de agents e skills
 

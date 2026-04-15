@@ -209,6 +209,10 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert 'hx-get="/covered-call/partial/live?' in html
     assert "Cadastro do estoque consolidado" in html
     assert 'action="/holdings/upsert"' in html
+    assert "Auditoria e detalhes operacionais" in html
+    assert html.count("Painel ao vivo de covered call") == 1
+    assert html.count("Calls de PETR4 em aberto (real)") == 1
+    assert html.count("Sugestões de novas calls para PETR4") == 1
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
@@ -295,9 +299,11 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Painel ao vivo de covered call" in html
+    assert "Resumo didático da cobertura atual" in html
     assert "Cotação PETR4" in html
     assert "PETRD999" in html
     assert "Cadastro do estoque consolidado" not in html
+    assert "Auditoria e detalhes operacionais" not in html
 
 
 def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> None:

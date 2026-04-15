@@ -14,6 +14,54 @@
   </div>
 </section>
 
+<section class="mb-4">
+  <div class="card border-0 shadow-sm bg-primary-subtle">
+    <div class="card-body">
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-8">
+          <h2 class="h6 mb-2">Resumo didático da cobertura atual</h2>
+          <p class="small text-muted mb-0">
+            Este quadro resume o saldo do estoque real, o que já está reservado em calls e quanto ainda está livre para uma nova venda coberta.
+          </p>
+        </div>
+        <div class="col-lg-4 text-lg-end">
+          {% if stock_real.shares_free > 0 %}
+            <span class="badge text-bg-success">Cobertura ok</span>
+          {% elif stock_real.shares_total > 0 %}
+            <span class="badge text-bg-secondary">Sem saldo livre</span>
+          {% else %}
+            <span class="badge text-bg-warning text-dark">Sem estoque real</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="row g-3 mt-1">
+        <div class="col-sm-3">
+          <div class="text-muted small">Ações totais</div>
+          <div class="fs-5 fw-semibold">{{ stock_real.shares_total }}</div>
+        </div>
+        <div class="col-sm-3">
+          <div class="text-muted small">Ações reservadas</div>
+          <div class="fs-5 fw-semibold">{{ stock_real.shares_covered }}</div>
+        </div>
+        <div class="col-sm-3">
+          <div class="text-muted small">Saldo livre</div>
+          <div class="fs-5 fw-semibold">{{ stock_real.shares_free }}</div>
+        </div>
+        <div class="col-sm-3">
+          <div class="text-muted small">PM informado</div>
+          <div class="fs-5 fw-semibold">
+            {% if stock_real.free_avg_price is not none %}
+              R$ {{ "%.2f"|format(stock_real.free_avg_price) }}
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <div class="row mb-4">
   <div class="col-md-4 mb-3 mb-md-0">
     <div class="card">
