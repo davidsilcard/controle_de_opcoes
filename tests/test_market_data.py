@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
+
+import httpx
+
 from opcoes.market_data import (
+    MarketDataClient,
+    MarketDataConfig,
     enrich_option_rows_with_live_market_data,
     enrich_positions_with_live_market_data,
     enrich_underlying_quote_with_live_market_data,
@@ -198,3 +204,41 @@ def test_market_display_helpers_format_source_and_timestamp() -> None:
     assert market_source_label("ask") == "Ask"
     assert format_market_timestamp_label("2026-04-15T13:59:24Z") == "15/04 10:59:24"
     assert format_market_timestamp_label("2026-04-15") == "15/04/2026"
+
+
+def test_market_data_client_batch_posts_json_body() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content_type"] = request.headers.get("Content-Type")
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "requested_symbol": "GGBR4",
+                        "symbol": "GGBR4",
+                        "last": 21.84,
+                        "time_utc": "2026-04-15T15:40:34.615000Z",
+                        "ok": True,
+                    }
+                ]
+            },
+        )
+
+    client = MarketDataClient(
+        config=MarketDataConfig(
+            base_url="http://edge-test",
+            bearer_token="token-app",
+            timeout_seconds=5.0,
+            stale_after_seconds=60,
+        ),
+        http_client=httpx.Client(base_url="http://edge-test", transport=httpx.MockTransport(handler)),
+    )
+
+    payload = client.fetch_quotes(["GGBR4"])
+
+    assert captured["content_type"] == "application/json"
+    assert captured["body"] == {"symbols": ["GGBR4"], "include_raw": False}
+    assert payload["GGBR4"]["ok"] is True

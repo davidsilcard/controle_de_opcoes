@@ -229,7 +229,7 @@ class MarketDataClient:
                 response = self._client.post(
                     "/v1/quotes/batch",
                     headers=headers,
-                    content=json.dumps({"symbols": chunk, "include_raw": False}, separators=(",", ":")),
+                    json={"symbols": chunk, "include_raw": False},
                 )
                 response.raise_for_status()
                 payload = response.json()
