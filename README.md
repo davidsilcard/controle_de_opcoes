@@ -869,6 +869,63 @@ sudo systemctl show opcoes-scrape.service -p ActiveState -p SubState -p Result
 sudo journalctl -u opcoes-scrape.service -f
 ```
 
+### Como validar se o scrape esta funcionando
+
+Checklist operacional rapido:
+
+1. confirme se o job esta ativo no `systemd`:
+
+```bash
+sudo systemctl status opcoes-scrape.service --no-pager
+```
+
+Leitura esperada:
+
+- `Active: activating (start)` ou `active` enquanto o ciclo ainda estiver em execucao
+- `Active: inactive (dead)` logo depois que terminar com sucesso
+- se houver `failed`, investigue o `journalctl`
+
+2. confirme se o log continua avancando:
+
+```bash
+sudo journalctl -u opcoes-scrape.service -f
+```
+
+Leitura esperada:
+
+- novas linhas com etapas como `Rodando scrape`, `Exportando snapshot CSV`, `Atualizando Fundamentus` e `Ciclo concluido`
+- mensagens repetidas de download e `OK (...)` tambem indicam progresso real
+- se o log parar por muito tempo no mesmo ponto, vale investigar possivel travamento
+
+3. confira o timer do agendamento:
+
+```bash
+sudo systemctl status opcoes-scrape.timer --no-pager
+```
+
+Leitura esperada:
+
+- o `.service` pode aparecer como `disabled` sem problema
+- quem precisa estar habilitado e ativo e o `opcoes-scrape.timer`
+
+4. confira o reflexo no painel web:
+
+- em `Configuracoes > Automacao e servicos`, o status deve mudar de `Em andamento` para `Concluido` ao final
+- `Ultimo fim`, `Duracao` e `Resumo` devem ser preenchidos quando o ciclo terminar
+
+5. se quiser confirmar pelo banco da aplicacao:
+
+```bash
+cd ~/apps/controle_de_opcoes
+deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli service-run list
+```
+
+Leitura esperada:
+
+- a execucao atual aparece como `running` enquanto roda
+- ao final, deve virar `success`
+- se morrer fora do fluxo normal, o watchdog pode marcar como `failed`
+
 Observacao de horario:
 
 - o timer versionado roda em `Mon..Fri *-*-* 09:00:00 UTC`, que equivale a `06:00` em `America/Sao_Paulo` no cenario atual.
