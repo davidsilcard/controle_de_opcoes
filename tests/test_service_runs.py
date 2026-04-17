@@ -92,7 +92,7 @@ def test_service_run_lifecycle_and_dashboard(monkeypatch) -> None:
         service_key="scrape_cycle",
         trigger_type="systemd",
         summary="Ciclo iniciado",
-        scheduled_for=dt.datetime(2026, 4, 1, 9, 0, tzinfo=dt.timezone.utc),
+        scheduled_for=dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
     )
 
     assert run_id
@@ -122,7 +122,7 @@ def test_service_run_lifecycle_and_dashboard(monkeypatch) -> None:
     assert dashboard["services"][0]["label"] == "Ciclo diario do scraper"
     assert dashboard["services"][0]["last_run"]["status"] == "success"
     assert dashboard["services"][0]["last_run"]["monitor_status"] == "success"
-    assert dashboard["services"][0]["next_run_utc"].isoformat() == "2026-04-02T09:00:00+00:00"
+    assert dashboard["services"][0]["next_run_utc"].isoformat() == "2026-04-02T06:00:00+00:00"
 
     assert fake.closed >= 4
 
@@ -135,13 +135,13 @@ def test_service_dashboard_flags_possible_stall_and_watchdog_can_fail_run(monkey
         service_key="scrape_cycle",
         trigger_type="systemd",
         summary="Ciclo iniciado",
-        scheduled_for=dt.datetime(2026, 4, 1, 9, 0, tzinfo=dt.timezone.utc),
+        scheduled_for=dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
     )
-    fake.rows[0]["started_at"] = dt.datetime(2026, 4, 1, 9, 0, tzinfo=dt.timezone.utc)
+    fake.rows[0]["started_at"] = dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc)
 
     dashboard = get_service_dashboard(
         limit=5,
-        now_utc=dt.datetime(2026, 4, 1, 14, 15, tzinfo=dt.timezone.utc),
+        now_utc=dt.datetime(2026, 4, 1, 11, 15, tzinfo=dt.timezone.utc),
     )
     last_run = dashboard["services"][0]["last_run"]
     assert last_run["monitor_status"] == "stalled"

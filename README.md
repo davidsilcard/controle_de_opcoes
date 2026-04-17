@@ -928,7 +928,7 @@ Leitura esperada:
 
 Observacao de horario:
 
-- o timer versionado roda em `Mon..Fri *-*-* 09:00:00 UTC`, que equivale a `06:00` em `America/Sao_Paulo` no cenario atual.
+- o timer versionado roda em `Mon..Fri *-*-* 06:00:00 UTC`, que equivale a `03:00` em `America/Sao_Paulo` no cenario atual.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
 - depois de atualizar o repositorio na VPS com `git pull`, rode `deploy/scripts/opcoes-compose-vps.sh up -d --build` para que o container use os comandos e telas novos.
 
@@ -994,7 +994,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - painel de `Configuracoes` agora sinaliza `Possivel travamento` quando um ciclo fica tempo demais sem finalizar, e o host passa a ter um watchdog para reconciliar status `running` orfao.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
-- assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 06:00 de `America/Sao_Paulo`.
+- assets versionados de `systemd` agora permitem agendar o ciclo de scrape/fundamentus diretamente na VPS, incluindo export diario de `data/opcoes_latest.csv` as 03:00 de `America/Sao_Paulo`.
 - CLI `retention` agora aplica politica automatica de expiracao para snapshots e historicos de mercado, preservando dados do usuario, auditoria e DARF.
 - aba `Configuracoes` agora inclui um painel de automacao com historico do job agendado, inicio, fim, duracao, status e proxima execucao prevista.
 - CLI `service-run` registra e lista execucoes do ciclo agendado para alimentar esse painel.

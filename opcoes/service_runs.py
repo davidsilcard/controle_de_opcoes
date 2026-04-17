@@ -275,9 +275,9 @@ def _service_definitions() -> List[ServiceDefinition]:
                 "Executa scrape, exporta o CSV mais recente, atualiza Fundamentus "
                 "e aplica a limpeza automatica dos dados de mercado."
             ),
-            schedule_label="Dias uteis as 06:00 (America/Sao_Paulo)",
+            schedule_label="Dias uteis as 03:00 (America/Sao_Paulo)",
             weekdays=(0, 1, 2, 3, 4),
-            run_hour_utc=9,
+            run_hour_utc=6,
             run_minute_utc=0,
             stale_after_seconds=4 * 60 * 60,
         )
