@@ -319,13 +319,14 @@ Variaveis opcionais para a camada live do backend:
 ```bash
 OPCOES_EDGE_BASE_URL=http://127.0.0.1:8011
 OPCOES_MARKET_DATA_TOKEN=token-interno-opcional
-OPCOES_MARKET_DATA_TIMEOUT_SECONDS=5
+OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15
 OPCOES_MARKET_DATA_STALE_AFTER_SECONDS=60
 ```
 
 Observacoes:
 
 - se `OPCOES_MARKET_DATA_TOKEN` nao for definido, a aplicacao tenta reutilizar o token `app` de `OPCOES_EDGE_API_TOKENS`
+- para backend via `BTG Trader Desk`, `OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15` tende a ser um valor inicial mais seguro que `5`, porque alguns lotes parciais podem levar varios segundos antes de fechar com timeout por item
 - a marcacao padrao usa `last` para acoes e regra hibrida para opcoes: `ask` em posicoes vendidas e `bid` em posicoes compradas, com fallback para `last`
 - a UI marca cada preco como `Ao vivo`, `Atrasado`, `Snapshot` ou `Offline`
 

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class MarketDataConfig:
     base_url: str
     bearer_token: str
-    timeout_seconds: float = 5.0
+    timeout_seconds: float = 15.0
     stale_after_seconds: int = 60
 
     @property
@@ -52,12 +52,12 @@ def load_market_data_config_from_env() -> MarketDataConfig:
     if not token:
         token_map = _parse_token_map(os.getenv("OPCOES_EDGE_API_TOKENS"))
         token = token_map.get("app") or next(iter(token_map.values()), "")
-    timeout_raw = (os.getenv("OPCOES_MARKET_DATA_TIMEOUT_SECONDS") or "5").strip()
+    timeout_raw = (os.getenv("OPCOES_MARKET_DATA_TIMEOUT_SECONDS") or "15").strip()
     stale_raw = (os.getenv("OPCOES_MARKET_DATA_STALE_AFTER_SECONDS") or "60").strip()
     try:
         timeout_seconds = max(float(timeout_raw), 1.0)
     except ValueError:
-        timeout_seconds = 5.0
+        timeout_seconds = 15.0
     try:
         stale_after_seconds = max(int(stale_raw), 15)
     except ValueError:
