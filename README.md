@@ -270,6 +270,17 @@ Como regra pratica:
 
 As skills locais em `./.agents/skills` documentam um perfil recomendado de modelo e raciocinio. Como `openai.yaml` aqui e usado mais como metadata de interface, a recomendacao operacional fica registrada nas `SKILL.md`.
 
+Onde colocar skills:
+
+- skill local deste projeto: `C:\projetos-python\controle_de_opcoes\.agents\skills\<nome-da-skill>\`
+- skill global reutilizavel em varios projetos: `C:\Users\david\.codex\skills\<nome-da-skill>\`
+- caminho legado que nao deve mais ser usado: `C:\projetos-python\controle_de_opcoes\agents\.agents\...`
+
+Exemplo local valido:
+
+- `C:\projetos-python\controle_de_opcoes\.agents\skills\perito-mercado-opcoes\SKILL.md`
+- `C:\projetos-python\controle_de_opcoes\.agents\skills\perito-mercado-opcoes\agents\openai.yaml`
+
 Perfis adotados:
 
 - `orquestrador`: `gpt-5.4` com `high`
