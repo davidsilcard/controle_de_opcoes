@@ -944,6 +944,8 @@ Observacao de horario:
 - o timer versionado roda em `Mon..Fri *-*-* 06:00:00 UTC`, que equivale a `03:00` em `America/Sao_Paulo` no cenario atual.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
 - depois de atualizar o repositorio na VPS com `git pull`, rode `deploy/scripts/opcoes-compose-vps.sh up -d --build` para que o container use os comandos e telas novos.
+- na tela de configuracoes, `Proxima prevista` mostra o agendamento atual; `Ultimo inicio registrado` e `Ultimo fim registrado` mostram o historico real ja executado, que pode continuar refletindo o horario antigo ate a proxima rodada.
+- timestamps de cotacao agora sao exibidos para o usuario em `America/Sao_Paulo`, enquanto o timestamp bruto do provider continua visivel para auditoria.
 
 ## Usuários (acesso web)
 

@@ -72,6 +72,8 @@ def test_settings_page_shows_service_panel(monkeypatch) -> None:
     assert "Ciclo diario do scraper" in html
     assert "Execucoes recentes" in html
     assert "Ciclo concluido" in html
+    assert "A proxima prevista usa o agendamento atual" in html
+    assert "Ultimo inicio registrado" in html
 
 
 def test_settings_page_shows_possible_stall_warning(monkeypatch) -> None:
@@ -132,3 +134,4 @@ def test_settings_page_shows_possible_stall_warning(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Possivel travamento" in html
     assert "Execucao sem finalizacao ha 5h 00m" in html
+    assert "Ultimo fim registrado" in html

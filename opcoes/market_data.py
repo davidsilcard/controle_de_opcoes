@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -13,6 +14,7 @@ from .runtime_env import load_dotenv_once
 from .utils import infer_option_type
 
 logger = logging.getLogger(__name__)
+_LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 @dataclass(frozen=True)
@@ -212,7 +214,8 @@ def format_market_timestamp_label(value: Any) -> str | None:
         return None
     if parsed.time() == dt.time.min:
         return parsed.strftime("%d/%m/%Y")
-    return parsed.strftime("%d/%m %H:%M:%S")
+    localized = parsed.astimezone(_LOCAL_DISPLAY_TZ)
+    return localized.strftime("%d/%m %H:%M:%S")
 
 
 class MarketDataClient:

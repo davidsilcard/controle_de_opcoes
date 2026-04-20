@@ -61,13 +61,16 @@
                   <dd class="col-sm-7">
                     {{ service.next_run_local_display }}
                     <div class="text-muted">Base UTC: {{ service.next_run_utc_display }}</div>
+                    <div class="text-muted">
+                      A proxima prevista usa o agendamento atual; os horarios abaixo mostram a ultima execucao realmente registrada.
+                    </div>
                   </dd>
 
                   {% if service.last_run_view %}
-                  <dt class="col-sm-5">Ultimo inicio</dt>
+                  <dt class="col-sm-5">Ultimo inicio registrado</dt>
                   <dd class="col-sm-7">{{ service.last_run_view.started_at_display }}</dd>
 
-                  <dt class="col-sm-5">Ultimo fim</dt>
+                  <dt class="col-sm-5">Ultimo fim registrado</dt>
                   <dd class="col-sm-7">{{ service.last_run_view.finished_at_display }}</dd>
 
                   <dt class="col-sm-5">Duracao</dt>

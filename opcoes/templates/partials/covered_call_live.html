@@ -92,20 +92,19 @@
                 Atualizado em
                 <span data-local-datetime="{{ underlying_quote.market_time_utc or underlying_quote.price_date }}">
                   {{ underlying_quote.market_time_display or underlying_quote.price_date }}
-                </span>
+                </span> (America/Sao_Paulo)
               </div>
             {% endif %}
           {% else %}
             -
           {% endif %}
         </div>
-        <div class="text-muted small mt-2">Timestamp recebido da cotação</div>
+        <div class="text-muted small mt-2">Timestamp bruto do provider</div>
         <div>
-          {% if underlying_quote and underlying_quote.price_date %}
+          {% if underlying_quote and (underlying_quote.market_time_utc or underlying_quote.price_date) %}
             <span
-              data-local-datetime="{{ underlying_quote.price_date }}"
-              title="{{ underlying_quote.price_date }}"
-            >{{ underlying_quote.market_time_display or underlying_quote.price_date }}</span>
+              title="{{ underlying_quote.market_time_utc or underlying_quote.price_date }}"
+            >{{ underlying_quote.market_time_utc or underlying_quote.price_date }}</span>
           {% else %}
             -
           {% endif %}

@@ -144,7 +144,7 @@ def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
     assert ctx["covered_real"][0]["underlying_price"] == 48.9
     assert ctx["suggestions"][0]["premium_ref"] == 0.1
     assert ctx["suggestions"][0]["market_status_label"] == "Ao vivo"
-    assert ctx["underlying_quote"]["market_time_display"] == "14/04 13:00:00"
+    assert ctx["underlying_quote"]["market_time_display"] == "14/04 10:00:00"
 
 
 def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
@@ -386,13 +386,13 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
                     "price_status": "ok",
                 }
             ],
-            "underlying_quote": {
-                "price": 48.9,
-                "price_date": "2026-04-14",
-                "market_status_label": "Ao vivo",
-                "market_source_label": "Ultimo",
-                "market_time_display": "14/04 13:00:00",
-            },
+                "underlying_quote": {
+                    "price": 48.9,
+                    "price_date": "2026-04-14",
+                    "market_status_label": "Ao vivo",
+                    "market_source_label": "Ultimo",
+                    "market_time_display": "14/04 10:00:00",
+                },
             "covered_real": [],
             "covered_sim": [],
             "suggestions": [
@@ -444,8 +444,9 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert "Recompra" not in html
     assert "Atualizado em" in html
     assert 'data-local-datetime="2026-04-14"' in html
-    assert "14/04 13:00:00" in html
-    assert "Timestamp recebido da cotação" in html
+    assert "14/04 10:00:00" in html
+    assert "(America/Sao_Paulo)" in html
+    assert "Timestamp bruto do provider" in html
     assert "Ao vivo" in html
 
 
