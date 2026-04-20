@@ -72,6 +72,7 @@ Observacao:
 - em producao, a aplicacao nao sobe se `OPCOES_SECRET_KEY` estiver ausente ou no valor padrao.
 - para desenvolvimento local, defina uma chave propria mesmo em ambiente simples.
 - para VPS com varias aplicacoes, prefira guardar segredos fora do projeto, por exemplo em `/etc/controle_de_opcoes/app.env`.
+- na VPS, trate `/etc/controle_de_opcoes/app.env` como fonte oficial e evite manter `.env` com valores reais na raiz do projeto.
 - `OPCOES_AUTH_SCHEMA` define o schema dedicado de autenticacao web, onde ficam `auth.web_users` e os dados de login.
 - `OPCOES_TEMP_PASSWORD_TTL_SECONDS` ajusta por quanto tempo a senha temporaria continua valida antes de expirar no primeiro acesso.
 - opcionalmente, use `OPCOES_SHARED_SCHEMA` para separar a base compartilhada de mercado/configuracoes do schema operacional do usuario.
@@ -95,6 +96,13 @@ Separacao de responsabilidades:
 - `/etc/<app>/app.env`: segredos e parametros de producao
 - `systemd`: jobs agendados e timers
 - `Caddy`: dominio, HTTPS e roteamento por subdominio
+
+Regra de precedencia recomendada:
+
+- desenvolvimento local: use `./.env`
+- producao na VPS: use `/etc/controle_de_opcoes/app.env`
+- quando `OPCOES_APP_ENV_FILE` estiver definido, o loader Python passa a priorizar esse arquivo antes de tentar `./.env`
+- na VPS, isso evita divergencia entre comandos `python -m ...` e os containers Docker
 
 Exemplo de arquivo seguro de producao:
 

@@ -47,6 +47,9 @@ def load_dotenv_once(path: Optional[Path] = None) -> Optional[Path]:
     if path is not None:
         candidates.append(Path(path).expanduser())
     else:
+        configured_env = (os.getenv("OPCOES_APP_ENV_FILE") or "").strip()
+        if configured_env:
+            candidates.append(Path(configured_env).expanduser())
         cwd_env = Path.cwd() / ".env"
         candidates.append(cwd_env)
         project_env = Path(__file__).resolve().parents[1] / ".env"
