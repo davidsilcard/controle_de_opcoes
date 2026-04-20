@@ -39,7 +39,7 @@ def _serialize_context(ctx: Mapping[str, Any]) -> str:
             "__type__": "ReportData",
             "value": asdict(data),
         }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def _deserialize_context(payload_json: str) -> Dict[str, Any]:

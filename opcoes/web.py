@@ -84,10 +84,10 @@ from .market_data import (
     market_status_label,
 )
 from .ranking_page_cache import (
-    build_cache_key as build_ranking_page_cache_key,
-    get_cached_context as get_persisted_ranking_cache,
-    invalidate_namespace as invalidate_persisted_ranking_cache_namespace,
-    set_cached_context as set_persisted_ranking_cache,
+    build_cache_key as build_persisted_page_cache_key,
+    get_cached_context as get_persisted_page_cache,
+    invalidate_namespace as invalidate_persisted_page_cache_namespace,
+    set_cached_context as set_persisted_page_cache,
 )
 from .perf import (
     build_server_timing_header,
@@ -355,6 +355,8 @@ def create_app() -> Flask:
     market_data_client = MarketDataClient()
     ranking_cache: dict[str, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
+    strategy_page_cache: dict[str, tuple[float, dict]] = {}
+    strategy_page_cache_lock = threading.Lock()
     ranking_cache_write_endpoints = {
         "darf_generate",
         "darf_pay",
@@ -412,7 +414,7 @@ def create_app() -> Flask:
         )
 
     def _ranking_cache_key() -> str:
-        return build_ranking_page_cache_key(
+        return build_persisted_page_cache_key(
             route_name="index",
             namespace=_current_ranking_cache_namespace(),
             args_signature=_ranking_args_signature(),
@@ -438,7 +440,10 @@ def create_app() -> Flask:
         if payload is not None:
             return payload
         ttl = _ranking_cache_ttl_seconds()
-        payload = get_persisted_ranking_cache(cache_key=cache_key, ttl_seconds=ttl)
+        try:
+            payload = get_persisted_page_cache(cache_key=cache_key, ttl_seconds=ttl)
+        except Exception:
+            payload = None
         if payload is not None:
             _set_ranking_memory_cache(cache_key, payload)
         return payload
@@ -465,14 +470,17 @@ def create_app() -> Flask:
         if ttl <= 0:
             return
         _set_ranking_memory_cache(cache_key, payload)
-        set_persisted_ranking_cache(
-            cache_key=cache_key,
-            namespace=_current_ranking_cache_namespace(),
-            route_name="index",
-            args_signature=_ranking_args_signature(),
-            ctx=payload,
-            ttl_seconds=ttl,
-        )
+        try:
+            set_persisted_page_cache(
+                cache_key=cache_key,
+                namespace=_current_ranking_cache_namespace(),
+                route_name="index",
+                args_signature=_ranking_args_signature(),
+                ctx=payload,
+                ttl_seconds=ttl,
+            )
+        except Exception:
+            pass
 
     def _invalidate_ranking_cache_for_namespace(namespace: str) -> None:
         if not namespace:
@@ -481,10 +489,119 @@ def create_app() -> Flask:
             keys = [key for key in ranking_cache.keys() if f'"namespace":"{namespace}"' in key]
             for key in keys:
                 ranking_cache.pop(key, None)
-        invalidate_persisted_ranking_cache_namespace(namespace)
+        try:
+            invalidate_persisted_page_cache_namespace(namespace)
+        except Exception:
+            pass
 
     def _invalidate_ranking_cache_for_current_user() -> None:
         _invalidate_ranking_cache_for_namespace(_current_ranking_cache_namespace())
+
+    def _strategy_page_cache_ttl_seconds() -> int:
+        raw = os.getenv("OPCOES_STRATEGY_PAGE_CACHE_SECONDS", "30").strip()
+        try:
+            ttl = int(raw)
+        except ValueError:
+            ttl = 30
+        return max(ttl, 0)
+
+    def _strategy_page_args_signature(*, ignore_keys: set[str] | None = None) -> tuple:
+        ignored = ignore_keys or set()
+        return tuple(
+            (key, tuple(sorted(str(v) for v in request.args.getlist(key))))
+            for key in sorted(request.args.keys())
+            if key not in ignored
+        )
+
+    def _strategy_page_cache_key(route_name: str, *, ignore_keys: set[str] | None = None) -> str:
+        return build_persisted_page_cache_key(
+            route_name=route_name,
+            namespace=_current_ranking_cache_namespace(),
+            args_signature=_strategy_page_args_signature(ignore_keys=ignore_keys),
+        )
+
+    def _get_strategy_page_memory_cache(cache_key: str) -> Optional[dict]:
+        ttl = _strategy_page_cache_ttl_seconds()
+        if ttl <= 0:
+            return None
+        now = time.monotonic()
+        with strategy_page_cache_lock:
+            entry = strategy_page_cache.get(cache_key)
+            if not entry:
+                return None
+            expires_at, payload = entry
+            if expires_at <= now:
+                strategy_page_cache.pop(cache_key, None)
+                return None
+            return payload
+
+    def _get_strategy_page_cache(cache_key: str) -> Optional[dict]:
+        payload = _get_strategy_page_memory_cache(cache_key)
+        if payload is not None:
+            return payload
+        ttl = _strategy_page_cache_ttl_seconds()
+        try:
+            payload = get_persisted_page_cache(cache_key=cache_key, ttl_seconds=ttl)
+        except Exception:
+            payload = None
+        if payload is not None:
+            _set_strategy_page_memory_cache(cache_key, payload)
+        return payload
+
+    def _set_strategy_page_memory_cache(cache_key: str, payload: dict) -> None:
+        ttl = _strategy_page_cache_ttl_seconds()
+        if ttl <= 0:
+            return
+        now = time.monotonic()
+        expires_at = now + float(ttl)
+        with strategy_page_cache_lock:
+            strategy_page_cache[cache_key] = (expires_at, payload)
+            if len(strategy_page_cache) > 256:
+                stale_keys = [
+                    key
+                    for key, (exp, _ctx) in strategy_page_cache.items()
+                    if exp <= now
+                ]
+                for key in stale_keys:
+                    strategy_page_cache.pop(key, None)
+
+    def _set_strategy_page_cache(
+        cache_key: str,
+        payload: dict,
+        *,
+        route_name: str,
+        ignore_keys: set[str] | None = None,
+    ) -> None:
+        ttl = _strategy_page_cache_ttl_seconds()
+        if ttl <= 0:
+            return
+        _set_strategy_page_memory_cache(cache_key, payload)
+        try:
+            set_persisted_page_cache(
+                cache_key=cache_key,
+                namespace=_current_ranking_cache_namespace(),
+                route_name=route_name,
+                args_signature=_strategy_page_args_signature(ignore_keys=ignore_keys),
+                ctx=payload,
+                ttl_seconds=ttl,
+            )
+        except Exception:
+            pass
+
+    def _invalidate_strategy_page_cache_for_namespace(namespace: str) -> None:
+        if not namespace:
+            return
+        with strategy_page_cache_lock:
+            keys = [key for key in strategy_page_cache.keys() if f'"namespace":"{namespace}"' in key]
+            for key in keys:
+                strategy_page_cache.pop(key, None)
+        try:
+            invalidate_persisted_page_cache_namespace(namespace)
+        except Exception:
+            pass
+
+    def _invalidate_strategy_page_cache_for_current_user() -> None:
+        _invalidate_strategy_page_cache_for_namespace(_current_ranking_cache_namespace())
 
     def _csrf_token_value() -> str:
         token = session.get(CSRF_FIELD_NAME)
@@ -680,6 +797,7 @@ def create_app() -> Flask:
         endpoint = request.endpoint or ""
         if request.method == "POST" and endpoint in ranking_cache_write_endpoints:
             _invalidate_ranking_cache_for_current_user()
+            _invalidate_strategy_page_cache_for_current_user()
         if endpoint != "static":
             response.headers.setdefault("Cache-Control", "no-store")
             response.headers.setdefault("Pragma", "no-cache")
@@ -840,6 +958,9 @@ def create_app() -> Flask:
         _invalidate_ranking_cache_for_namespace(
             _ranking_cache_namespace(session.get("username"))
         )
+        _invalidate_strategy_page_cache_for_namespace(
+            _ranking_cache_namespace(session.get("username"))
+        )
         session.clear()
         return redirect(url_for("login"))
 
@@ -859,14 +980,36 @@ def create_app() -> Flask:
 
     @app.route("/covered-call")
     def covered_call() -> str:
-        with timed_stage("route.covered_call.context"):
-            ctx = _build_covered_call_page_context(
-                args=request.args,
-                market_data_client=market_data_client,
-                persist_settings=True,
-                include_financial_sections=True,
-                include_inventory_summary=True,
-            )
+        cacheable = not (
+            request.args.get("holding_notice") or request.args.get("holding_error")
+        )
+        ctx = None
+        cache_key = None
+        if cacheable:
+            with timed_stage("route.covered_call.cache_key"):
+                cache_key = _strategy_page_cache_key(
+                    "covered_call",
+                    ignore_keys={"holding_notice", "holding_error"},
+                )
+            with timed_stage("route.covered_call.cache_lookup"):
+                ctx = _get_strategy_page_cache(cache_key)
+        if ctx is None:
+            with timed_stage("route.covered_call.context"):
+                ctx = _build_covered_call_page_context(
+                    args=request.args,
+                    market_data_client=market_data_client,
+                    persist_settings=True,
+                    include_financial_sections=True,
+                    include_inventory_summary=True,
+                )
+            if cacheable and cache_key is not None:
+                with timed_stage("route.covered_call.cache_store"):
+                    _set_strategy_page_cache(
+                        cache_key,
+                        ctx,
+                        route_name="covered_call",
+                        ignore_keys={"holding_notice", "holding_error"},
+                    )
         with timed_stage("route.covered_call.render"):
             return render_template("covered_call.html", **ctx)
 
@@ -885,8 +1028,19 @@ def create_app() -> Flask:
 
     @app.route("/cash-covered-put")
     def cash_covered_put() -> str:
-        with timed_stage("route.cash_put.context"):
-            ctx = get_cash_covered_put_context(request.args)
+        with timed_stage("route.cash_put.cache_key"):
+            cache_key = _strategy_page_cache_key("cash_covered_put")
+        with timed_stage("route.cash_put.cache_lookup"):
+            ctx = _get_strategy_page_cache(cache_key)
+        if ctx is None:
+            with timed_stage("route.cash_put.context"):
+                ctx = get_cash_covered_put_context(request.args)
+            with timed_stage("route.cash_put.cache_store"):
+                _set_strategy_page_cache(
+                    cache_key,
+                    ctx,
+                    route_name="cash_covered_put",
+                )
         with timed_stage("route.cash_put.render"):
             return render_template("cash_covered_put.html", **ctx)
 
