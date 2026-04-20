@@ -158,6 +158,19 @@ def _normalize_quote_item(item: Mapping[str, Any], *, stale_after_seconds: int) 
     }
 
 
+def _error_code_from_item(item: Mapping[str, Any]) -> str:
+    error_payload = item.get("error")
+    if isinstance(error_payload, Mapping):
+        code = str(error_payload.get("code") or "").strip().lower()
+        if code:
+            return code
+    return "unknown"
+
+
+def _symbol_from_item(item: Mapping[str, Any]) -> str:
+    return str(item.get("requested_symbol") or item.get("symbol") or "").strip().upper()
+
+
 def _to_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -247,7 +260,37 @@ class MarketDataClient:
                 return results
             items = payload.get("items") if isinstance(payload, Mapping) else None
             if not isinstance(items, list):
+                logger.warning(
+                    "market_data_batch_invalid_payload",
+                    extra={
+                        "base_url": self.config.base_url,
+                        "chunk_size": len(chunk),
+                        "payload_type": type(payload).__name__,
+                    },
+                )
                 continue
+            success_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok", True))
+            error_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok") is False)
+            error_items = [
+                {
+                    "symbol": _symbol_from_item(item),
+                    "error_code": _error_code_from_item(item),
+                }
+                for item in items
+                if isinstance(item, Mapping) and item.get("ok") is False
+            ]
+            logger.info(
+                "market_data_batch_processed",
+                extra={
+                    "base_url": self.config.base_url,
+                    "chunk_size": len(chunk),
+                    "count_total": len(items),
+                    "count_success": success_count,
+                    "count_error": error_count,
+                    "partial": bool(payload.get("partial")) if isinstance(payload, Mapping) else False,
+                    "error_items": error_items,
+                },
+            )
             for item in items:
                 if not isinstance(item, Mapping):
                     continue

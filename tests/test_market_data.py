@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 
@@ -242,3 +243,82 @@ def test_market_data_client_batch_posts_json_body() -> None:
     assert captured["content_type"] == "application/json"
     assert captured["body"] == {"symbols": ["GGBR4"], "include_raw": False}
     assert payload["GGBR4"]["ok"] is True
+
+
+def test_market_data_client_keeps_partial_batch_and_logs_item_errors(caplog) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "requested_symbol": "ITUBE542",
+                        "symbol": "ITUBE542",
+                        "last": 6.57,
+                        "time_utc": "2026-04-20T12:44:40.803000Z",
+                        "ok": True,
+                    },
+                    {
+                        "requested_symbol": "WIZCD983",
+                        "ok": False,
+                        "error": {
+                            "code": "timeout",
+                            "message": "Provider timeout",
+                            "details": {"symbol": "WIZCD983"},
+                        },
+                    },
+                    {
+                        "requested_symbol": "WEGEK537",
+                        "symbol": "WEGEK537",
+                        "last": 4.14,
+                        "time_utc": "2026-04-20T12:44:41.860000Z",
+                        "ok": True,
+                    },
+                    {
+                        "requested_symbol": "GGBRD221",
+                        "ok": False,
+                        "error": {
+                            "code": "timeout",
+                            "message": "Provider timeout",
+                            "details": {"symbol": "GGBRD221"},
+                        },
+                    },
+                ],
+                "count_total": 4,
+                "count_success": 2,
+                "count_error": 2,
+                "partial": True,
+            },
+        )
+
+    client = MarketDataClient(
+        config=MarketDataConfig(
+            base_url="http://edge-test",
+            bearer_token="token-app",
+            timeout_seconds=5.0,
+            stale_after_seconds=60,
+        ),
+        http_client=httpx.Client(base_url="http://edge-test", transport=httpx.MockTransport(handler)),
+    )
+
+    with caplog.at_level(logging.INFO):
+        payload = client.fetch_quotes(["ITUBE542", "WIZCD983", "WEGEK537", "GGBRD221"])
+
+    assert payload["ITUBE542"]["ok"] is True
+    assert payload["WEGEK537"]["ok"] is True
+    assert payload["WIZCD983"]["ok"] is False
+    assert payload["WIZCD983"]["error"]["code"] == "timeout"
+    assert payload["GGBRD221"]["ok"] is False
+    assert payload["GGBRD221"]["error"]["code"] == "timeout"
+
+    record = next(
+        record for record in caplog.records if record.msg == "market_data_batch_processed"
+    )
+    assert record.count_total == 4
+    assert record.count_success == 2
+    assert record.count_error == 2
+    assert record.partial is True
+    assert record.error_items == [
+        {"symbol": "WIZCD983", "error_code": "timeout"},
+        {"symbol": "GGBRD221", "error_code": "timeout"},
+    ]
