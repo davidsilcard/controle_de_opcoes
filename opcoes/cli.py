@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import datetime as dt
 import getpass
+import os
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -13,6 +14,7 @@ from .auth import (
     list_user_schema_mappings,
     list_users,
     migrate_user_app_schemas,
+    normalize_username,
 )
 from .scraper.run import scrape_all
 from .enrich import enrich_csv
@@ -50,6 +52,9 @@ from .service_runs import (
     start_service_run,
 )
 from .runtime_env import load_dotenv_once
+from .config import reset_pg_schema_override, set_pg_schema_override
+from .ranking_page_cache import build_cache_key as build_ranking_page_cache_key, set_cached_context as set_ranking_page_cache
+from .strategies import get_ranking_context
 
 
 USER_BOOTSTRAP_MARKET_TABLES = [
@@ -367,6 +372,21 @@ def parse_args() -> argparse.Namespace:
         dest="persist",
         action="store_false",
         help="Não gravar histórico de ranking no banco (default: persiste).",
+    )
+
+    rank_cache = sub.add_parser(
+        "ranking-cache",
+        help="Aquece ou atualiza o cache persistido da home de ranking.",
+    )
+    rank_cache_sub = rank_cache.add_subparsers(dest="subcmd", required=True)
+    rank_cache_refresh = rank_cache_sub.add_parser(
+        "refresh",
+        help="Recalcula e persiste o contexto padrão da home de ranking.",
+    )
+    rank_cache_refresh.add_argument(
+        "--username",
+        default=None,
+        help="Usuário para aquecer o cache no schema/namespace dele.",
     )
 
     sn = sub.add_parser("snapshot", help="Opera sobre snapshots diários")
@@ -984,6 +1004,45 @@ def main() -> None:
                 },
                 params={"min_score": args.min_score, "limit": args.limit},
             )
+    elif args.cmd == "ranking-cache":
+        if args.subcmd == "refresh":
+            normalized_username = normalize_username(args.username or "")
+            namespace = "global"
+            try:
+                if normalized_username:
+                    target_schema = get_user_app_schema(normalized_username)
+                    if not target_schema:
+                        raise SystemExit(
+                            f"Usuário '{normalized_username}' não possui app_schema resolvido."
+                        )
+                    set_pg_schema_override(target_schema)
+                    namespace = f"user:{normalized_username}"
+
+                ctx = get_ranking_context({})
+                ttl_raw = (os.getenv("OPCOES_RANKING_CACHE_SECONDS") or "45").strip()
+                try:
+                    ttl_seconds = max(int(ttl_raw), 0)
+                except ValueError:
+                    ttl_seconds = 45
+                cache_key = build_ranking_page_cache_key(
+                    route_name="index",
+                    namespace=namespace,
+                    args_signature=(),
+                )
+                set_ranking_page_cache(
+                    cache_key=cache_key,
+                    namespace=namespace,
+                    route_name="index",
+                    args_signature=(),
+                    ctx=ctx,
+                    ttl_seconds=ttl_seconds,
+                )
+                print(
+                    f"Ranking cache atualizado: namespace={namespace} ttl={ttl_seconds}s"
+                )
+            finally:
+                if normalized_username:
+                    reset_pg_schema_override()
     elif args.cmd == "snapshot":
         if args.subcmd == "export":
             try:

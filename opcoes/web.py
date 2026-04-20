@@ -83,6 +83,12 @@ from .market_data import (
     market_source_label,
     market_status_label,
 )
+from .ranking_page_cache import (
+    build_cache_key as build_ranking_page_cache_key,
+    get_cached_context as get_persisted_ranking_cache,
+    invalidate_namespace as invalidate_persisted_ranking_cache_namespace,
+    set_cached_context as set_persisted_ranking_cache,
+)
 from .perf import (
     build_server_timing_header,
     finalize_request_timing,
@@ -347,7 +353,7 @@ def create_app() -> Flask:
     app.secret_key = secret_key
     ensure_bootstrap_user_from_env()
     market_data_client = MarketDataClient()
-    ranking_cache: dict[tuple, tuple[float, dict]] = {}
+    ranking_cache: dict[str, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
     ranking_cache_write_endpoints = {
         "darf_generate",
@@ -399,15 +405,20 @@ def create_app() -> Flask:
             username = normalize_username(session.get("username") or "")
         return _ranking_cache_namespace(username)
 
-    def _ranking_cache_key() -> tuple:
-        args_signature = tuple(
+    def _ranking_args_signature() -> tuple:
+        return tuple(
             (key, tuple(sorted(str(v) for v in request.args.getlist(key))))
             for key in sorted(request.args.keys())
         )
-        backend = "postgres"
-        return ("index", backend, _current_ranking_cache_namespace(), args_signature)
 
-    def _get_ranking_cache(cache_key: tuple) -> Optional[dict]:
+    def _ranking_cache_key() -> str:
+        return build_ranking_page_cache_key(
+            route_name="index",
+            namespace=_current_ranking_cache_namespace(),
+            args_signature=_ranking_args_signature(),
+        )
+
+    def _get_ranking_memory_cache(cache_key: str) -> Optional[dict]:
         ttl = _ranking_cache_ttl_seconds()
         if ttl <= 0:
             return None
@@ -422,7 +433,17 @@ def create_app() -> Flask:
                 return None
             return payload
 
-    def _set_ranking_cache(cache_key: tuple, payload: dict) -> None:
+    def _get_ranking_cache(cache_key: str) -> Optional[dict]:
+        payload = _get_ranking_memory_cache(cache_key)
+        if payload is not None:
+            return payload
+        ttl = _ranking_cache_ttl_seconds()
+        payload = get_persisted_ranking_cache(cache_key=cache_key, ttl_seconds=ttl)
+        if payload is not None:
+            _set_ranking_memory_cache(cache_key, payload)
+        return payload
+
+    def _set_ranking_memory_cache(cache_key: str, payload: dict) -> None:
         ttl = _ranking_cache_ttl_seconds()
         if ttl <= 0:
             return
@@ -439,13 +460,28 @@ def create_app() -> Flask:
                 for key in stale_keys:
                     ranking_cache.pop(key, None)
 
+    def _set_ranking_cache(cache_key: str, payload: dict) -> None:
+        ttl = _ranking_cache_ttl_seconds()
+        if ttl <= 0:
+            return
+        _set_ranking_memory_cache(cache_key, payload)
+        set_persisted_ranking_cache(
+            cache_key=cache_key,
+            namespace=_current_ranking_cache_namespace(),
+            route_name="index",
+            args_signature=_ranking_args_signature(),
+            ctx=payload,
+            ttl_seconds=ttl,
+        )
+
     def _invalidate_ranking_cache_for_namespace(namespace: str) -> None:
         if not namespace:
             return
         with ranking_cache_lock:
-            keys = [key for key in ranking_cache.keys() if len(key) > 2 and key[2] == namespace]
+            keys = [key for key in ranking_cache.keys() if f'"namespace":"{namespace}"' in key]
             for key in keys:
                 ranking_cache.pop(key, None)
+        invalidate_persisted_ranking_cache_namespace(namespace)
 
     def _invalidate_ranking_cache_for_current_user() -> None:
         _invalidate_ranking_cache_for_namespace(_current_ranking_cache_namespace())

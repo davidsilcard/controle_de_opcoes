@@ -354,6 +354,7 @@ OPCOES_MARKET_DATA_TOKEN=token-interno-opcional
 OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15
 OPCOES_MARKET_DATA_STALE_AFTER_SECONDS=60
 OPCOES_PERF_TIMING_ENABLED=1
+RANKING_CACHE_WARM_USERNAME=
 OPCOES_WEB_WORKERS=4
 OPCOES_WEB_WORKER_CLASS=gthread
 OPCOES_WEB_THREADS=4
@@ -367,6 +368,8 @@ Observacoes:
 - a marcacao padrao usa `last` para acoes e regra hibrida para opcoes: `ask` em posicoes vendidas e `bid` em posicoes compradas, com fallback para `last`
 - a UI marca cada preco como `Ao vivo`, `Atrasado`, `Snapshot` ou `Offline`
 - com `OPCOES_PERF_TIMING_ENABLED=1`, a app Flask emite `Server-Timing` nas respostas web e log estruturado `web_request_timing`
+- `OPCOES_RANKING_CACHE_SECONDS` agora funciona como cache L1 em memoria + cache L2 persistido em PostgreSQL para a home de ranking
+- `RANKING_CACHE_WARM_USERNAME` permite aquecer o cache persistido do ranking ao final do ciclo agendado para um usuario/schema especifico
 - `OPCOES_WEB_WORKERS`, `OPCOES_WEB_WORKER_CLASS`, `OPCOES_WEB_THREADS` e `OPCOES_WEB_TIMEOUT_SECONDS` controlam o runtime do `gunicorn` no container `web`
 
 Fluxo recomendado:
