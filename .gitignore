@@ -14,8 +14,7 @@ codex_test_tmp/
 # Virtual environment
 .venv/
 
-# Local agent/skill artifacts
-agents/
+# Local Codex agent/skill artifacts
 .agents/
 
 # Local data artifacts

@@ -251,11 +251,24 @@ Atualizacao parcial da interface:
 - quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
 - os paineis ao vivo agora mostram de forma explicita a origem do preco (`Ao vivo`, `Atrasado` ou `Snapshot`), a referencia usada (`Bid`, `Ask`, `Ultimo` ou `Snapshot`) e o horario/data util da ultima atualizacao.
 - quando a cotacao ao vivo nao estiver disponivel, a aplicacao continua usando o snapshot local, mas sem confundir esse fallback com status `Offline` quando ja existe um preco valido na base.
-- quando o gateway informar timestamps com sufixo UTC (`Z`), a UI passa a exibir o horario "de parede" recebido na cotacao, sem deslocar 3 horas por conversao automatica de fuso; o valor bruto continua acessivel no `title` do campo para auditoria.
+- quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.
 
-### Governanca de agents e skills
+### Governanca de skills locais e subagentes
 
-As skills locais em `agents/.agents/skills` passaram a documentar um perfil recomendado de modelo e raciocinio. Como `agents/openai.yaml` hoje e voltado a metadata de interface, a recomendacao operacional fica registrada nas `SKILL.md`.
+Convencao correta para este projeto:
+
+- skills locais e especificas deste repositorio ficam em `./.agents/skills`
+- cada skill usa a estrutura `./.agents/skills/<nome-da-skill>/SKILL.md` e `./.agents/skills/<nome-da-skill>/agents/openai.yaml`
+- o caminho `agents/.agents/...` foi um artefato local legado e nao deve mais ser usado
+
+Como regra pratica:
+
+- se a skill vale so para este projeto, use `./.agents/skills`
+- se a skill for global e reutilizavel em varios projetos, ela deve morar no ambiente global do Codex, nao dentro deste repositorio
+- use o termo `skill local` para o pacote de instrucoes especializadas salvo no repositorio
+- use o termo `subagente` apenas para uma execucao delegada em paralelo, quando realmente houver necessidade de dividir trabalho
+
+As skills locais em `./.agents/skills` documentam um perfil recomendado de modelo e raciocinio. Como `openai.yaml` aqui e usado mais como metadata de interface, a recomendacao operacional fica registrada nas `SKILL.md`.
 
 Perfis adotados:
 
@@ -989,7 +1002,7 @@ uv run pytest -q
 ```
 
 Observação: testes marcados com `requires_postgres` são pulados automaticamente quando não há `DATABASE_URL`/`POSTGRES_*` configurado.
-Artefatos locais de apoio, como `agents/`, `.agents/` e diretórios temporários de teste, não fazem parte do versionamento padrão do projeto.
+Artefatos locais de apoio, como `.agents/` e diretórios temporários de teste, não fazem parte do versionamento padrão do projeto.
 
 E2E opcional:
 
@@ -999,7 +1012,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
-- higiene de repositório reforçada para ignorar artefatos locais de agentes/skills e temporários de teste, evitando ruído no Git e no VS Code.
+- higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.
 - README agora documenta `db optimize` para criar os indices recomendados apos bootstrap ou migracao.
 - README detalha melhor o rate limit de login por IP, incluindo a dependencia de `ProxyFix` e a persistencia no schema de autenticacao.
