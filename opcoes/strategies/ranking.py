@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping
 
 from ..report import ReportData, generate_report
+from ..perf import timed_stage
 from ..utils import infer_option_type, parse_ptbr_number
 from ..settings import (
     get_ranking_view_settings,
@@ -310,12 +311,13 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     # IO / Data Fetching
     empty_state_message = ""
     try:
-        data: ReportData = generate_report(
-            min_score=min_score,
-            limit=limit,
-            recurring_days=recurring_days,
-            recurring_limit=recurring_limit,
-        )
+        with timed_stage("ranking.generate_report"):
+            data: ReportData = generate_report(
+                min_score=min_score,
+                limit=limit,
+                recurring_days=recurring_days,
+                recurring_limit=recurring_limit,
+            )
     except RuntimeError as exc:
         # Primeiro acesso de usuário novo: ainda sem snapshots.
         if "Nenhum snapshot encontrado" in str(exc):
@@ -338,15 +340,16 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             raise
 
     # Pure Logic Delegation
-    ctx = calculate_ranking_strategy(
-        data=data,
-        min_score=min_score,
-        limit=limit,
-        recurring_days=recurring_days,
-        recurring_limit=recurring_limit,
-        underlying_filter=underlying_filter,
-        option_type_filter=option_type_filter,
-    )
+    with timed_stage("ranking.calculate_strategy"):
+        ctx = calculate_ranking_strategy(
+            data=data,
+            min_score=min_score,
+            limit=limit,
+            recurring_days=recurring_days,
+            recurring_limit=recurring_limit,
+            underlying_filter=underlying_filter,
+            option_type_filter=option_type_filter,
+        )
     if empty_state_message:
         ctx["empty_state_message"] = empty_state_message
     return ctx

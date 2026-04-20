@@ -31,4 +31,4 @@ ENV PATH="/app/.venv/bin:${PATH}"
 
 EXPOSE 8000 8001
 
-CMD ["gunicorn", "--workers=2", "--bind=0.0.0.0:8000", "opcoes.web:create_app()"]
+CMD ["sh", "-c", "exec gunicorn --workers=${OPCOES_WEB_WORKERS:-4} --worker-class=${OPCOES_WEB_WORKER_CLASS:-gthread} --threads=${OPCOES_WEB_THREADS:-4} --timeout=${OPCOES_WEB_TIMEOUT_SECONDS:-120} --bind=0.0.0.0:8000 'opcoes.web:create_app()'"]

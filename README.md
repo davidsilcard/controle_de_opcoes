@@ -353,6 +353,11 @@ OPCOES_EDGE_BASE_URL=http://127.0.0.1:8011
 OPCOES_MARKET_DATA_TOKEN=token-interno-opcional
 OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15
 OPCOES_MARKET_DATA_STALE_AFTER_SECONDS=60
+OPCOES_PERF_TIMING_ENABLED=1
+OPCOES_WEB_WORKERS=4
+OPCOES_WEB_WORKER_CLASS=gthread
+OPCOES_WEB_THREADS=4
+OPCOES_WEB_TIMEOUT_SECONDS=120
 ```
 
 Observacoes:
@@ -361,6 +366,8 @@ Observacoes:
 - para backend via `BTG Trader Desk`, `OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15` tende a ser um valor inicial mais seguro que `5`, porque alguns lotes parciais podem levar varios segundos antes de fechar com timeout por item
 - a marcacao padrao usa `last` para acoes e regra hibrida para opcoes: `ask` em posicoes vendidas e `bid` em posicoes compradas, com fallback para `last`
 - a UI marca cada preco como `Ao vivo`, `Atrasado`, `Snapshot` ou `Offline`
+- com `OPCOES_PERF_TIMING_ENABLED=1`, a app Flask emite `Server-Timing` nas respostas web e log estruturado `web_request_timing`
+- `OPCOES_WEB_WORKERS`, `OPCOES_WEB_WORKER_CLASS`, `OPCOES_WEB_THREADS` e `OPCOES_WEB_TIMEOUT_SECONDS` controlam o runtime do `gunicorn` no container `web`
 
 Fluxo recomendado:
 
@@ -1005,6 +1012,11 @@ Use `user invite` para emitir senha temporaria e `user bootstrap` quando quiser 
 - `OPCOES_LOGIN_WINDOW_SECONDS`
 - `OPCOES_LOGIN_BLOCK_SECONDS`
 - `OPCOES_RANKING_CACHE_SECONDS`
+- `OPCOES_PERF_TIMING_ENABLED`
+- `OPCOES_WEB_WORKERS`
+- `OPCOES_WEB_WORKER_CLASS`
+- `OPCOES_WEB_THREADS`
+- `OPCOES_WEB_TIMEOUT_SECONDS`
 
 ## Testes
 

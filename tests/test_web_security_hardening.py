@@ -192,3 +192,30 @@ def test_https_security_headers_are_applied(monkeypatch) -> None:
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert response.headers["Strict-Transport-Security"].startswith("max-age=")
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_login_emits_server_timing_when_perf_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
+    monkeypatch.setenv("OPCOES_PERF_TIMING_ENABLED", "1")
+
+    app = create_app()
+    client = app.test_client()
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    header = response.headers.get("Server-Timing", "")
+    assert "request.total" in header
+
+
+def test_login_omits_server_timing_when_perf_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
+    monkeypatch.setenv("OPCOES_PERF_TIMING_ENABLED", "0")
+
+    app = create_app()
+    client = app.test_client()
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert "Server-Timing" not in response.headers

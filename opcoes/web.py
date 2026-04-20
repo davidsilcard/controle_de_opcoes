@@ -83,6 +83,12 @@ from .market_data import (
     market_source_label,
     market_status_label,
 )
+from .perf import (
+    build_server_timing_header,
+    finalize_request_timing,
+    start_request_timing,
+    timed_stage,
+)
 from . import finance, darf
 from .tax import (
     build_position_tax_events,
@@ -226,21 +232,24 @@ def _build_positions_page_context(
         if month_candidate is not None and 1 <= month_candidate <= 12:
             result_month = month_candidate
 
-    positions = list_positions(
-        include_closed=include_closed,
-        only_closed=only_closed,
-        ticker_contains=ticker_contains or None,
-        underlying_contains=underlying_contains or None,
-        strategy_tag=strategy_tag or None,
-        trade_type=trade_type or None,
-        is_simulated=is_simulated,
-    )
-    positions = enrich_positions_with_live_market_data(
-        positions,
-        client=market_data_client,
-    )
+    with timed_stage("positions.list_positions"):
+        positions = list_positions(
+            include_closed=include_closed,
+            only_closed=only_closed,
+            ticker_contains=ticker_contains or None,
+            underlying_contains=underlying_contains or None,
+            strategy_tag=strategy_tag or None,
+            trade_type=trade_type or None,
+            is_simulated=is_simulated,
+        )
+    with timed_stage("positions.enrich_market_data"):
+        positions = enrich_positions_with_live_market_data(
+            positions,
+            client=market_data_client,
+        )
     position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
-    premium_ids = finance.get_premium_position_ids(position_ids)
+    with timed_stage("positions.get_premium_ids"):
+        premium_ids = finance.get_premium_position_ids(position_ids)
     for pos in positions:
         pos_id = pos.get("id")
         pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
@@ -521,6 +530,11 @@ def create_app() -> Flask:
         return bool(session.get("must_change_password"))
 
     @app.before_request
+    def _start_request_timing():
+        start_request_timing()
+        return None
+
+    @app.before_request
     def _protect_csrf():
         if app.testing:
             return None
@@ -626,6 +640,7 @@ def create_app() -> Flask:
 
     @app.after_request
     def _invalidate_ranking_cache_after_write(response):
+        g._perf_status_code = response.status_code
         endpoint = request.endpoint or ""
         if request.method == "POST" and endpoint in ranking_cache_write_endpoints:
             _invalidate_ranking_cache_for_current_user()
@@ -661,6 +676,10 @@ def create_app() -> Flask:
                     "Strict-Transport-Security",
                     "max-age=31536000; includeSubDomains",
                 )
+        finalize_request_timing()
+        server_timing = build_server_timing_header()
+        if server_timing:
+            response.headers["Server-Timing"] = server_timing
         return response
 
     @app.context_processor
@@ -790,44 +809,57 @@ def create_app() -> Flask:
 
     @app.route("/")
     def index() -> str:
-        cache_key = _ranking_cache_key()
-        ctx = _get_ranking_cache(cache_key)
+        with timed_stage("route.index.cache_key"):
+            cache_key = _ranking_cache_key()
+        with timed_stage("route.index.cache_lookup"):
+            ctx = _get_ranking_cache(cache_key)
         if ctx is None:
-            ctx = get_ranking_context(request.args)
-            _set_ranking_cache(cache_key, ctx)
-        return render_template("index.html", **ctx)
+            with timed_stage("route.index.context"):
+                ctx = get_ranking_context(request.args)
+            with timed_stage("route.index.cache_store"):
+                _set_ranking_cache(cache_key, ctx)
+        with timed_stage("route.index.render"):
+            return render_template("index.html", **ctx)
 
     @app.route("/covered-call")
     def covered_call() -> str:
-        ctx = _build_covered_call_page_context(
-            args=request.args,
-            market_data_client=market_data_client,
-            persist_settings=True,
-            include_financial_sections=True,
-            include_inventory_summary=True,
-        )
-        return render_template("covered_call.html", **ctx)
+        with timed_stage("route.covered_call.context"):
+            ctx = _build_covered_call_page_context(
+                args=request.args,
+                market_data_client=market_data_client,
+                persist_settings=True,
+                include_financial_sections=True,
+                include_inventory_summary=True,
+            )
+        with timed_stage("route.covered_call.render"):
+            return render_template("covered_call.html", **ctx)
 
     @app.route("/covered-call/partial/live")
     def covered_call_partial_live() -> str:
-        ctx = _build_covered_call_page_context(
-            args=request.args,
-            market_data_client=market_data_client,
-            persist_settings=False,
-            include_financial_sections=False,
-            include_inventory_summary=False,
-        )
-        return render_template("partials/covered_call_live.html", **ctx)
+        with timed_stage("route.covered_call_partial.context"):
+            ctx = _build_covered_call_page_context(
+                args=request.args,
+                market_data_client=market_data_client,
+                persist_settings=False,
+                include_financial_sections=False,
+                include_inventory_summary=False,
+            )
+        with timed_stage("route.covered_call_partial.render"):
+            return render_template("partials/covered_call_live.html", **ctx)
 
     @app.route("/cash-covered-put")
     def cash_covered_put() -> str:
-        ctx = get_cash_covered_put_context(request.args)
-        return render_template("cash_covered_put.html", **ctx)
+        with timed_stage("route.cash_put.context"):
+            ctx = get_cash_covered_put_context(request.args)
+        with timed_stage("route.cash_put.render"):
+            return render_template("cash_covered_put.html", **ctx)
 
     @app.route("/fundamentus")
     def fundamentus() -> str:
-        ctx = get_fundamentus_context(request.args)
-        return render_template("fundamentus.html", **ctx)
+        with timed_stage("route.fundamentus.context"):
+            ctx = get_fundamentus_context(request.args)
+        with timed_stage("route.fundamentus.render"):
+            return render_template("fundamentus.html", **ctx)
 
     @app.route("/darf")
     def darf_view() -> str:
@@ -1416,19 +1448,21 @@ def create_app() -> Flask:
         if next_url.endswith("?"):
             next_url = request.path
 
-        ctx = _build_positions_page_context(
-            ticker_contains=ticker_contains,
-            underlying_contains=underlying_contains,
-            strategy_tag=strategy_tag,
-            trade_type=trade_type,
-            status=status,
-            is_simulated_raw=is_simulated_raw,
-            result_year_raw=result_year_raw,
-            result_month_raw=result_month_raw,
-            market_data_client=market_data_client,
-        )
+        with timed_stage("route.positions.context"):
+            ctx = _build_positions_page_context(
+                ticker_contains=ticker_contains,
+                underlying_contains=underlying_contains,
+                strategy_tag=strategy_tag,
+                trade_type=trade_type,
+                status=status,
+                is_simulated_raw=is_simulated_raw,
+                result_year_raw=result_year_raw,
+                result_month_raw=result_month_raw,
+                market_data_client=market_data_client,
+            )
         ctx["next_url"] = next_url
-        return render_template("positions.html", **ctx)
+        with timed_stage("route.positions.render"):
+            return render_template("positions.html", **ctx)
 
     @app.route("/positions/partial/live")
     def positions_partial_live() -> str:
@@ -1441,19 +1475,21 @@ def create_app() -> Flask:
         result_year_raw = (request.args.get("result_year") or "").strip()
         result_month_raw = (request.args.get("result_month") or "").strip()
         next_url = request.args.get("next_url") or "/positions"
-        ctx = _build_positions_page_context(
-            ticker_contains=ticker_contains,
-            underlying_contains=underlying_contains,
-            strategy_tag=strategy_tag,
-            trade_type=trade_type,
-            status=status,
-            is_simulated_raw=is_simulated_raw,
-            result_year_raw=result_year_raw,
-            result_month_raw=result_month_raw,
-            market_data_client=market_data_client,
-        )
+        with timed_stage("route.positions_partial.context"):
+            ctx = _build_positions_page_context(
+                ticker_contains=ticker_contains,
+                underlying_contains=underlying_contains,
+                strategy_tag=strategy_tag,
+                trade_type=trade_type,
+                status=status,
+                is_simulated_raw=is_simulated_raw,
+                result_year_raw=result_year_raw,
+                result_month_raw=result_month_raw,
+                market_data_client=market_data_client,
+            )
         ctx["next_url"] = next_url
-        return render_template("partials/positions_live.html", **ctx)
+        with timed_stage("route.positions_partial.render"):
+            return render_template("partials/positions_live.html", **ctx)
 
     @app.route("/audit")
     def audit_view() -> str:

@@ -4,6 +4,7 @@ import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ..holdings import get_holding_snapshot, list_holding_events
+from ..perf import timed_stage
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..utils import infer_option_type, parse_ptbr_number
 from .. import finance
@@ -526,14 +527,17 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         defaults.buyback_target_pct,
     )
 
-    positions_all = list_positions(include_closed=True)
+    with timed_stage("cash_put.positions_all"):
+        positions_all = list_positions(include_closed=True)
     positions_open = [
         pos
         for pos in positions_all
         if (pos.get("status") or "").strip().lower() != "closed"
     ]
-    rows = fetch_latest_underlying_options(underlying=underlying)
-    quote = fetch_latest_underlying_quote(underlying)
+    with timed_stage("cash_put.options_rows"):
+        rows = fetch_latest_underlying_options(underlying=underlying)
+    with timed_stage("cash_put.underlying_quote"):
+        quote = fetch_latest_underlying_quote(underlying)
 
     if args:
         update_cash_put_settings(
@@ -551,7 +555,8 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     mode = (cash_mode or "real").lower()
     if mode not in ("real", "simulated", "all"):
         mode = "real"
-    total_balance = finance.get_balance(mode="all" if mode == "all" else mode)
+    with timed_stage("cash_put.total_balance"):
+        total_balance = finance.get_balance(mode="all" if mode == "all" else mode)
 
     ctx = calculate_cash_covered_put_strategy(
         underlying=underlying,

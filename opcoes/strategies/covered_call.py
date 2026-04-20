@@ -15,6 +15,7 @@ from ..market_data import (
     market_status_label,
 )
 from ..portfolio import list_positions
+from ..perf import timed_stage
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..settings import get_covered_call_settings, update_covered_call_settings
 from ..utils import infer_option_type, parse_ptbr_number
@@ -711,28 +712,32 @@ def get_covered_call_context(
     only_target_hits = _get_bool_arg(args, "only_target_hits", defaults.only_target_hits)
 
     # IO / Data Fetching
-    positions_open = list_positions(include_closed=False)
+    with timed_stage("covered_call.positions_open"):
+        positions_open = list_positions(include_closed=False)
     positions_open = enrich_positions_with_live_market_data(
         positions_open,
         client=market_data_client,
     )
-    holding_snapshots = list_holding_snapshots(
-        underlying_filter=underlying or None,
-        positions_open=positions_open,
-    )
+    with timed_stage("covered_call.holding_snapshots"):
+        holding_snapshots = list_holding_snapshots(
+            underlying_filter=underlying or None,
+            positions_open=positions_open,
+        )
     underlying_quick_filter = _build_underlying_quick_filter(
         positions_open,
         underlying,
         holding_snapshots,
     )
     # We fetch rows here instead of inside the helper
-    options_rows = fetch_latest_underlying_options(underlying=underlying)
+    with timed_stage("covered_call.options_rows"):
+        options_rows = fetch_latest_underlying_options(underlying=underlying)
     options_rows = enrich_option_rows_with_live_market_data(
         options_rows,
         underlying=underlying,
         client=market_data_client,
     )
-    quote = fetch_latest_underlying_quote(underlying)
+    with timed_stage("covered_call.underlying_quote"):
+        quote = fetch_latest_underlying_quote(underlying)
     quote = enrich_underlying_quote_with_live_market_data(
         quote,
         underlying=underlying,
