@@ -1,11 +1,11 @@
 # Edge API VPS runbook
 
-Este runbook descreve a publicacao de `api.moven.cloud` na VPS, usando a edge FastAPI deste repositorio e o `mt5-gateway` privado rodando na maquina Windows.
+Este runbook descreve a publicacao de `api.moven.cloud` na VPS, usando a edge FastAPI deste repositorio e o gateway privado rodando na maquina Windows.
 
 ## Topologia
 
 - Windows local:
-  - terminal MetaTrader 5
+  - backend de mercado local, agora podendo usar `BTG Trader Desk`
   - `api-metatrader5` em `127.0.0.1:8000`
 - Tailscale/WireGuard:
   - conecta VPS <-> Windows em rede privada
@@ -25,7 +25,7 @@ OPCOES_SECRET_KEY=troque-por-uma-chave-longa-e-forte
 MT5_GATEWAY_BASE_URL=http://100.64.0.10:8000
 MT5_GATEWAY_KEY_ID=edge=1
 MT5_GATEWAY_SHARED_SECRET=troque-por-um-segredo-forte
-MT5_GATEWAY_SCOPES=quotes:read,symbols:read,orders:preview
+MT5_GATEWAY_SCOPES=quotes:read,symbols:read
 MT5_GATEWAY_TIMEOUT_SECONDS=10
 
 OPCOES_EDGE_API_TOKENS=excel=troque-este-token,app=troque-outro-token
@@ -107,8 +107,10 @@ sudo systemctl reload caddy
 
 - mantenha o relogio do Windows e da VPS sincronizados por NTP
 - nao exponha o `mt5-gateway` diretamente na internet
-- mantenha `MT5_ENABLE_ORDER_SEND=0` no Windows ate fechar o fluxo de ordens
-- `GET /ready` do gateway agora so sinaliza prontidao e conexao do MT5; nao espere mais detalhes sensiveis de conta/terminal nesse endpoint
+- mantenha `MT5_ENABLE_ORDER_SEND=0` no Windows ate fechar um fluxo real de ordens
+- `GET /ready` do gateway agora deve ser lido principalmente por `status`, `provider`, `connected` e `state`
+- `GET /internal/v1/metrics` e a melhor fonte para monitorar latencia, cache e erro do gateway privado
+- `POST /internal/v1/orders/preview` e `POST /internal/v1/orders` podem responder `501 not_supported` enquanto o backend estiver focado apenas em market data
 - a edge usa cache em memoria; em multi-worker esse cache nao e compartilhado
 - para WebSocket, prefira uma unica instancia/worker da edge
 
@@ -123,5 +125,6 @@ sudo systemctl reload caddy
 7. testar:
    - `https://api.moven.cloud/health`
    - `http://100.64.0.10:8000/ready`
+   - `http://100.64.0.10:8000/internal/v1/metrics`
    - `POST /v1/ws/token`
    - `GET /v1/quotes/PETR4`

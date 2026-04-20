@@ -253,6 +253,10 @@ class Mt5GatewayClient:
         response = self._client.get("/ready")
         return self._decode_response(response)
 
+    def metrics(self) -> dict[str, Any]:
+        response = self._request("GET", "/internal/v1/metrics")
+        return self._decode_response(response)
+
     def has_scope(self, scope: str) -> bool:
         configured_scopes = self.config.scopes
         return not configured_scopes or scope in configured_scopes

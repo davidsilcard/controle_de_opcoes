@@ -100,6 +100,8 @@ def build_request_spec(args: argparse.Namespace) -> tuple[str, str, dict[str, An
         return "GET", "/health", None
     if mode == "ready":
         return "GET", "/ready", None
+    if mode == "metrics":
+        return "GET", "/v1/metrics", None
     if mode == "quote":
         return "GET", f"/v1/quotes/{args.symbol.strip().upper()}", None
     if mode == "batch":
@@ -202,7 +204,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        choices=["health", "ready", "quote", "batch", "search"],
+        choices=["health", "ready", "metrics", "quote", "batch", "search"],
         default="quote",
         help="Perfil do endpoint que será testado.",
     )

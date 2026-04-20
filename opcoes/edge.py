@@ -282,6 +282,17 @@ def create_app(
             raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
         return JSONResponse(payload)
 
+    @app.get("/v1/metrics")
+    def metrics(
+        _subject: str = Depends(verify_token),
+        client: Mt5GatewayClient = Depends(get_gateway_client),
+    ) -> JSONResponse:
+        try:
+            payload = client.metrics()
+        except Mt5GatewayError as exc:
+            raise HTTPException(status_code=exc.status_code or 502, detail=exc.payload or str(exc)) from exc
+        return JSONResponse(payload)
+
     @app.post("/v1/orders/preview")
     def order_preview(
         payload: OrderPreviewRequest,

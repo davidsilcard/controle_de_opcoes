@@ -65,6 +65,14 @@ class FakeGatewayClient:
             "items": [{"requested_query": query, "symbol": "PETR4"}],
         }
 
+    def metrics(self) -> dict:
+        return {
+            "provider": "btg_trader_desk",
+            "connected": True,
+            "state": "connected",
+            "quotes": {"requests_total": 10, "errors_total": 0},
+        }
+
     def preview_order(self, payload: dict) -> dict:
         return {"requested_symbol": payload["symbol"], "check_completed": True}
 
@@ -163,6 +171,19 @@ def test_edge_batch_keeps_partial_items_and_caches_only_successes() -> None:
     assert single.status_code == 200
     assert gateway_client.batch_calls == 1
     assert gateway_client.quote_calls == 0
+
+
+def test_edge_metrics_proxies_gateway_payload() -> None:
+    client, _gateway_client, _async_gateway_client = build_app()
+    headers = {"Authorization": "Bearer token-123"}
+
+    response = client.get("/v1/metrics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "btg_trader_desk"
+    assert payload["connected"] is True
+    assert payload["quotes"]["requests_total"] == 10
 
 
 def test_edge_websocket_streams_snapshot() -> None:

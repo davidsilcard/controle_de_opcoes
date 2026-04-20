@@ -281,17 +281,18 @@ Variaveis minimas para a edge:
 MT5_GATEWAY_BASE_URL=http://100.64.0.10:8000
 MT5_GATEWAY_KEY_ID=edge=1
 MT5_GATEWAY_SHARED_SECRET=troque-por-um-segredo-forte
-MT5_GATEWAY_SCOPES=quotes:read,symbols:read,orders:preview
+MT5_GATEWAY_SCOPES=quotes:read,symbols:read
 OPCOES_EDGE_API_TOKENS=excel=troque-este-token,app=troque-outro-token
 ```
 
 Contrato atual do `mt5-gateway` consumido pela edge:
 
 - autenticacao HMAC com `X-Key-Id`, `X-Timestamp`, `X-Nonce` e `X-Signature`
-- `GET /ready` agora e enxuto e nao deve mais ser usado como fonte de dados sensiveis de conta/terminal
+- `GET /ready` agora deve ser interpretado principalmente por `status`, `provider`, `connected` e `state`
+- `mt5_connected` e `mt5_state` ainda podem aparecer, mas so como compatibilidade retroativa
 - `POST /internal/v1/quotes/batch` pode retornar sucesso parcial; a edge preserva itens com erro no batch publico e cacheia apenas os itens validos
-- `POST /internal/v1/orders/preview` fica separado de `POST /internal/v1/orders`
-- o endpoint publico `POST /v1/orders` so deve ser usado quando a chave tiver `orders:send` e o gateway estiver com envio real habilitado
+- `GET /internal/v1/metrics` fica disponivel para monitoramento do gateway privado
+- `POST /internal/v1/orders/preview` e `POST /internal/v1/orders` podem responder `501 not_supported` nesta fase e nao devem ser tratados como fluxo operacional disponivel
 
 Exemplo rapido de uso do cliente interno:
 
@@ -300,6 +301,7 @@ from opcoes.mt5_gateway import Mt5GatewayClient
 
 client = Mt5GatewayClient()
 print(client.ready())
+print(client.metrics())
 print(client.get_quote("PETR4"))
 print(client.get_quotes_batch(["PETR4", "VALE3"]))
 ```
@@ -307,7 +309,7 @@ print(client.get_quotes_batch(["PETR4", "VALE3"]))
 Camada interna de market data ao vivo:
 
 - a aplicacao web principal continua dona das formulas e das decisoes didaticas
-- o `mt5-gateway` segue como fonte bruta de mercado
+- o gateway privado segue como fonte bruta de mercado, mesmo com backend local mudando de MT5 para `BTG Trader Desk`
 - o `opcoes-edge` distribui quotes com cache curto e autenticacao interna
 - `Posicoes` e `Covered Call` agora tentam usar quotes ao vivo no backend a cada carregamento da pagina
 - se o edge ou o gateway falharem, a UI volta para os snapshots sem quebrar a tela
@@ -331,7 +333,7 @@ Fluxo recomendado:
 
 - `opcoes.moven.cloud` continua na app Flask
 - `api.moven.cloud` publica a edge FastAPI
-- a edge chama o gateway privado rodando na maquina Windows com MT5
+- a edge chama o gateway privado rodando na maquina Windows, agora podendo usar `BTG Trader Desk` como backend de cotacao
 
 Arquivos principais:
 
@@ -351,6 +353,7 @@ Exemplos uteis:
 
 ```bash
 uv run python -m opcoes.stress_api --mode health --base-url http://127.0.0.1:8011 --requests 300 --concurrency 30
+uv run python -m opcoes.stress_api --mode metrics --base-url http://127.0.0.1:8011 --requests 120 --concurrency 12
 uv run python -m opcoes.stress_api --mode batch --symbols PETR4,VALE3,ITUB4,BBAS3 --requests 150 --concurrency 15
 uv run python -m opcoes.stress_api --mode search --query PETR --limit 10 --requests 100 --concurrency 10
 uv run python -m opcoes.stress_api --mode quote --symbol PETR4 --requests 200 --concurrency 20 --json
@@ -754,11 +757,12 @@ Edge:
 curl -i http://127.0.0.1:8011/health
 ```
 
-Gateway MT5 pela tailnet:
+ Gateway privado pela tailnet:
 
 ```bash
 curl -i http://100.70.177.96:8000/health
 curl -i http://100.70.177.96:8000/ready
+curl -i http://100.70.177.96:8000/internal/v1/metrics
 ```
 
 Quote via edge com bearer token:

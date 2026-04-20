@@ -26,7 +26,7 @@ def build_client(handler, *, scopes: frozenset[str] | None = None) -> Mt5Gateway
             key_id="edge=1",
             shared_secret="super-secret",
             timeout_seconds=5,
-            scopes=scopes or frozenset({"quotes:read", "symbols:read", "orders:preview"}),
+            scopes=scopes or frozenset({"quotes:read", "symbols:read"}),
         ),
         http_client=http_client,
     )
@@ -155,6 +155,9 @@ def test_gateway_client_reads_new_ready_payload() -> None:
             200,
             json={
                 "status": "ready",
+                "provider": "btg_trader_desk",
+                "connected": True,
+                "state": "connected",
                 "mt5_connected": True,
                 "mt5_state": "connected",
                 "reconnect_count": 0,
@@ -167,10 +170,35 @@ def test_gateway_client_reads_new_ready_payload() -> None:
 
     assert payload == {
         "status": "ready",
+        "provider": "btg_trader_desk",
+        "connected": True,
+        "state": "connected",
         "mt5_connected": True,
         "mt5_state": "connected",
         "reconnect_count": 0,
     }
+
+
+def test_gateway_client_reads_metrics_payload() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/internal/v1/metrics"
+        return httpx.Response(
+            200,
+            json={
+                "provider": "btg_trader_desk",
+                "connected": True,
+                "state": "connected",
+                "quotes": {"requests_total": 42, "errors_total": 1},
+            },
+        )
+
+    client = build_client(handler)
+
+    payload = client.metrics()
+
+    assert payload["provider"] == "btg_trader_desk"
+    assert payload["connected"] is True
+    assert payload["quotes"]["requests_total"] == 42
 
 
 def test_gateway_client_blocks_send_order_without_scope() -> None:

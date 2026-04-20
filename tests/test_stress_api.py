@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import argparse
+
 from opcoes.stress_api import StressResult, build_summary, percentile
+from opcoes.stress_api import build_request_spec
 
 
 def test_percentile_interpolates_sorted_values() -> None:
@@ -26,3 +29,19 @@ def test_build_summary_reports_success_latency_and_statuses() -> None:
     assert round(summary["requests_per_second"], 2) == 1.5
     assert summary["status_codes"] == {200: 2, 502: 1}
     assert summary["top_errors"][0]["error"] == "bad_gateway"
+
+
+def test_build_request_spec_supports_metrics_mode() -> None:
+    args = argparse.Namespace(
+        mode="metrics",
+        symbol="PETR4",
+        symbols="PETR4,VALE3",
+        query="PETR",
+        limit=10,
+    )
+
+    method, path, payload = build_request_spec(args)
+
+    assert method == "GET"
+    assert path == "/v1/metrics"
+    assert payload is None
