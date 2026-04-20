@@ -1046,8 +1046,19 @@ def create_app() -> Flask:
 
     @app.route("/fundamentus")
     def fundamentus() -> str:
-        with timed_stage("route.fundamentus.context"):
-            ctx = get_fundamentus_context(request.args)
+        with timed_stage("route.fundamentus.cache_key"):
+            cache_key = _strategy_page_cache_key("fundamentus")
+        with timed_stage("route.fundamentus.cache_lookup"):
+            ctx = _get_strategy_page_cache(cache_key)
+        if ctx is None:
+            with timed_stage("route.fundamentus.context"):
+                ctx = get_fundamentus_context(request.args)
+            with timed_stage("route.fundamentus.cache_store"):
+                _set_strategy_page_cache(
+                    cache_key,
+                    ctx,
+                    route_name="fundamentus",
+                )
         with timed_stage("route.fundamentus.render"):
             return render_template("fundamentus.html", **ctx)
 
@@ -1638,18 +1649,29 @@ def create_app() -> Flask:
         if next_url.endswith("?"):
             next_url = request.path
 
-        with timed_stage("route.positions.context"):
-            ctx = _build_positions_page_context(
-                ticker_contains=ticker_contains,
-                underlying_contains=underlying_contains,
-                strategy_tag=strategy_tag,
-                trade_type=trade_type,
-                status=status,
-                is_simulated_raw=is_simulated_raw,
-                result_year_raw=result_year_raw,
-                result_month_raw=result_month_raw,
-                market_data_client=market_data_client,
-            )
+        with timed_stage("route.positions.cache_key"):
+            cache_key = _strategy_page_cache_key("positions")
+        with timed_stage("route.positions.cache_lookup"):
+            ctx = _get_strategy_page_cache(cache_key)
+        if ctx is None:
+            with timed_stage("route.positions.context"):
+                ctx = _build_positions_page_context(
+                    ticker_contains=ticker_contains,
+                    underlying_contains=underlying_contains,
+                    strategy_tag=strategy_tag,
+                    trade_type=trade_type,
+                    status=status,
+                    is_simulated_raw=is_simulated_raw,
+                    result_year_raw=result_year_raw,
+                    result_month_raw=result_month_raw,
+                    market_data_client=market_data_client,
+                )
+            with timed_stage("route.positions.cache_store"):
+                _set_strategy_page_cache(
+                    cache_key,
+                    ctx,
+                    route_name="positions",
+                )
         ctx["next_url"] = next_url
         with timed_stage("route.positions.render"):
             return render_template("positions.html", **ctx)
