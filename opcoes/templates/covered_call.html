@@ -213,10 +213,31 @@
             hx-trigger="load, every 15s"
             hx-swap="innerHTML"
           >
-            {% include "partials/covered_call_live.html" %}
+            <div class="card border-0 shadow-sm mb-4">
+              <div class="card-body py-4">
+                <div class="d-flex align-items-center gap-3">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+                  <div class="text-muted small">Carregando painel ao vivo, cotacoes e sugestoes...</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {% include "partials/covered_call_audit.html" %}
+          <div
+            id="covered-call-audit"
+            hx-get="/covered-call/partial/audit?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+          >
+            <div class="card border-0 shadow-sm">
+              <div class="card-body py-4">
+                <div class="d-flex align-items-center gap-3">
+                  <div class="spinner-border spinner-border-sm text-secondary" role="status" aria-hidden="true"></div>
+                  <div class="text-muted small">Carregando auditoria e detalhes operacionais...</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <aside class="col-lg-3 col-xl-2">
           <div class="card cc-sidebar">

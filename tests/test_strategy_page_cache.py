@@ -16,7 +16,7 @@ def test_covered_call_route_uses_persisted_cache_across_app_instances(monkeypatc
         calls["count"] += 1
         return {"value": calls["count"]}
 
-    monkeypatch.setattr(web, "_build_covered_call_page_context", _fake_ctx)
+    monkeypatch.setattr(web, "_build_covered_call_shell_page_context", _fake_ctx)
     monkeypatch.setattr(web, "render_template", lambda _tpl, **ctx: f"v={ctx['value']}")
 
     app_one = web.create_app()
@@ -48,7 +48,7 @@ def test_covered_call_route_bypasses_cache_when_notice_is_present(monkeypatch) -
         calls["count"] += 1
         return {"value": calls["count"]}
 
-    monkeypatch.setattr(web, "_build_covered_call_page_context", _fake_ctx)
+    monkeypatch.setattr(web, "_build_covered_call_shell_page_context", _fake_ctx)
     monkeypatch.setattr(web, "render_template", lambda _tpl, **ctx: f"v={ctx['value']}")
 
     app = web.create_app()

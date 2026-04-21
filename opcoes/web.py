@@ -63,6 +63,7 @@ from .service_runs import get_service_dashboard
 from .strategies import (
     get_cash_covered_put_context,
     get_covered_call_context,
+    get_covered_call_shell_context,
     get_fundamentus_context,
     get_ranking_context,
 )
@@ -317,6 +318,13 @@ def _build_covered_call_page_context(
         )
     else:
         ctx["inventory_summary"] = []
+    ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
+    ctx["holding_error"] = (args.get("holding_error") or "").strip()
+    return ctx
+
+
+def _build_covered_call_shell_page_context(*, args: Any) -> dict[str, Any]:
+    ctx = get_covered_call_shell_context(args)
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
     return ctx
@@ -995,12 +1003,8 @@ def create_app() -> Flask:
                 ctx = _get_strategy_page_cache(cache_key)
         if ctx is None:
             with timed_stage("route.covered_call.context"):
-                ctx = _build_covered_call_page_context(
+                ctx = _build_covered_call_shell_page_context(
                     args=request.args,
-                    market_data_client=market_data_client,
-                    persist_settings=True,
-                    include_financial_sections=True,
-                    include_inventory_summary=True,
                 )
             if cacheable and cache_key is not None:
                 with timed_stage("route.covered_call.cache_store"):
@@ -1025,6 +1029,19 @@ def create_app() -> Flask:
             )
         with timed_stage("route.covered_call_partial.render"):
             return render_template("partials/covered_call_live.html", **ctx)
+
+    @app.route("/covered-call/partial/audit")
+    def covered_call_partial_audit() -> str:
+        with timed_stage("route.covered_call_audit_partial.context"):
+            ctx = _build_covered_call_page_context(
+                args=request.args,
+                market_data_client=market_data_client,
+                persist_settings=False,
+                include_financial_sections=True,
+                include_inventory_summary=True,
+            )
+        with timed_stage("route.covered_call_audit_partial.render"):
+            return render_template("partials/covered_call_audit.html", **ctx)
 
     @app.route("/cash-covered-put")
     def cash_covered_put() -> str:
@@ -1061,6 +1078,10 @@ def create_app() -> Flask:
                 )
         with timed_stage("route.fundamentus.render"):
             return render_template("fundamentus.html", **ctx)
+
+    @app.route("/favicon.ico")
+    def favicon() -> tuple[str, int]:
+        return ("", 204)
 
     @app.route("/darf")
     def darf_view() -> str:

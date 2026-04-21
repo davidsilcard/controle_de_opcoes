@@ -248,7 +248,7 @@ def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
 
 def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     monkeypatch.setattr(
-        "opcoes.web._build_covered_call_page_context",
+        "opcoes.web._build_covered_call_shell_page_context",
         lambda **_kwargs: {
             "underlying": "PETR4",
             "filters": {
@@ -277,46 +277,6 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
                 "free_min_price": None,
                 "free_max_price": None,
             },
-            "inventory_summary": [],
-            "underlying_quote": {"price": 48.9, "price_date": "2026-04-14", "market_status_label": "Ao vivo", "market_price_source": "last"},
-            "covered_real": [
-                {
-                    "id": 1,
-                    "ticker": "PETRD999",
-                    "vencimento": "17/04/2026",
-                    "dias_uteis": 2,
-                    "open_qty": 100,
-                    "last_price": 0.1,
-                    "market_status_label": "Snapshot",
-                    "market_source_label": "Snapshot",
-                    "market_time_display": "15/04/2026",
-                    "buyback_profit_per_share": -0.05,
-                    "buyback_profit_pct": -100.0,
-                    "buyback_target_hit": False,
-                    "underlying_price": 48.9,
-                    "underlying_market_status_label": "Snapshot",
-                    "underlying_market_time_display": "15/04/2026",
-                    "extrinsic_pct_spot": 0.46,
-                    "pct_2x": 1.0,
-                    "pl": -40.04,
-                    "pl_pct": -100.10,
-                    "strike": 49.0,
-                }
-            ],
-            "covered_sim": [],
-            "suggestions": [],
-            "buyback_target_pct": 70.0,
-            "lots_real": [],
-            "lots_sim": [],
-            "call_summary_real": [],
-            "call_summary_sim": [],
-            "monthly_premiums": [],
-            "monthly_operational_result": [],
-            "simulated_monthly_premiums": [],
-            "simulated_monthly_operational_result": [],
-            "buyback_candidates_real": [],
-            "buyback_candidates_simulated": [],
-            "sell_target": {"base_price": None, "target_price": None},
             "underlying_quick_filter": [],
         },
     )
@@ -331,16 +291,14 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="covered-call-live"' in html
     assert 'hx-get="/covered-call/partial/live?' in html
+    assert 'id="covered-call-audit"' in html
+    assert 'hx-get="/covered-call/partial/audit?' in html
     assert "Cadastro do estoque consolidado" in html
     assert 'action="/holdings/upsert"' in html
-    assert "Auditoria e detalhes operacionais" in html
-    assert html.count("Painel ao vivo de covered call") == 1
-    assert html.count("Calls de PETR4 em aberto (real)") == 2
-    assert html.count("Sugestões de novas calls para PETR4") == 1
-    assert "Recompra" in html
-    assert "Atenção operacional" in html
-    assert "<details class=\"card border-0 shadow-sm cc-audit-details\" open>" in html
-    assert "15/04/2026" in html
+    assert "Carregando painel ao vivo, cotacoes e sugestoes..." in html
+    assert "Carregando auditoria e detalhes operacionais..." in html
+    assert "Painel ao vivo de covered call" not in html
+    assert "Auditoria e detalhes operacionais" not in html
 
 
 def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) -> None:
@@ -448,6 +406,81 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert "(America/Sao_Paulo)" in html
     assert "Timestamp bruto do provider" in html
     assert "Ao vivo" in html
+
+
+def test_covered_call_partial_audit_renders_operational_details(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "opcoes.web._build_covered_call_page_context",
+        lambda **_kwargs: {
+            "underlying": "PETR4",
+            "filters": {
+                "min_extrinsic": "0.0",
+                "min_days": "1",
+                "max_days": "30",
+                "min_dist_strike": "0.0",
+                "target_upside_pct": "0.0",
+                "only_target_hits": False,
+            },
+            "holding_notice": "",
+            "holding_error": "",
+            "stock_real": {"shares_total": 100, "shares_covered": 100, "shares_free": 0, "free_avg_price": 45.0},
+            "stock_sim": {"shares_total": 0, "shares_covered": 0, "shares_free": 0, "free_avg_price": None},
+            "inventory_summary": [],
+            "underlying_quote": {"price": 48.9, "price_date": "2026-04-14"},
+            "covered_real": [
+                {
+                    "id": 1,
+                    "ticker": "PETRD999",
+                    "vencimento": "17/04/2026",
+                    "dias_uteis": 2,
+                    "open_qty": 100,
+                    "last_price": 0.1,
+                    "market_status_label": "Snapshot",
+                    "market_source_label": "Snapshot",
+                    "market_time_display": "15/04/2026",
+                    "buyback_profit_per_share": -0.05,
+                    "buyback_profit_pct": -100.0,
+                    "buyback_target_hit": False,
+                    "underlying_price": 48.9,
+                    "underlying_market_status_label": "Snapshot",
+                    "underlying_market_time_display": "15/04/2026",
+                    "extrinsic_pct_spot": 0.46,
+                    "pct_2x": 1.0,
+                    "pl": -40.04,
+                    "pl_pct": -100.10,
+                    "strike": 49.0,
+                }
+            ],
+            "covered_sim": [],
+            "suggestions": [],
+            "buyback_target_pct": 70.0,
+            "lots_real": [],
+            "lots_sim": [],
+            "call_summary_real": [],
+            "call_summary_sim": [],
+            "monthly_premiums": [],
+            "monthly_operational_result": [],
+            "simulated_monthly_premiums": [],
+            "simulated_monthly_operational_result": [],
+            "buyback_candidates_real": [],
+            "buyback_candidates_simulated": [],
+            "sell_target": {"base_price": None, "target_price": None},
+            "underlying_quick_filter": [],
+        },
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/covered-call/partial/audit?underlying=PETR4")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Auditoria e detalhes operacionais" in html
+    assert "Recompra" in html
+    assert "Atenção operacional" in html
+    assert "PETRD999" in html
 
 
 def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> None:

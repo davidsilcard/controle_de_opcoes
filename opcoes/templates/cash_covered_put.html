@@ -720,8 +720,10 @@
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-      // Preencher data atual no modal
-      document.querySelector('input[name="date"]').valueAsDate = new Date();
+      const tradeDateInput = document.querySelector('input[type="date"][name="date"]');
+      if (tradeDateInput && "valueAsDate" in tradeDateInput) {
+        tradeDateInput.valueAsDate = new Date();
+      }
     </script>
   </body>
 </html>
