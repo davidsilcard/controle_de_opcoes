@@ -1,0 +1,112 @@
+<p class="text-muted">{{ message }}</p>
+{% if snapshot_date %}
+  <p class="text-muted small">
+    Snapshot: {{ snapshot_date }} | Linhas: {{ total_rows }}
+    {% if signals_available %}
+      | Filtro: {{ status_label }} | Exibidas: {{ filtered_rows_count }}
+      | Aprovadas: {{ approved_count }} | Reprovadas: {{ rejected_count }}
+    {% endif %}
+  </p>
+{% endif %}
+{% if rows and not signals_available %}
+  <div class="alert alert-warning" role="alert">
+    Filtros ainda não aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
+  </div>
+{% elif rows and signals_available %}
+  <div class="alert alert-success" role="alert">
+    Filtros aplicados no snapshot mais recente.
+  </div>
+{% else %}
+  <div class="alert alert-info" role="alert">
+    Em construção. Esta aba vai concentrar o filtro fundamentalista e avisos da estratégia.
+  </div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Resumo</div>
+      <div class="card-body">
+        <div class="small text-muted">Aprovadas: {{ approved_count }} | Reprovadas: {{ rejected_count }}</div>
+        <div class="small text-muted">Exibidas: {{ filtered_rows_count }} | Total base: {{ total_rows }}</div>
+        {% if put_target_vencimento %}
+          <div class="small text-muted mt-2">Janela de PUT alvo: {{ put_target_vencimento }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Ranking histórico</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Papel</th>
+                <th class="text-end">Aparições</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in ranking_window[:15] %}
+                <tr>
+                  <td>{{ item.papel }}</td>
+                  <td class="text-end">{{ item.approvals }}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="2" class="text-muted text-center">Sem dados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Tabela Fundamentus</div>
+      <div class="card-body p-0">
+        {% if not rows %}
+          <div class="p-3 text-muted small">Nenhuma linha para os filtros atuais.</div>
+        {% else %}
+          <div class="table-responsive fundamentus-table-wrap">
+            <table class="table table-sm table-striped align-middle fundamentus-table js-sort-filter-table">
+              <thead class="table-light">
+                <tr>
+                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="0" data-type="text">Papel <span class="sort-indicator"></span></button></th>
+                  <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="1" data-type="number">Cotação <span class="sort-indicator"></span></button></th>
+                  <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="2" data-type="number">Preço teto <span class="sort-indicator"></span></button></th>
+                  <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="3" data-type="percent">DY <span class="sort-indicator"></span></button></th>
+                  <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="percent">ROE <span class="sort-indicator"></span></button></th>
+                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="5" data-type="text">Status <span class="sort-indicator"></span></button></th>
+                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="6" data-type="text">Setor <span class="sort-indicator"></span></button></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows[:200] %}
+                  <tr>
+                    <td>{{ row.papel }}</td>
+                    <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
+                    <td class="text-end">{{ row.preco_teto is not none and ('%.2f'|format(row.preco_teto)) or '-' }}</td>
+                    <td class="text-end">{% if row.div_yield is not none %}{{ '%.2f'|format(row.div_yield) }}%{% else %}-{% endif %}</td>
+                    <td class="text-end">{% if row.roe is not none %}{{ '%.2f'|format(row.roe) }}%{% else %}-{% endif %}</td>
+                    <td>
+                      {% if row.signal and row.signal.status == 'approved' %}
+                        <span class="badge text-bg-success">Aprovada</span>
+                      {% elif row.signal %}
+                        <span class="badge text-bg-danger">Reprovada</span>
+                      {% else %}
+                        -
+                      {% endif %}
+                    </td>
+                    <td>{{ row.sector or '-' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>

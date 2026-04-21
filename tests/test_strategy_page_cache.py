@@ -135,11 +135,11 @@ def test_fundamentus_route_uses_persisted_cache_across_app_instances(monkeypatch
 
     calls = {"count": 0}
 
-    def _fake_ctx(_args):
+    def _fake_ctx(**_kwargs):
         calls["count"] += 1
         return {"value": calls["count"]}
 
-    monkeypatch.setattr(web, "get_fundamentus_context", _fake_ctx)
+    monkeypatch.setattr(web, "_build_fundamentus_shell_page_context", _fake_ctx)
     monkeypatch.setattr(web, "render_template", lambda _tpl, **ctx: f"v={ctx['value']}")
 
     app_one = web.create_app()
@@ -156,6 +156,38 @@ def test_fundamentus_route_uses_persisted_cache_across_app_instances(monkeypatch
     client_two = app_two.test_client()
 
     second = client_two.get("/fundamentus")
+    assert second.status_code == 200
+    assert second.data.decode() == "v=1"
+    assert calls["count"] == 1
+
+
+def test_index_route_uses_shell_cache_across_app_instances(monkeypatch) -> None:
+    invalidate_namespace("global")
+    monkeypatch.setenv("OPCOES_RANKING_CACHE_SECONDS", "60")
+
+    calls = {"count": 0}
+
+    def _fake_ctx(**_kwargs):
+        calls["count"] += 1
+        return {"value": calls["count"]}
+
+    monkeypatch.setattr(web, "_build_ranking_shell_page_context", _fake_ctx)
+    monkeypatch.setattr(web, "render_template", lambda _tpl, **ctx: f"v={ctx['value']}")
+
+    app_one = web.create_app()
+    app_one.testing = True
+    client_one = app_one.test_client()
+
+    first = client_one.get("/")
+    assert first.status_code == 200
+    assert first.data.decode() == "v=1"
+    assert calls["count"] == 1
+
+    app_two = web.create_app()
+    app_two.testing = True
+    client_two = app_two.test_client()
+
+    second = client_two.get("/")
     assert second.status_code == 200
     assert second.data.decode() == "v=1"
     assert calls["count"] == 1

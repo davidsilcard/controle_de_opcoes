@@ -1005,4 +1005,19 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-__all__ = ["get_fundamentus_context"]
+def get_fundamentus_shell_context(args: Mapping[str, Any]) -> Dict[str, Any]:
+    limit = _get_optional_int_arg(args, "limit")
+    snap = (args.get("date") or "").strip()
+    status_filter = (args.get("status") or "approved").strip().lower()
+    if status_filter not in {"approved", "rejected", "all"}:
+        status_filter = "approved"
+    window_days = max(1, _get_int_arg(args, "window_days", 30))
+    return {
+        "snapshot_date": snap or None,
+        "limit": limit,
+        "status_filter": status_filter,
+        "ranking_window_days": window_days,
+    }
+
+
+__all__ = ["get_fundamentus_context", "get_fundamentus_shell_context"]

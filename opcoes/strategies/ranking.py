@@ -353,3 +353,54 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     if empty_state_message:
         ctx["empty_state_message"] = empty_state_message
     return ctx
+
+
+def get_ranking_shell_context(args: Mapping[str, Any]) -> Dict[str, Any]:
+    strat_settings = get_strategy_settings()
+    ranking_settings = get_ranking_view_settings()
+
+    min_score = _get_int_arg(args, "min_score", strat_settings.min_score)
+    limit = _get_int_arg(args, "limit", strat_settings.limit_opportunities)
+    recurring_days = _get_int_arg(args, "recurring_days", strat_settings.recurring_days)
+    recurring_limit = _get_int_arg(args, "recurring_limit", ranking_settings.recurring_limit)
+
+    underlying_filter = _get_text_arg(args, "underlying", ranking_settings.underlying_filter).upper()
+    option_type_filter = _get_text_arg(args, "option_type", ranking_settings.option_type_filter).upper()
+    if option_type_filter in {"CALLS", "CALL"}:
+        option_type_filter = "CALL"
+    elif option_type_filter in {"PUTS", "PUT"}:
+        option_type_filter = "PUT"
+    else:
+        option_type_filter = ""
+
+    should_persist_filters = any(
+        key in args
+        for key in (
+            "min_score",
+            "limit",
+            "recurring_days",
+            "recurring_limit",
+            "underlying",
+            "option_type",
+        )
+    )
+    if should_persist_filters:
+        update_strategy_settings(
+            min_score=min_score,
+            limit_opportunities=limit,
+            recurring_days=recurring_days,
+        )
+        update_ranking_view_settings(
+            recurring_limit=recurring_limit,
+            underlying_filter=underlying_filter,
+            option_type_filter=option_type_filter,
+        )
+
+    return {
+        "min_score": min_score,
+        "limit": limit,
+        "recurring_days": recurring_days,
+        "recurring_limit": recurring_limit,
+        "underlying_filter": underlying_filter,
+        "option_type_filter": option_type_filter,
+    }

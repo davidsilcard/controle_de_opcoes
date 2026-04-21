@@ -65,7 +65,9 @@ from .strategies import (
     get_covered_call_context,
     get_covered_call_shell_context,
     get_fundamentus_context,
+    get_fundamentus_shell_context,
     get_ranking_context,
+    get_ranking_shell_context,
 )
 from .flows import FlowError, assign_put, callaway
 from .holdings import (
@@ -328,6 +330,14 @@ def _build_covered_call_shell_page_context(*, args: Any) -> dict[str, Any]:
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
     return ctx
+
+
+def _build_ranking_shell_page_context(*, args: Any) -> dict[str, Any]:
+    return get_ranking_shell_context(args)
+
+
+def _build_fundamentus_shell_page_context(*, args: Any) -> dict[str, Any]:
+    return get_fundamentus_shell_context(args)
 
 
 def create_app() -> Flask:
@@ -980,11 +990,18 @@ def create_app() -> Flask:
             ctx = _get_ranking_cache(cache_key)
         if ctx is None:
             with timed_stage("route.index.context"):
-                ctx = get_ranking_context(request.args)
+                ctx = _build_ranking_shell_page_context(args=request.args)
             with timed_stage("route.index.cache_store"):
                 _set_ranking_cache(cache_key, ctx)
         with timed_stage("route.index.render"):
             return render_template("index.html", **ctx)
+
+    @app.route("/partial/ranking")
+    def ranking_partial() -> str:
+        with timed_stage("route.index_partial.context"):
+            ctx = get_ranking_context(request.args)
+        with timed_stage("route.index_partial.render"):
+            return render_template("partials/ranking_dashboard.html", **ctx)
 
     @app.route("/covered-call")
     def covered_call() -> str:
@@ -1069,7 +1086,7 @@ def create_app() -> Flask:
             ctx = _get_strategy_page_cache(cache_key)
         if ctx is None:
             with timed_stage("route.fundamentus.context"):
-                ctx = get_fundamentus_context(request.args)
+                ctx = _build_fundamentus_shell_page_context(args=request.args)
             with timed_stage("route.fundamentus.cache_store"):
                 _set_strategy_page_cache(
                     cache_key,
@@ -1078,6 +1095,13 @@ def create_app() -> Flask:
                 )
         with timed_stage("route.fundamentus.render"):
             return render_template("fundamentus.html", **ctx)
+
+    @app.route("/fundamentus/partial/dashboard")
+    def fundamentus_partial_dashboard() -> str:
+        with timed_stage("route.fundamentus_partial.context"):
+            ctx = get_fundamentus_context(request.args)
+        with timed_stage("route.fundamentus_partial.render"):
+            return render_template("partials/fundamentus_dashboard.html", **ctx)
 
     @app.route("/favicon.ico")
     def favicon() -> tuple[str, int]:
