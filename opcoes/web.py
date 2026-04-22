@@ -1114,15 +1114,39 @@ def create_app() -> Flask:
         is_simulated = mode == "simulated"
         selected_period = (request.args.get("period") or "").strip()
 
+        def _safe_period(value: object) -> str:
+            text = str(value or "").strip()
+            if len(text) != 7 or text[4] != "-":
+                return ""
+            try:
+                year = int(text[:4])
+                month = int(text[5:7])
+            except ValueError:
+                return ""
+            if month < 1 or month > 12:
+                return ""
+            return f"{year:04d}-{month:02d}"
+
         provisions = darf.get_monthly_darf_provisions(is_simulated=is_simulated, limit=36)
         records = darf.list_months(is_simulated=is_simulated, limit=36)
-        record_by_period = {r.period: r for r in records}
+        record_by_period = {
+            normalized: r
+            for r in records
+            for normalized in [_safe_period(getattr(r, "period", ""))]
+            if normalized
+        }
+        provision_by_period = {
+            normalized: float(amount or 0.0)
+            for period, amount in provisions.items()
+            for normalized in [_safe_period(period)]
+            if normalized
+        }
         tax_periods = sorted(
             {
                 f"{today.year:04d}-{today.month:02d}"
                 for today in [datetime.date.today()]
             }
-            | set(provisions.keys())
+            | set(provision_by_period.keys())
             | set(record_by_period.keys()),
             reverse=True,
         )
@@ -1163,7 +1187,7 @@ def create_app() -> Flask:
                 year=int(p[:4]),
                 is_simulated=is_simulated,
             )
-            prov = float(provisions.get(p, 0.0) or 0.0)
+            prov = float(provision_by_period.get(p, 0.0) or 0.0)
             rec = record_by_period.get(p)
             try:
                 due_date = rec.due_date if rec else darf.last_business_day_next_month(p)
@@ -1227,7 +1251,7 @@ def create_app() -> Flask:
             period=selected_period,
             is_simulated=is_simulated,
         )
-        selected_provisioned = float(provisions.get(selected_period, 0.0) or 0.0)
+        selected_provisioned = float(provision_by_period.get(selected_period, 0.0) or 0.0)
 
         return render_template(
             "darf.html",
