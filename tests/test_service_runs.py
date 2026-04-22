@@ -122,7 +122,7 @@ def test_service_run_lifecycle_and_dashboard(monkeypatch) -> None:
     assert dashboard["services"][0]["label"] == "Ciclo diario do scraper"
     assert dashboard["services"][0]["last_run"]["status"] == "success"
     assert dashboard["services"][0]["last_run"]["monitor_status"] == "success"
-    assert dashboard["services"][0]["next_run_utc"].isoformat() == "2026-04-02T06:00:00+00:00"
+    assert dashboard["services"][0]["next_run_utc"].isoformat() == "2026-04-02T05:00:00+00:00"
 
     assert fake.closed >= 4
 
@@ -180,4 +180,4 @@ def test_service_dashboard_infers_scheduled_slot_in_local_timezone(monkeypatch) 
     )
     last_run = dashboard["services"][0]["last_run"]
 
-    assert last_run["scheduled_for_display_utc"].isoformat() == "2026-04-22T06:00:00+00:00"
+    assert last_run["scheduled_for_display_utc"].isoformat() == "2026-04-22T05:00:00+00:00"
