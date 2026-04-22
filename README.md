@@ -247,8 +247,12 @@ Atualizacao parcial da interface:
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
 - em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
+- em `Covered Call`, o resumo mensal de `premios liquidos` e `resultado liquido` voltou a ficar sempre visivel na pagina principal, mesmo quando nao existe call aberta no ativo.
+- em `Covered Call`, o filtro rapido agora marca com selo `Aberta` os ativos da garantia que ja tem call em aberto, sem esconder o badge de quantidade consolidada.
+- em `Covered Call` e `Cash-Covered Put`, os meses dos quadros financeiros passam a ser normalizados para `YYYY-MM`, evitando exibicoes truncadas como `2026-0`.
 - a auditoria da `Covered Call` preserva o detalhamento rico de `calls em aberto`, incluindo `recompra`, `% do prêmio`, `extrínseco`, `% p/ 2x`, `P/L` e ações operacionais.
 - quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
+- a tela `Cash-Covered Put` agora ganhou um `Filtro rapido` com o mesmo padrao visual da `Covered Call`, listando apenas ativos com puts abertas e sinalizando cada um com selo `Aberta`.
 - os paineis ao vivo agora mostram de forma explicita a origem do preco (`Ao vivo`, `Atrasado` ou `Snapshot`), a referencia usada (`Bid`, `Ask`, `Ultimo` ou `Snapshot`) e o horario/data util da ultima atualizacao.
 - quando a cotacao ao vivo nao estiver disponivel, a aplicacao continua usando o snapshot local, mas sem confundir esse fallback com status `Offline` quando ja existe um preco valido na base.
 - quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.

@@ -8,6 +8,19 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
     >
+    <style>
+      .ccp-sidebar {
+        position: sticky;
+        top: 84px;
+      }
+      .ccp-sidebar .list-group-item {
+        padding: 0.35rem 0.6rem;
+      }
+      .ccp-open-flag {
+        font-size: 0.72rem;
+        letter-spacing: 0.01em;
+      }
+    </style>
   </head>
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top">
@@ -26,8 +39,10 @@
       </div>
     </nav>
 
-    <div class="container">
-      <h1 class="h4 mb-3">Cash-Covered Put – {{ underlying }}</h1>
+    <div class="container-fluid px-3 px-lg-4">
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-9 col-xl-10">
+          <h1 class="h4 mb-3">Cash-Covered Put – {{ underlying }}</h1>
 
       <form class="row g-2 mb-4" method="get" action="/cash-covered-put">
         <div class="col-sm-2">
@@ -671,6 +686,44 @@
           </table>
         </div>
       {% endif %}
+        </div>
+        <aside class="col-lg-3 col-xl-2">
+          <div class="card ccp-sidebar">
+            <div class="card-header py-2">Filtro rápido</div>
+            <div class="list-group list-group-flush small">
+              {% if open_put_quick_filter %}
+                {% for item in open_put_quick_filter %}
+                  <a
+                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if item.ticker == underlying %}active{% endif %}"
+                    href="{{ url_for('cash_covered_put', underlying=item.ticker, min_yield_pct=filters.min_yield_pct, min_buffer_pct=filters.min_buffer_pct, min_days=filters.min_days, max_days=filters.max_days, limit=filters.limit, contract_size=filters.contract_size, cash_mode=cash_mode) }}"
+                  >
+                    <span class="d-flex align-items-center gap-2">
+                      <span>{{ item.ticker }}</span>
+                      {% if item.has_open_puts %}
+                        <span class="badge ccp-open-flag {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-success{% endif %}">
+                          Aberta
+                        </span>
+                      {% endif %}
+                    </span>
+                    {% if item.qty_total > 0 %}
+                      <span class="badge {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-secondary{% endif %}">
+                        {{ item.qty_total }}
+                      </span>
+                    {% endif %}
+                  </a>
+                {% endfor %}
+              {% else %}
+                <div class="list-group-item text-muted">
+                  Nenhuma put aberta para acompanhar no momento.
+                </div>
+              {% endif %}
+            </div>
+            <div class="card-footer small text-muted">
+              Ativos com puts vendidas ainda abertas. O selo <strong>Aberta</strong> evita depender da memória para achar a operação.
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
 
     <!-- Modal: Movimentar Caixa -->

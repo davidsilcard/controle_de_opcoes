@@ -290,6 +290,55 @@ def _aggregate_put_premiums_by_month(
     return results[::-1]
 
 
+def _normalize_monthly_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for row in rows or []:
+        item = dict(row)
+        item["month"] = finance.normalize_month_label(item.get("month"))
+        normalized.append(item)
+    return normalized
+
+
+def _build_open_put_quick_filter(
+    positions_open: List[Dict[str, Any]],
+    current_underlying: str,
+) -> List[Dict[str, Any]]:
+    rows: Dict[str, Dict[str, Any]] = {}
+
+    for pos in positions_open:
+        if not _is_put_option_position(pos):
+            continue
+        underlying = (pos.get("underlying") or "").strip().upper()
+        if not underlying:
+            continue
+        item = rows.setdefault(
+            underlying,
+            {
+                "ticker": underlying,
+                "qty_real": 0,
+                "qty_simulated": 0,
+                "qty_total": 0,
+                "has_open_puts": True,
+            },
+        )
+        open_qty = int(pos.get("open_qty") or pos.get("qty") or 0)
+        if bool(pos.get("is_simulated")):
+            item["qty_simulated"] += open_qty
+        else:
+            item["qty_real"] += open_qty
+        item["qty_total"] = int(item["qty_real"] + item["qty_simulated"])
+
+    selected = (current_underlying or "").strip().upper()
+    return sorted(
+        rows.values(),
+        key=lambda item: (
+            item["ticker"] != selected,
+            -int(item.get("qty_total") or 0),
+            item["ticker"],
+        ),
+    )
+
+
 def _build_put_suggestions(
     rows: List[Dict[str, Any]],
     *,
@@ -623,6 +672,8 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         is_simulated=True,
         strategy_tag="cash_put",
     ) or ctx.get("simulated_monthly_premiums_fallback", [])
+    monthly_premiums = _normalize_monthly_series(monthly_premiums)
+    simulated_monthly_premiums = _normalize_monthly_series(simulated_monthly_premiums)
     transactions = finance.get_transactions(
         limit=10,
         strategy_tag="cash_put",
@@ -641,6 +692,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         positions_all=positions_all,
         is_simulated=summary_simulated_filter,
     )
+    open_put_quick_filter = _build_open_put_quick_filter(positions_open, underlying)
 
     return {
         **ctx,
@@ -659,6 +711,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "monthly_premiums": monthly_premiums,
         "recent_transactions": transactions,
         "latest_assignment_summary": latest_assignment_summary,
+        "open_put_quick_filter": open_put_quick_filter,
     }
 
 

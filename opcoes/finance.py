@@ -1,4 +1,5 @@
 import datetime as dt
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -360,10 +361,26 @@ def get_monthly_premiums(
         """
         rows = conn.execute(query, (*params, int(limit_months))).fetchall()
         # Inverte para ordem cronológica (gráfico)
-        results = [{"month": r["month"], "total": r["total"]} for r in rows]
+        results = [{"month": normalize_month_label(r["month"]), "total": r["total"]} for r in rows]
         return results[::-1]
     finally:
         conn.close()
+
+
+def normalize_month_label(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}", text):
+        return text
+    match = re.match(r"^(?P<year>\d{4})-(?P<month>\d{1,2})\b", text)
+    if not match:
+        return text
+    year = int(match.group("year"))
+    month = int(match.group("month"))
+    if month < 1 or month > 12:
+        return text
+    return f"{year:04d}-{month:02d}"
 
 
 def get_transactions(

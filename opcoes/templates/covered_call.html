@@ -33,6 +33,10 @@
       .cc-market-time {
         white-space: nowrap;
       }
+      .cc-open-flag {
+        font-size: 0.72rem;
+        letter-spacing: 0.01em;
+      }
     </style>
   </head>
   <body class="bg-light">
@@ -223,6 +227,85 @@
             </div>
           </div>
 
+          <div class="row g-3 mb-4">
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-success-subtle">
+                <div class="card-header">Prêmios líquidos (Real)</div>
+                <div class="card-body small">
+                  {% if monthly_premiums %}
+                    {% for m in monthly_premiums %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem prêmios reais registrados.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-primary-subtle">
+                <div class="card-header">Resultado líquido (Real)</div>
+                <div class="card-body small">
+                  {% if monthly_operational_result %}
+                    {% for m in monthly_operational_result %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem resultado operacional real registrado.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-warning-subtle">
+                <div class="card-header">Prêmios líquidos (Simulado)</div>
+                <div class="card-body small">
+                  {% if simulated_monthly_premiums %}
+                    {% for m in simulated_monthly_premiums %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem prêmios simulados registrados.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-warning-subtle">
+                <div class="card-header">Resultado líquido (Simulado)</div>
+                <div class="card-body small">
+                  {% if simulated_monthly_operational_result %}
+                    {% for m in simulated_monthly_operational_result %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem resultado operacional simulado registrado.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div
             id="covered-call-audit"
             hx-get="/covered-call/partial/audit?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
@@ -249,12 +332,21 @@
                     class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if item.ticker == underlying %}active{% endif %}"
                     href="{{ url_for('covered_call', underlying=item.ticker, min_extrinsic=filters.min_extrinsic, min_days=filters.min_days, max_days=filters.max_days, min_dist_strike=filters.min_dist_strike, target_upside_pct=filters.target_upside_pct, only_target_hits=(1 if filters.only_target_hits else 0)) }}"
                   >
-                    <span>{{ item.ticker }}</span>
-                    {% if item.qty_total > 0 %}
-                      <span class="badge {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-secondary{% endif %}">
-                        {{ item.qty_total }}
-                      </span>
-                    {% endif %}
+                    <span class="d-flex align-items-center gap-2">
+                      <span>{{ item.ticker }}</span>
+                      {% if item.has_open_calls %}
+                        <span class="badge cc-open-flag {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-success{% endif %}">
+                          Aberta
+                        </span>
+                      {% endif %}
+                    </span>
+                    <span class="d-flex align-items-center gap-2">
+                      {% if item.qty_total > 0 %}
+                        <span class="badge {% if item.ticker == underlying %}text-bg-light text-dark{% else %}text-bg-secondary{% endif %}">
+                          {{ item.qty_total }}
+                        </span>
+                      {% endif %}
+                    </span>
                   </a>
                 {% endfor %}
               {% else %}
@@ -262,7 +354,7 @@
               {% endif %}
             </div>
             <div class="card-footer small text-muted">
-              Ativos da garantia para trocar o alvo sem digitar.
+              Ativos da garantia para trocar o alvo sem digitar. O selo <strong>Aberta</strong> mostra onde já existe call em aberto.
             </div>
           </div>
         </aside>

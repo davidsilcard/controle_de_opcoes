@@ -280,7 +280,17 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
                 "free_min_price": None,
                 "free_max_price": None,
             },
-            "underlying_quick_filter": [],
+            "underlying_quick_filter": [
+                {
+                    "ticker": "PETR4",
+                    "qty_total": 100,
+                    "has_open_calls": True,
+                }
+            ],
+            "monthly_premiums": [{"month": "2026-01", "total": 42.46}],
+            "monthly_operational_result": [{"month": "2026-01", "total": 40.00}],
+            "simulated_monthly_premiums": [],
+            "simulated_monthly_operational_result": [],
         },
     )
 
@@ -300,6 +310,10 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert 'action="/holdings/upsert"' in html
     assert "Carregando painel ao vivo, cotacoes e sugestoes..." in html
     assert "Carregando auditoria e detalhes operacionais..." in html
+    assert "Prêmios líquidos (Real)" in html
+    assert "Resultado líquido (Real)" in html
+    assert "2026-01" in html
+    assert "Aberta" in html
     assert "Painel ao vivo de covered call" not in html
     assert "Auditoria e detalhes operacionais" not in html
 
@@ -569,6 +583,10 @@ def test_covered_call_shell_context_persists_settings(monkeypatch) -> None:
     monkeypatch.setattr(
         "opcoes.strategies.covered_call.update_covered_call_settings",
         lambda **kwargs: update_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.finance.get_monthly_premiums",
+        lambda **_kwargs: [],
     )
 
     ctx = get_covered_call_shell_context(
