@@ -204,6 +204,12 @@ Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo co
 uv run python -m opcoes.cli report
 ```
 
+Na interface web, a aba `Ranking diario` continua usando carregamento progressivo, mas voltou a preservar o painel completo da estrategia:
+
+- `Top oportunidades`, `Top Apostas Racionais` e `Top Loterias`;
+- `Watchlist`, recorrencia historica e segmentos por perfil;
+- tabelas completas de posicoes reais/simuladas com totais e alertas.
+
 ### Posições
 
 ```bash

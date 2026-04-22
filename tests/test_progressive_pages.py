@@ -3,6 +3,66 @@ from __future__ import annotations
 from opcoes.web import create_app
 
 
+def _sample_ranking_opportunity(*, ticker: str, underlying: str) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "underlying": underlying,
+        "score_total": 12.3,
+        "best_ask": 1.2,
+        "best_bid": 1.1,
+        "ultimo": 1.15,
+        "preco_teorico": 1.0,
+        "preco_max_10_pct": 1.1,
+        "preco_max_20_pct": 1.2,
+        "desconto_teorico_pct": 5.0,
+        "spread_pct": 3.0,
+        "illiquidez_flag": False,
+        "distorcao_preco_pct": 2.5,
+        "distorcao_flag": False,
+        "%_Alta_p_2x": 4.5,
+        "custo_pct": 1.8,
+        "extrinsic_value": 0.6,
+        "extrinsic_pct_spot": 1.2,
+        "breakeven_price": 49.0,
+        "breakeven_dist_pct": 3.5,
+        "prob_be_pct": 66.0,
+        "underlying_price_date": "2026-04-21",
+        "underlying_price": 48.2,
+        "dias_uteis": 17,
+        "vol_impl_perc": 28.5,
+        "iv_rank_180d": 65.0,
+        "hv_21d": 22.1,
+        "hv_63d": 23.4,
+        "hv_126d": 24.0,
+        "hv_252d": 25.2,
+        "iv_hv_spread": 4.5,
+        "hv_ref_window": 21,
+        "iv_score": 7,
+        "em2x_score": 8,
+        "vol_fluxo_5d": 12345.0,
+        "prob_itm_pct": 31.0,
+        "Status_Moneyness": "ITM",
+    }
+
+
+def _sample_ranking_position(*, position_id: int, ticker: str) -> dict[str, object]:
+    return {
+        "id": position_id,
+        "ticker": ticker,
+        "trade_date": "2026-04-10",
+        "qty": 100,
+        "entry_price": 1.0,
+        "last_price": 1.1,
+        "strike": 50.0,
+        "dias_uteis": 17,
+        "pl": 10.0,
+        "pl_pct": 10.0,
+        "breakeven_price": 49.0,
+        "score_total": 12.3,
+        "trend_flag": "1",
+    }
+
+
 def test_ranking_route_renders_progressive_placeholder(monkeypatch) -> None:
     monkeypatch.setattr(
         "opcoes.web._build_ranking_shell_page_context",
@@ -29,6 +89,19 @@ def test_ranking_route_renders_progressive_placeholder(monkeypatch) -> None:
 
 
 def test_ranking_partial_renders_data(monkeypatch) -> None:
+    opp = _sample_ranking_opportunity(ticker="PETRA999", underlying="PETR4")
+    watch = {
+        **_sample_ranking_opportunity(ticker="PETRB888", underlying="PETR4"),
+        "best_ask": None,
+        "best_bid": None,
+        "spread_pct": None,
+    }
+    recurring = {
+        **_sample_ranking_opportunity(ticker="PETRC777", underlying="PETR4"),
+        "hits": 3,
+        "presence_pct": 50.0,
+        "last_seen": "2026-04-21",
+    }
     monkeypatch.setattr(
         "opcoes.web.get_ranking_context",
         lambda _args: {
@@ -38,20 +111,14 @@ def test_ranking_partial_renders_data(monkeypatch) -> None:
                 (),
                 {
                     "snapshot_date": "2026-04-21",
-                    "opportunities": [
-                        {
-                            "ticker": "PETRA999",
-                            "underlying": "PETR4",
-                            "score_total": 12.3,
-                            "best_ask": 1.2,
-                            "best_bid": 1.1,
-                            "ultimo": 1.15,
-                            "preco_teorico": 1.0,
-                            "%_Alta_p_2x": 4.5,
-                        }
-                    ],
-                    "theoretical_opportunities": [],
-                    "recurring_opportunities": [],
+                    "opportunities": [opp],
+                    "theoretical_opportunities": [watch],
+                    "rational_opportunities": [opp],
+                    "lottery_opportunities": [opp],
+                    "recurring_opportunities": [recurring],
+                    "recurring_window_start": "2026-03-22",
+                    "recurring_window_days": 30,
+                    "recurring_snapshot_days": 6,
                 },
             )(),
             "option_type_filter": "CALL",
@@ -59,11 +126,30 @@ def test_ranking_partial_renders_data(monkeypatch) -> None:
                 "show_warning": False,
                 "severity": "warning",
                 "no_tradeable": False,
-                "watchlist_count": 0,
-                "total_count": 1,
+                "watchlist_count": 1,
+                "total_count": 2,
+                "watchlist_ratio_pct": 50.0,
             },
-            "positions_real": [],
-            "positions_simulated": [],
+            "positions_real": [_sample_ranking_position(position_id=1, ticker="PETRA999")],
+            "positions_simulated": [_sample_ranking_position(position_id=2, ticker="PETRS111")],
+            "totals_real": {
+                "total_purchase": 100.0,
+                "total_current": 110.0,
+                "total_pl": 10.0,
+                "total_pl_pct": 10.0,
+            },
+            "totals_simulated": {
+                "total_purchase": 100.0,
+                "total_current": 110.0,
+                "total_pl": 10.0,
+                "total_pl_pct": 10.0,
+            },
+            "alerts_map": {1: ["Spread acima do limite"]},
+            "segments": {
+                "carteira": [opp],
+                "alavancagem": [{**opp, "ticker": "PETRA998", "Status_Moneyness": "ATM"}],
+                "aposta": [{**opp, "ticker": "PETRA997", "Status_Moneyness": "OTM"}],
+            },
         },
     )
     app = create_app()
@@ -76,6 +162,14 @@ def test_ranking_partial_renders_data(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Snapshot: 2026-04-21" in html
     assert "PETRA999" in html
+    assert "Top Apostas Racionais" in html
+    assert "Top Loterias" in html
+    assert "Watchlist (sem book" in html
+    assert "Oportunidades recorrentes" in html
+    assert "Segmentos por perfil" in html
+    assert "Posições abertas real" in html
+    assert "Posições abertas fictício" in html
+    assert "Spread acima do limite" in html
 
 
 def test_fundamentus_route_renders_progressive_placeholder(monkeypatch) -> None:
