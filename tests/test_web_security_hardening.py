@@ -179,6 +179,9 @@ def test_login_rate_limit_is_shared_between_app_instances(monkeypatch) -> None:
 
 def test_https_security_headers_are_applied(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
+    monkeypatch.setenv("OPCOES_EDGE_BASE_URL", "http://edge:8001")
+    monkeypatch.setenv("OPCOES_EDGE_PUBLIC_BASE_URL", "https://api.moven.cloud")
+    monkeypatch.setenv("OPCOES_MARKET_DATA_TOKEN", "token-app")
 
     app = create_app()
     client = app.test_client()
@@ -191,7 +194,14 @@ def test_https_security_headers_are_applied(monkeypatch) -> None:
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert response.headers["Strict-Transport-Security"].startswith("max-age=")
-    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    csp = response.headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in csp
+    assert "connect-src" in csp
+    assert "'self'" in csp
+    assert "http://edge:8001" in csp
+    assert "ws://edge:8001" in csp
+    assert "https://api.moven.cloud" in csp
+    assert "wss://api.moven.cloud" in csp
 
 
 def test_login_emits_server_timing_when_perf_enabled(monkeypatch) -> None:

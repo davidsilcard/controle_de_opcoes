@@ -523,11 +523,15 @@ def create_app() -> Flask:
     def _csp_connect_sources() -> str:
         sources = ["'self'"]
         if market_data_client.config.enabled:
-            base_parts = urlsplit(market_data_client.config.base_url)
-            if base_parts.scheme and base_parts.netloc:
-                sources.append(f"{base_parts.scheme}://{base_parts.netloc}")
-                ws_scheme = "wss" if base_parts.scheme == "https" else "ws"
-                sources.append(f"{ws_scheme}://{base_parts.netloc}")
+            for base_url in {
+                market_data_client.config.base_url,
+                market_data_client.config.public_base_url,
+            }:
+                base_parts = urlsplit((base_url or "").strip())
+                if base_parts.scheme and base_parts.netloc:
+                    sources.append(f"{base_parts.scheme}://{base_parts.netloc}")
+                    ws_scheme = "wss" if base_parts.scheme == "https" else "ws"
+                    sources.append(f"{ws_scheme}://{base_parts.netloc}")
         return " ".join(dict.fromkeys(sources))
 
     def _ranking_cache_ttl_seconds() -> int:
