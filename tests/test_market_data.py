@@ -28,12 +28,29 @@ class FakeMarketClient:
 
 def test_load_market_data_config_prefers_app_token(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_EDGE_BASE_URL", "http://127.0.0.1:8011")
+    monkeypatch.setenv("OPCOES_EDGE_PUBLIC_BASE_URL", "https://api.example.test")
     monkeypatch.setenv("OPCOES_EDGE_API_TOKENS", "excel=abc,app=token-app")
 
     config = load_market_data_config_from_env()
 
     assert config.base_url == "http://127.0.0.1:8011"
+    assert config.public_base_url == "https://api.example.test"
     assert config.bearer_token == "token-app"
+
+
+def test_market_data_client_prefers_public_base_url_for_websocket() -> None:
+    client = MarketDataClient(
+        config=MarketDataConfig(
+            base_url="http://edge:8001",
+            public_base_url="https://api.moven.cloud",
+            bearer_token="token-app",
+            timeout_seconds=5.0,
+            stale_after_seconds=60,
+        ),
+        http_client=httpx.Client(base_url="http://edge:8001"),
+    )
+
+    assert client.websocket_quotes_url == "wss://api.moven.cloud/v1/ws/quotes"
 
 
 def test_market_price_for_position_uses_hybrid_reference() -> None:

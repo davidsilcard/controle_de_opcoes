@@ -22,6 +22,7 @@ _LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 class MarketDataConfig:
     base_url: str
     bearer_token: str
+    public_base_url: str = ""
     timeout_seconds: float = 15.0
     stale_after_seconds: int = 60
 
@@ -51,6 +52,11 @@ def load_market_data_config_from_env() -> MarketDataConfig:
         or os.getenv("OPCOES_MARKET_DATA_BASE_URL")
         or "http://127.0.0.1:8011"
     ).strip().rstrip("/")
+    public_base_url = (
+        os.getenv("OPCOES_EDGE_PUBLIC_BASE_URL")
+        or os.getenv("OPCOES_MARKET_DATA_PUBLIC_BASE_URL")
+        or base_url
+    ).strip().rstrip("/")
     token = (os.getenv("OPCOES_MARKET_DATA_TOKEN") or "").strip()
     if not token:
         token_map = _parse_token_map(os.getenv("OPCOES_EDGE_API_TOKENS"))
@@ -68,6 +74,7 @@ def load_market_data_config_from_env() -> MarketDataConfig:
     return MarketDataConfig(
         base_url=base_url,
         bearer_token=token,
+        public_base_url=public_base_url,
         timeout_seconds=timeout_seconds,
         stale_after_seconds=stale_after_seconds,
     )
@@ -239,7 +246,7 @@ class MarketDataClient:
 
     @property
     def websocket_quotes_url(self) -> str:
-        base = self.config.base_url.rstrip("/")
+        base = (self.config.public_base_url or self.config.base_url).rstrip("/")
         parts = urlsplit(base)
         scheme = "wss" if parts.scheme == "https" else "ws"
         path = "/v1/ws/quotes"

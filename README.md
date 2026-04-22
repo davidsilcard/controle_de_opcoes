@@ -85,6 +85,7 @@ OPCOES_PG_SCHEMA=admin
 OPCOES_AUTH_SCHEMA=auth
 OPCOES_SECRET_KEY=uma-chave-longa-unica-e-secreta
 OPCOES_TEMP_PASSWORD_TTL_SECONDS=10800
+OPCOES_EDGE_PUBLIC_BASE_URL=https://api.moven.cloud
 ```
 
 Observacao:
@@ -95,6 +96,7 @@ Observacao:
 - na VPS, trate `/etc/controle_de_opcoes/app.env` como fonte oficial e evite manter `.env` com valores reais na raiz do projeto.
 - `OPCOES_AUTH_SCHEMA` define o schema dedicado de autenticacao web, onde ficam `auth.web_users` e os dados de login.
 - `OPCOES_TEMP_PASSWORD_TTL_SECONDS` ajusta por quanto tempo a senha temporaria continua valida antes de expirar no primeiro acesso.
+- `OPCOES_EDGE_PUBLIC_BASE_URL` define a URL publica da edge usada pelo navegador para o `WebSocket`; em ambientes com Docker + proxy reverso, ela deve apontar para o host publico, por exemplo `https://api.moven.cloud`.
 - opcionalmente, use `OPCOES_SHARED_SCHEMA` para separar a base compartilhada de mercado/configuracoes do schema operacional do usuario.
 - se `OPCOES_SHARED_SCHEMA` nao for definido, a aplicacao usa `OPCOES_AUTOMATION_SCHEMA` e depois `OPCOES_PG_SCHEMA` como base compartilhada.
 
@@ -277,6 +279,7 @@ Atualizacao parcial da interface:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
 - o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
+- em VPS com Docker, mantenha `OPCOES_EDGE_BASE_URL` como endereco interno do container, por exemplo `http://edge:8001`, e configure `OPCOES_EDGE_PUBLIC_BASE_URL` com o host publico, por exemplo `https://api.moven.cloud`, para o browser receber um `wss://...` valido.
 - quando o `WebSocket` falha, a interface cai para fallback mais lento, preservando a tela em modo `Snapshot` em vez de quebrar o painel.
 - isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA e sem mover formulas financeiras para o cliente.
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
