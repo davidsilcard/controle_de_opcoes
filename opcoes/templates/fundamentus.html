@@ -17,7 +17,10 @@
       }
       .fundamentus-table {
         font-size: 0.85rem;
-        min-width: 1100px;
+        min-width: 1400px;
+      }
+      .put-table {
+        min-width: 1500px;
       }
       .fundamentus-table thead th {
         position: sticky;
@@ -25,6 +28,10 @@
         background: #f8f9fa;
         z-index: 2;
         white-space: nowrap;
+      }
+      .fundamentus-table thead tr:nth-child(2) th {
+        top: 2.4rem;
+        z-index: 3;
       }
       .fundamentus-table th:first-child,
       .fundamentus-table td:first-child {
@@ -36,6 +43,12 @@
       .fundamentus-table thead th:first-child {
         background: #f8f9fa;
         z-index: 5;
+      }
+      .fundamentus-table tbody td {
+        white-space: nowrap;
+      }
+      .fundamentus-table .column-filter {
+        min-width: 70px;
       }
     </style>
   </head>
@@ -79,7 +92,6 @@
       function initFundamentusInteractive(root) {
         const scope = root || document;
         const tables = scope.querySelectorAll(".js-sort-filter-table");
-        if (!tables.length) return;
 
         const parseNumber = (text) => {
           if (!text) return NaN;
@@ -104,10 +116,29 @@
           return text.toLowerCase();
         };
 
+        const matchFilter = (cellText, filterValue, type) => {
+          const raw = (filterValue || "").trim().toLowerCase();
+          if (!raw) return true;
+          const opMatch = raw.match(/^(>=|<=|>|<|=)\s*(-?[\d.,]+)$/);
+          if (opMatch && (type === "number" || type === "percent")) {
+            const cellNumber = parseNumber(cellText);
+            const filterNumber = parseNumber(opMatch[2]);
+            if (Number.isNaN(cellNumber) || Number.isNaN(filterNumber)) return false;
+            const op = opMatch[1];
+            if (op === ">=") return cellNumber >= filterNumber;
+            if (op === "<=") return cellNumber <= filterNumber;
+            if (op === ">") return cellNumber > filterNumber;
+            if (op === "<") return cellNumber < filterNumber;
+            if (op === "=") return cellNumber === filterNumber;
+          }
+          return cellText.toLowerCase().includes(raw);
+        };
+
         tables.forEach((table) => {
           const tbody = table.querySelector("tbody");
           if (!tbody) return;
           const sortButtons = table.querySelectorAll(".sort-btn");
+          const filters = table.querySelectorAll(".column-filter");
           let activeSort = { index: null, direction: 1 };
 
           const updateIndicators = () => {
@@ -144,13 +175,78 @@
             updateIndicators();
           };
 
+          const applyFilters = () => {
+            const filterValues = Array.from(filters).map((input) => ({
+              index: Number(input.dataset.index),
+              value: input.value,
+              type: input.dataset.type || "text",
+            }));
+            const rows = tbody.querySelectorAll("tr");
+            rows.forEach((row) => {
+              const cells = row.children;
+              const shouldShow = filterValues.every((filter) => {
+                const cell = cells[filter.index];
+                const cellText = cell ? cell.textContent.trim() : "";
+                return matchFilter(cellText, filter.value, filter.type);
+              });
+              row.style.display = shouldShow ? "" : "none";
+            });
+          };
+
           sortButtons.forEach((btn) => {
             btn.addEventListener("click", () => {
               sortRows(Number(btn.dataset.index), btn.dataset.type || "text");
             });
           });
 
+          filters.forEach((input) => {
+            input.addEventListener("input", applyFilters);
+          });
+
+          const defaultIndex = table.dataset.defaultSortIndex;
+          if (defaultIndex !== undefined) {
+            const index = Number(defaultIndex);
+            if (!Number.isNaN(index)) {
+              const defaultButton = Array.from(sortButtons).find(
+                (btn) => Number(btn.dataset.index) === index
+              );
+              const type = (defaultButton && defaultButton.dataset.type) || "text";
+              const direction = table.dataset.defaultSortDirection === "desc" ? -1 : 1;
+              sortRows(index, type, direction);
+            }
+          }
+
           updateIndicators();
+        });
+
+        const canvas = scope.querySelector("#sector-chart");
+        if (!canvas) return;
+        let data = [];
+        try {
+          data = JSON.parse(canvas.dataset.sectorBreakdown || "[]");
+        } catch (_error) {
+          data = [];
+        }
+        if (!Array.isArray(data) || !data.length) return;
+        const total = data.reduce((sum, item) => sum + (item.count || 0), 0);
+        if (!total) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const size = Math.min(canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = size * 0.45;
+        let start = -Math.PI / 2;
+        data.forEach((item) => {
+          const slice = (item.count / total) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, radius, start, start + slice);
+          ctx.closePath();
+          ctx.fillStyle = item.color || "#888";
+          ctx.fill();
+          start += slice;
         });
       }
 

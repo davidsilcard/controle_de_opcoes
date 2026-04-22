@@ -107,25 +107,83 @@ def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
         lambda _args: {
             "message": "ok",
             "snapshot_date": "2026-04-21",
+            "changes_reference_date": "2026-04-20",
+            "entered_opportunities": ["PETR4"],
+            "exited_opportunities": ["VALE3"],
+            "ranking_total": [{"papel": "PETR4", "approvals": 4}],
             "rows": [
                 {
                     "papel": "PETR4",
                     "cotacao": 37.5,
                     "preco_teto": 42.0,
+                    "pl": 5.0,
+                    "pvp": 1.2,
+                    "psr": 1.1,
                     "div_yield": 12.0,
+                    "p_ativo": 1.0,
+                    "p_cap_giro": 1.0,
+                    "p_ebit": 1.0,
+                    "p_ativo_circ_liq": 1.0,
+                    "ev_ebit": 1.0,
+                    "ev_ebitda": 1.0,
+                    "margem_ebit": 10.0,
+                    "margem_liquida": 10.0,
+                    "liquidez_corrente": 1.1,
+                    "roic": 10.0,
                     "roe": 20.0,
+                    "liquidez_2m": 1000000.0,
+                    "patrimonio_liq": 5000000.0,
+                    "div_bruta_patrim": 0.2,
+                    "cresc_rec_5a": 5.0,
+                    "peg_ratio": 1.0,
                     "sector": "Energia",
-                    "signal": type("Signal", (), {"status": "approved"})(),
+                    "signal": type(
+                        "Signal",
+                        (),
+                        {"status": "approved", "reason_label": "Aprovada em todos os filtros.", "reason": "approved", "failed_step": None},
+                    )(),
                 }
             ],
             "signals_available": True,
             "status_label": "Aprovadas",
+            "status_filter": "approved",
+            "limit": 100,
+            "ranking_window_days": 30,
             "approved_count": 1,
             "rejected_count": 0,
             "filtered_rows_count": 1,
             "total_rows": 1,
-            "put_target_vencimento": None,
-            "ranking_window": [],
+            "put_target_vencimento": "2026-05-15",
+            "put_score_formula": "score didatico",
+            "put_min_premium_pct": 0.5,
+            "put_min_score": 4.0,
+            "put_watchlist_count": 0,
+            "put_profile_breakdown": [{"label": "Conservadora", "count": 1}],
+            "put_opportunities": [
+                {
+                    "papel": "PETRQ33",
+                    "cotacao": 37.5,
+                    "contrato": "PETRQ33",
+                    "strike": 34.0,
+                    "preco_ref": 0.8,
+                    "premium_source": "best_bid",
+                    "premio_pct": 2.1,
+                    "premio_mensal_pct": 2.1,
+                    "distancia_strike_pct": 9.0,
+                    "put_score": 7.5,
+                    "put_profile": "Equilibrada",
+                    "execution_note": "Acompanha book",
+                    "dias_ate_vencimento": 18,
+                }
+            ],
+            "put_distance_limit_pct": 15.0,
+            "put_target_monthly_yield_pct": 1.0,
+            "put_snapshot_date": "2026-04-21",
+            "ranking_window": [{"papel": "PETR4", "approvals": 2}],
+            "ranking_window_start": "2026-03-22",
+            "ranking_window_end": "2026-04-21",
+            "target_yield_pct": 8.0,
+            "sector_breakdown": [{"label": "Energia", "count": 1, "pct": 100.0, "color": "#4e79a7"}],
         },
     )
     app = create_app()
@@ -139,3 +197,7 @@ def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
     assert "Snapshot: 2026-04-21" in html
     assert "PETR4" in html
     assert "Aprovada" in html
+    assert "Oportunidades de PUTs" in html
+    assert "Mudancas na lista de aprovadas" in html
+    assert "Divisao por setor" in html
+    assert 'data-default-sort-index="9"' in html

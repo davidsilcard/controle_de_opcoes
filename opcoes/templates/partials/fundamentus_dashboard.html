@@ -8,9 +8,73 @@
     {% endif %}
   </p>
 {% endif %}
+{% set lag_days = snapshot_lag_days | default(none) %}
+{% if lag_days is not none and lag_days > 0 %}
+  <div class="alert alert-warning small" role="alert">
+    Defasagem entre bases: Fundamentus em {{ snapshot_date }} e opcoes em {{ put_snapshot_date }}
+    ({{ lag_days }} dia(s)).
+    A selecao de PUT usa preco conservador (bid primeiro). Sem bid, fica como watchlist por ultimo.
+  </div>
+{% endif %}
+{% if filter_run %}
+  <div class="card mb-3">
+    <div class="card-header">Filtros aplicados no snapshot</div>
+    <div class="card-body py-2">
+      <div class="row small">
+        <div class="col-md-4">Liq. 2m min: <strong>{{ '%.0f'|format(filter_run.liq_2m_min) }}</strong></div>
+        <div class="col-md-4">Div. Bruta/Patrim max: <strong>{{ '%.2f'|format(filter_run.div_bruta_patrim_max) }}</strong></div>
+        <div class="col-md-4">Cresc. Rec. 5a min: <strong>{{ '%.2f'|format(filter_run.cresc_rec_5a_min) }}%</strong></div>
+        <div class="col-md-4">DY min: <strong>{{ '%.2f'|format(filter_run.div_yield_min) }}%</strong></div>
+        <div class="col-md-4">ROE min: <strong>{{ '%.2f'|format(filter_run.roe_min) }}%</strong></div>
+        <div class="col-md-4">Margem liq. min: <strong>{{ '%.2f'|format(filter_run.margem_liquida_min) }}%</strong></div>
+        <div class="col-md-4">Permite margem zero: <strong>{% if filter_run.margem_liquida_allow_zero %}Sim{% else %}Nao{% endif %}</strong></div>
+        <div class="col-md-8 text-muted">
+          Referencia de configuracao: {{ filter_run.snapshot_date }}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if signals_available %}
+  {% set qs_date = '' %}
+  {% if snapshot_date %}
+    {% set qs_date = '&date=' ~ snapshot_date %}
+  {% endif %}
+  {% set qs_limit = '' %}
+  {% if limit is not none %}
+    {% set qs_limit = '&limit=' ~ limit %}
+  {% endif %}
+  {% set qs_window = '' %}
+  {% if ranking_window_days %}
+    {% set qs_window = '&window_days=' ~ ranking_window_days %}
+  {% endif %}
+  <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Filtro de status">
+    <a class="btn btn-outline-secondary {% if status_filter == 'approved' %}active{% endif %}" href="?status=approved{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Aprovadas</a>
+    <a class="btn btn-outline-secondary {% if status_filter == 'rejected' %}active{% endif %}" href="?status=rejected{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Reprovadas</a>
+    <a class="btn btn-outline-secondary {% if status_filter == 'all' %}active{% endif %}" href="?status=all{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Todas</a>
+  </div>
+  <form class="row g-2 align-items-end mb-3" method="get" action="/fundamentus">
+    <input type="hidden" name="status" value="{{ status_filter }}">
+    {% if snapshot_date %}
+      <input type="hidden" name="date" value="{{ snapshot_date }}">
+    {% endif %}
+    {% if limit is not none %}
+      <input type="hidden" name="limit" value="{{ limit }}">
+    {% endif %}
+    <div class="col-auto">
+      <label class="form-label small">Janela (dias)</label>
+      <input type="number" name="window_days" class="form-control form-control-sm" value="{{ ranking_window_days }}" min="1">
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-outline-secondary btn-sm" type="submit">Atualizar janela</button>
+    </div>
+  </form>
+{% endif %}
+
 {% if rows and not signals_available %}
   <div class="alert alert-warning" role="alert">
-    Filtros ainda não aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
+    Filtros ainda nao aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
   </div>
 {% elif rows and signals_available %}
   <div class="alert alert-success" role="alert">
@@ -18,95 +82,425 @@
   </div>
 {% else %}
   <div class="alert alert-info" role="alert">
-    Em construção. Esta aba vai concentrar o filtro fundamentalista e avisos da estratégia.
+    Em construcao. Esta aba vai concentrar o filtro fundamentalista e avisos da estrategia.
   </div>
 {% endif %}
 
-<div class="row g-3">
-  <div class="col-lg-6">
-    <div class="card h-100">
-      <div class="card-header">Resumo</div>
-      <div class="card-body">
-        <div class="small text-muted">Aprovadas: {{ approved_count }} | Reprovadas: {{ rejected_count }}</div>
-        <div class="small text-muted">Exibidas: {{ filtered_rows_count }} | Total base: {{ total_rows }}</div>
-        {% if put_target_vencimento %}
-          <div class="small text-muted mt-2">Janela de PUT alvo: {{ put_target_vencimento }}</div>
+{% if signals_available %}
+  {% if changes_reference_date %}
+    <h2 class="h6 mb-2">Mudancas na lista de aprovadas</h2>
+    <div class="row mb-3">
+      <div class="col-lg-6 mb-3 mb-lg-0">
+        <div class="card border-success h-100">
+          <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <span>Entradas</span>
+            <span class="badge bg-light text-dark">{{ entered_opportunities | length }}</span>
+          </div>
+          <div class="card-body p-0">
+            {% if entered_opportunities %}
+              <ul class="list-group list-group-flush">
+                {% for papel in entered_opportunities %}
+                  <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>{{ papel }}</span>
+                    <span class="badge text-bg-success">novo</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="p-3 text-muted small">Nenhuma nova entrada.</div>
+            {% endif %}
+          </div>
+          <div class="card-footer text-muted small">
+            Aprovadas em {{ snapshot_date }} e nao estavam em {{ changes_reference_date }}.
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card border-danger h-100">
+          <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+            <span>Saidas</span>
+            <span class="badge bg-light text-dark">{{ exited_opportunities | length }}</span>
+          </div>
+          <div class="card-body p-0">
+            {% if exited_opportunities %}
+              <ul class="list-group list-group-flush">
+                {% for papel in exited_opportunities %}
+                  <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>{{ papel }}</span>
+                    <span class="badge text-bg-danger">saiu</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="p-3 text-muted small">Nenhuma saida.</div>
+            {% endif %}
+          </div>
+          <div class="card-footer text-muted small">
+            Estavam aprovadas em {{ changes_reference_date }} e nao estao em {{ snapshot_date }}.
+          </div>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="alert alert-secondary small mb-3" role="alert">
+      Sem historico anterior para comparar entradas e saidas.
+    </div>
+  {% endif %}
+
+  <div class="row mb-3">
+    <div class="col-lg-6 mb-3 mb-lg-0">
+      <div class="card h-100">
+        <div class="card-header">Ranking historico (aprovadas)</div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Papel</th>
+                  <th class="text-end">Aparicoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if ranking_total %}
+                  {% for item in ranking_total %}
+                    <tr>
+                      <td>{{ item.papel }}</td>
+                      <td class="text-end">{{ item.approvals }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="2" class="text-muted text-center">Sem dados.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header">
+          Ranking ultimos {{ ranking_window_days }} dias (aprovadas)
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Papel</th>
+                  <th class="text-end">Aparicoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if ranking_window %}
+                  {% for item in ranking_window %}
+                    <tr>
+                      <td>{{ item.papel }}</td>
+                      <td class="text-end">{{ item.approvals }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="2" class="text-muted text-center">Sem dados.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% if ranking_window_start and ranking_window_end %}
+          <div class="card-footer text-muted small">
+            Periodo: {{ ranking_window_start }} a {{ ranking_window_end }}
+          </div>
         {% endif %}
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
-    <div class="card h-100">
-      <div class="card-header">Ranking histórico</div>
+{% endif %}
+
+{% if rows %}
+  {% if put_opportunities %}
+    <div class="card mb-3">
+      <div class="card-header">
+        Oportunidades de PUTs
+        {% if put_target_vencimento %}
+          <span class="text-muted small">| Vencimento {{ put_target_vencimento }}</span>
+        {% endif %}
+      </div>
       <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-sm mb-0">
+        <div class="px-3 pt-2 pb-1">
+          <p class="text-muted small mb-1">
+            Ranking didatico de puts: {{ put_score_formula }}.
+            Filtros ativos: premio >= {{ '%.2f'|format(put_min_premium_pct) }}%, score >= {{ '%.1f'|format(put_min_score) }}.
+          </p>
+          <p class="text-muted small mb-2">
+            Total: {{ put_opportunities | length }} | Watchlist (sem bid): {{ put_watchlist_count }}
+            {% if put_profile_breakdown %}
+              |
+              {% for item in put_profile_breakdown %}
+                {{ item.label }}: {{ item.count }}{% if not loop.last %} |{% endif %}
+              {% endfor %}
+            {% endif %}
+          </p>
+        </div>
+        <div class="table-responsive fundamentus-table-wrap">
+          <table class="table table-sm table-striped align-middle fundamentus-table put-table js-sort-filter-table" data-default-sort-index="9" data-default-sort-direction="desc">
             <thead class="table-light">
               <tr>
-                <th>Papel</th>
-                <th class="text-end">Aparições</th>
+                <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="0" data-type="text">Papel <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="1" data-type="number">Cotacao <span class="sort-indicator"></span></button></th>
+                <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="2" data-type="text">Contrato <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="3" data-type="number">Strike <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="number">Preco ref <span class="sort-indicator"></span></button></th>
+                <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="5" data-type="text">Fonte <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="6" data-type="percent">Premio % <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="7" data-type="percent">Premio mes % <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="8" data-type="percent">Dist. Strike % <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="9" data-type="number" title="{{ put_score_formula }}">Score PUT <span class="sort-indicator"></span></button></th>
+                <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="10" data-type="text">Perfil <span class="sort-indicator"></span></button></th>
+                <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="11" data-type="text">Execucao <span class="sort-indicator"></span></button></th>
+                <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="12" data-type="number">Dias ate venc. <span class="sort-indicator"></span></button></th>
+              </tr>
+              <tr>
+                <th><input class="form-control form-control-sm column-filter" data-index="0" data-type="text" placeholder="filtrar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="1" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="2" data-type="text" placeholder="filtrar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="3" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="4" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="5" data-type="text" placeholder="bid / ultimo"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="6" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="7" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="8" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="9" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="10" data-type="text" placeholder="perfil"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="11" data-type="text" placeholder="alerta"></th>
+                <th><input class="form-control form-control-sm column-filter" data-index="12" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
               </tr>
             </thead>
             <tbody>
-              {% for item in ranking_window[:15] %}
+              {% for row in put_opportunities %}
                 <tr>
-                  <td>{{ item.papel }}</td>
-                  <td class="text-end">{{ item.approvals }}</td>
+                  <td>{{ row.papel }}</td>
+                  <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
+                  <td>{{ row.contrato or '-' }}</td>
+                  <td class="text-end">{{ row.strike is not none and ('%.2f'|format(row.strike)) or '-' }}</td>
+                  <td class="text-end">{{ row.preco_ref is not none and ('%.2f'|format(row.preco_ref)) or '-' }}</td>
+                  <td>
+                    {% if row.premium_source == 'best_bid' %}
+                      <span class="badge text-bg-success">bid</span>
+                    {% else %}
+                      <span class="badge text-bg-warning">ultimo</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">{% if row.premio_pct is not none %}{{ '%.2f'|format(row.premio_pct) }}%{% else %}-{% endif %}</td>
+                  <td class="text-end">{% if row.premio_mensal_pct is not none %}{{ '%.2f'|format(row.premio_mensal_pct) }}%{% else %}-{% endif %}</td>
+                  <td class="text-end">{% if row.distancia_strike_pct is not none %}{{ '%.2f'|format(row.distancia_strike_pct) }}%{% else %}-{% endif %}</td>
+                  <td class="text-end">
+                    {% if row.put_score is not none %}
+                      {% if row.put_score >= 8 %}
+                        <span class="text-success fw-semibold">{{ '%.2f'|format(row.put_score) }}</span>
+                      {% elif row.put_score >= 6 %}
+                        <span class="text-primary fw-semibold">{{ '%.2f'|format(row.put_score) }}</span>
+                      {% else %}
+                        {{ '%.2f'|format(row.put_score) }}
+                      {% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if row.put_profile == 'Conservadora' %}
+                      <span class="badge text-bg-success">{{ row.put_profile }}</span>
+                    {% elif row.put_profile == 'Equilibrada' %}
+                      <span class="badge text-bg-primary">{{ row.put_profile }}</span>
+                    {% else %}
+                      <span class="badge text-bg-warning">{{ row.put_profile }}</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ row.execution_note or '-' }}</td>
+                  <td class="text-end">{{ row.dias_ate_vencimento is not none and ('%d'|format(row.dias_ate_vencimento)) or '-' }}</td>
                 </tr>
-              {% else %}
-                <tr><td colspan="2" class="text-muted text-center">Sem dados.</td></tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
-    </div>
-  </div>
-  <div class="col-12">
-    <div class="card">
-      <div class="card-header">Tabela Fundamentus</div>
-      <div class="card-body p-0">
-        {% if not rows %}
-          <div class="p-3 text-muted small">Nenhuma linha para os filtros atuais.</div>
-        {% else %}
-          <div class="table-responsive fundamentus-table-wrap">
-            <table class="table table-sm table-striped align-middle fundamentus-table js-sort-filter-table">
-              <thead class="table-light">
-                <tr>
-                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="0" data-type="text">Papel <span class="sort-indicator"></span></button></th>
-                  <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="1" data-type="number">Cotação <span class="sort-indicator"></span></button></th>
-                  <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="2" data-type="number">Preço teto <span class="sort-indicator"></span></button></th>
-                  <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="3" data-type="percent">DY <span class="sort-indicator"></span></button></th>
-                  <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="percent">ROE <span class="sort-indicator"></span></button></th>
-                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="5" data-type="text">Status <span class="sort-indicator"></span></button></th>
-                  <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="6" data-type="text">Setor <span class="sort-indicator"></span></button></th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in rows[:200] %}
-                  <tr>
-                    <td>{{ row.papel }}</td>
-                    <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
-                    <td class="text-end">{{ row.preco_teto is not none and ('%.2f'|format(row.preco_teto)) or '-' }}</td>
-                    <td class="text-end">{% if row.div_yield is not none %}{{ '%.2f'|format(row.div_yield) }}%{% else %}-{% endif %}</td>
-                    <td class="text-end">{% if row.roe is not none %}{{ '%.2f'|format(row.roe) }}%{% else %}-{% endif %}</td>
-                    <td>
-                      {% if row.signal and row.signal.status == 'approved' %}
-                        <span class="badge text-bg-success">Aprovada</span>
-                      {% elif row.signal %}
-                        <span class="badge text-bg-danger">Reprovada</span>
-                      {% else %}
-                        -
-                      {% endif %}
-                    </td>
-                    <td>{{ row.sector or '-' }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+      <div class="card-footer text-muted small">
+        Strike abaixo da cotacao e distancia ate {{ put_distance_limit_pct }}%.
+        Premio minimo: {{ '%.2f'|format(put_min_premium_pct) }}%.
+        Meta mensal para score: {{ '%.2f'|format(put_target_monthly_yield_pct) }}%.
+        {% if put_snapshot_date %}
+          | Snapshot opcoes: {{ put_snapshot_date }}
         {% endif %}
       </div>
     </div>
+  {% elif put_target_vencimento %}
+    <div class="alert alert-secondary small">
+      Sem oportunidades de PUT para o vencimento {{ put_target_vencimento }}.
+    </div>
+  {% endif %}
+
+  <p class="text-muted small mb-2">Use o scroll horizontal para ver todas as colunas.</p>
+  <p class="text-muted small mb-2">
+    PEG (aprox.) = P/L dividido pelo Cresc. Rec. 5a (%). Usa crescimento de receita como proxy; valores <= 0 ficam em branco.
+  </p>
+  <div class="table-responsive fundamentus-table-wrap">
+    <table id="fundamentus-table" class="table table-sm table-striped align-middle fundamentus-table js-sort-filter-table">
+      <thead class="table-light">
+        <tr>
+          <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="0" data-type="text">Papel <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="1" data-type="number">Cotacao <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="2" data-type="number">Preco teto {{ target_yield_pct | round(2) }}% <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="3" data-type="number">P/L <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="number">P/VP <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="5" data-type="number">PSR <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="6" data-type="percent">Div.Yield <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="7" data-type="number">P/Ativo <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="8" data-type="number">P/Cap.Giro <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="9" data-type="number">P/EBIT <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="10" data-type="number">P/Ativ Circ.Liq <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="11" data-type="number">EV/EBIT <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="12" data-type="number">EV/EBITDA <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="13" data-type="percent">Mrg Ebit <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="14" data-type="percent">Mrg. Liq. <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="15" data-type="number">Liq. Corr. <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="16" data-type="percent">ROIC <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="17" data-type="percent">ROE <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="18" data-type="number">Liq.2meses <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="19" data-type="number">Patrim. Liq <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="20" data-type="number">Div.Brut/ Patrim. <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="21" data-type="percent">Cresc. Rec.5a <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="22" data-type="number" title="PEG = P/L dividido pelo Cresc. Rec. 5a (%)">PEG <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="23" data-type="text">Status <span class="sort-indicator"></span></button></th>
+          <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="24" data-type="text">Motivo <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="25" data-type="number">Etapa <span class="sort-indicator"></span></button></th>
+          <th data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="26" data-type="text">Setor <span class="sort-indicator"></span></button></th>
+        </tr>
+        <tr>
+          <th><input class="form-control form-control-sm column-filter" data-index="0" data-type="text" placeholder="filtrar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="1" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="2" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="3" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="4" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="5" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="6" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="7" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="8" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="9" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="10" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="11" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="12" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="13" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="14" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="15" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="16" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="17" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="18" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="19" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="20" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="21" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="22" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="23" data-type="text" placeholder="filtrar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="24" data-type="text" placeholder="filtrar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="25" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar"></th>
+          <th><input class="form-control form-control-sm column-filter" data-index="26" data-type="text" placeholder="filtrar"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.papel }}</td>
+            <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
+            <td class="text-end">{% if row.preco_teto is not none %}{{ '%.2f'|format(row.preco_teto) }}{% else %}-{% endif %}</td>
+            <td class="text-end">{{ row.pl is not none and ('%.2f'|format(row.pl)) or '-' }}</td>
+            <td class="text-end">{{ row.pvp is not none and ('%.2f'|format(row.pvp)) or '-' }}</td>
+            <td class="text-end">{{ row.psr is not none and ('%.3f'|format(row.psr)) or '-' }}</td>
+            <td class="text-end">{% if row.div_yield is not none %}{{ '%.2f'|format(row.div_yield) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{{ row.p_ativo is not none and ('%.3f'|format(row.p_ativo)) or '-' }}</td>
+            <td class="text-end">{{ row.p_cap_giro is not none and ('%.2f'|format(row.p_cap_giro)) or '-' }}</td>
+            <td class="text-end">{{ row.p_ebit is not none and ('%.2f'|format(row.p_ebit)) or '-' }}</td>
+            <td class="text-end">{{ row.p_ativo_circ_liq is not none and ('%.2f'|format(row.p_ativo_circ_liq)) or '-' }}</td>
+            <td class="text-end">{{ row.ev_ebit is not none and ('%.2f'|format(row.ev_ebit)) or '-' }}</td>
+            <td class="text-end">{{ row.ev_ebitda is not none and ('%.2f'|format(row.ev_ebitda)) or '-' }}</td>
+            <td class="text-end">{% if row.margem_ebit is not none %}{{ '%.2f'|format(row.margem_ebit) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{% if row.margem_liquida is not none %}{{ '%.2f'|format(row.margem_liquida) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{{ row.liquidez_corrente is not none and ('%.2f'|format(row.liquidez_corrente)) or '-' }}</td>
+            <td class="text-end">{% if row.roic is not none %}{{ '%.2f'|format(row.roic) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{% if row.roe is not none %}{{ '%.2f'|format(row.roe) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{{ row.liquidez_2m is not none and ('%.0f'|format(row.liquidez_2m)) or '-' }}</td>
+            <td class="text-end">{{ row.patrimonio_liq is not none and ('%.0f'|format(row.patrimonio_liq)) or '-' }}</td>
+            <td class="text-end">{{ row.div_bruta_patrim is not none and ('%.2f'|format(row.div_bruta_patrim)) or '-' }}</td>
+            <td class="text-end">{% if row.cresc_rec_5a is not none %}{{ '%.2f'|format(row.cresc_rec_5a) }}%{% else %}-{% endif %}</td>
+            <td class="text-end">{% if row.peg_ratio is not none %}{{ '%.2f'|format(row.peg_ratio) }}{% else %}-{% endif %}</td>
+            <td class="text-end">
+              {% if row.signal %}
+                {% if row.signal.status == 'approved' %}
+                  <span class="badge bg-success">Aprovado</span>
+                {% else %}
+                  <span class="badge bg-danger">Reprovado</span>
+                {% endif %}
+              {% else %}
+                <span class="badge bg-secondary">Sem filtro</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.signal %}
+                {{ row.signal.reason_label or row.signal.reason }}
+                {% if row.signal.reason and row.signal.reason_label and row.signal.reason != row.signal.reason_label %}
+                  <div class="text-muted small">{{ row.signal.reason }}</div>
+                {% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="text-end">{% if row.signal and row.signal.failed_step is not none %}{{ row.signal.failed_step }}{% else %}-{% endif %}</td>
+            <td>{{ row.sector or '-' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% if sector_breakdown %}
+  <div class="card mt-3">
+    <div class="card-header">Divisao por setor</div>
+    <div class="card-body">
+      <div class="row align-items-center">
+        <div class="col-lg-6">
+          <canvas
+            id="sector-chart"
+            width="300"
+            height="300"
+            aria-label="Grafico de setores"
+            data-sector-breakdown="{{ sector_breakdown | tojson | forceescape }}"
+          ></canvas>
+        </div>
+        <div class="col-lg-6 mt-3 mt-lg-0">
+          <ul class="list-unstyled small mb-0">
+            {% for item in sector_breakdown %}
+              <li class="d-flex align-items-center mb-1">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ item.color }};margin-right:8px;"></span>
+                <span class="me-auto">{{ item.label }}</span>
+                <span class="text-muted">{{ item.count }} ({{ "%.0f"|format(item.pct) }}%)</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="card mt-3">
+  <div class="card-body">
+    <h2 class="h6">Proximos passos</h2>
+    <ul class="mb-0">
+      <li>Coleta diaria no Fundamentus.</li>
+      <li>Filtros configuraveis e score.</li>
+      <li>Alertas para continuar ou vender posicoes.</li>
+    </ul>
   </div>
 </div>

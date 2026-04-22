@@ -180,6 +180,12 @@ uv run python -m opcoes.cli fundamentus
 uv run python -m opcoes.cli fundamentus-filter
 ```
 
+Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo com carregamento progressivo:
+
+- tabela detalhada das acoes aprovadas e reprovadas com filtros por coluna e ordenacao;
+- quadro de oportunidades de `PUT` com score, perfil e execucao;
+- cards de entradas/saidas entre snapshots, ranking historico e divisao por setor.
+
 ### Relatório / ranking
 
 ```bash
