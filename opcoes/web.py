@@ -326,7 +326,7 @@ def _build_covered_call_page_context(
 
 
 def _build_covered_call_shell_page_context(*, args: Any) -> dict[str, Any]:
-    ctx = get_covered_call_shell_context(args)
+    ctx = get_covered_call_shell_context(args, persist_settings=True)
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
     return ctx
@@ -389,6 +389,7 @@ def create_app() -> Flask:
         "register_position_premium",
         "recalc_position_premium",
         "update_position_view",
+        "upsert_holding_view",
         "delete_position_view",
     }
 
@@ -1627,6 +1628,9 @@ def create_app() -> Flask:
                 last_run_view = {
                     "status_label": status_label,
                     "status_class": status_class,
+                    "scheduled_for_display": _format_panel_datetime(
+                        last_run.get("scheduled_for_display_utc")
+                    ),
                     "started_at_display": _format_panel_datetime(last_run.get("started_at")),
                     "finished_at_display": _format_panel_datetime(last_run.get("finished_at")),
                     "duration_display": _format_duration(
@@ -1658,6 +1662,9 @@ def create_app() -> Flask:
                     **row,
                     "status_label": status_label,
                     "status_class": status_class,
+                    "scheduled_for_display": _format_panel_datetime(
+                        row.get("scheduled_for_display_utc")
+                    ),
                     "started_at_display": _format_panel_datetime(row.get("started_at")),
                     "finished_at_display": _format_panel_datetime(row.get("finished_at")),
                     "duration_display": _format_duration(

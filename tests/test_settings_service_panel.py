@@ -33,6 +33,7 @@ def test_settings_page_shows_service_panel(monkeypatch) -> None:
                     "last_run": {
                         "status": "success",
                         "monitor_status": "success",
+                        "scheduled_for_display_utc": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                         "started_at": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                         "finished_at": dt.datetime(2026, 4, 1, 7, 30, tzinfo=dt.timezone.utc),
                         "duration_seconds": 5400,
@@ -48,6 +49,7 @@ def test_settings_page_shows_service_panel(monkeypatch) -> None:
                     "service_key": "scrape_cycle",
                     "status": "success",
                     "monitor_status": "success",
+                    "scheduled_for_display_utc": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                     "started_at": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                     "finished_at": dt.datetime(2026, 4, 1, 7, 30, tzinfo=dt.timezone.utc),
                     "duration_seconds": 5400,
@@ -72,8 +74,9 @@ def test_settings_page_shows_service_panel(monkeypatch) -> None:
     assert "Ciclo diario do scraper" in html
     assert "Execucoes recentes" in html
     assert "Ciclo concluido" in html
-    assert "A proxima prevista usa o agendamento atual" in html
-    assert "Ultimo inicio registrado" in html
+    assert "Horario base do servico em America/Sao_Paulo." in html
+    assert "Ultimo horario previsto" in html
+    assert "Ultimo inicio real" in html
 
 
 def test_settings_page_shows_possible_stall_warning(monkeypatch) -> None:
@@ -97,6 +100,7 @@ def test_settings_page_shows_possible_stall_warning(monkeypatch) -> None:
                     "last_run": {
                         "status": "running",
                         "monitor_status": "stalled",
+                        "scheduled_for_display_utc": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                         "started_at": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                         "finished_at": None,
                         "duration_seconds": None,
@@ -112,6 +116,7 @@ def test_settings_page_shows_possible_stall_warning(monkeypatch) -> None:
                     "service_key": "scrape_cycle",
                     "status": "running",
                     "monitor_status": "stalled",
+                    "scheduled_for_display_utc": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                     "started_at": dt.datetime(2026, 4, 1, 6, 0, tzinfo=dt.timezone.utc),
                     "finished_at": None,
                     "duration_seconds": None,

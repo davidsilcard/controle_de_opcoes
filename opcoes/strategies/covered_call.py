@@ -702,14 +702,18 @@ def get_covered_call_context(
     include_financial_sections: bool = True,
 ) -> Dict[str, Any]:
     defaults = get_covered_call_settings()
-
-    underlying = (args.get("underlying") or defaults.underlying).strip().upper()
-    min_extrinsic = _get_float_arg(args, "min_extrinsic", defaults.min_extrinsic)
-    min_days = _get_int_arg(args, "min_days", defaults.min_days)
-    max_days = _get_int_arg(args, "max_days", defaults.max_days)
-    min_dist_strike = _get_float_arg(args, "min_dist_strike", defaults.min_dist_strike)
-    target_upside_pct = _get_float_arg(args, "target_upside_pct", 12.0)
-    only_target_hits = _get_bool_arg(args, "only_target_hits", defaults.only_target_hits)
+    resolved = _resolve_covered_call_inputs(
+        args,
+        defaults=defaults,
+        persist_settings=persist_settings,
+    )
+    underlying = str(resolved["underlying"])
+    min_extrinsic = float(resolved["min_extrinsic"])
+    min_days = int(resolved["min_days"])
+    max_days = int(resolved["max_days"])
+    min_dist_strike = float(resolved["min_dist_strike"])
+    target_upside_pct = float(resolved["target_upside_pct"])
+    only_target_hits = bool(resolved["only_target_hits"])
 
     # IO / Data Fetching
     with timed_stage("covered_call.positions_open"):
@@ -743,17 +747,6 @@ def get_covered_call_context(
         underlying=underlying,
         client=market_data_client,
     )
-
-    if args and persist_settings:
-        update_covered_call_settings(
-            underlying=underlying,
-            min_extrinsic=min_extrinsic,
-            min_days=min_days,
-            max_days=max_days,
-            min_dist_strike=min_dist_strike,
-            buyback_target_pct=defaults.buyback_target_pct,
-            only_target_hits=only_target_hits,
-        )
 
     ctx = calculate_covered_call_strategy(
         underlying=underlying,
@@ -853,9 +846,12 @@ def get_covered_call_context(
     return ctx
 
 
-def get_covered_call_shell_context(args: Mapping[str, Any]) -> Dict[str, Any]:
-    defaults = get_covered_call_settings()
-
+def _resolve_covered_call_inputs(
+    args: Mapping[str, Any],
+    *,
+    defaults: Any,
+    persist_settings: bool,
+) -> Dict[str, Any]:
     underlying = (args.get("underlying") or defaults.underlying).strip().upper()
     min_extrinsic = _get_float_arg(args, "min_extrinsic", defaults.min_extrinsic)
     min_days = _get_int_arg(args, "min_days", defaults.min_days)
@@ -863,6 +859,47 @@ def get_covered_call_shell_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     min_dist_strike = _get_float_arg(args, "min_dist_strike", defaults.min_dist_strike)
     target_upside_pct = _get_float_arg(args, "target_upside_pct", 12.0)
     only_target_hits = _get_bool_arg(args, "only_target_hits", defaults.only_target_hits)
+
+    if args and persist_settings:
+        update_covered_call_settings(
+            underlying=underlying,
+            min_extrinsic=min_extrinsic,
+            min_days=min_days,
+            max_days=max_days,
+            min_dist_strike=min_dist_strike,
+            buyback_target_pct=defaults.buyback_target_pct,
+            only_target_hits=only_target_hits,
+        )
+
+    return {
+        "underlying": underlying,
+        "min_extrinsic": min_extrinsic,
+        "min_days": min_days,
+        "max_days": max_days,
+        "min_dist_strike": min_dist_strike,
+        "target_upside_pct": target_upside_pct,
+        "only_target_hits": only_target_hits,
+    }
+
+
+def get_covered_call_shell_context(
+    args: Mapping[str, Any],
+    *,
+    persist_settings: bool = True,
+) -> Dict[str, Any]:
+    defaults = get_covered_call_settings()
+    resolved = _resolve_covered_call_inputs(
+        args,
+        defaults=defaults,
+        persist_settings=persist_settings,
+    )
+    underlying = str(resolved["underlying"])
+    min_extrinsic = float(resolved["min_extrinsic"])
+    min_days = int(resolved["min_days"])
+    max_days = int(resolved["max_days"])
+    min_dist_strike = float(resolved["min_dist_strike"])
+    target_upside_pct = float(resolved["target_upside_pct"])
+    only_target_hits = bool(resolved["only_target_hits"])
 
     with timed_stage("covered_call.shell.positions_open"):
         positions_open = list_positions(include_closed=False)

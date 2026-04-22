@@ -60,14 +60,16 @@
                   <dt class="col-sm-5">Proxima prevista</dt>
                   <dd class="col-sm-7">
                     {{ service.next_run_local_display }}
-                    <div class="text-muted">Base UTC: {{ service.next_run_utc_display }}</div>
                     <div class="text-muted">
-                      A proxima prevista usa o agendamento atual; os horarios abaixo mostram a ultima execucao realmente registrada.
+                      Horario base do servico em America/Sao_Paulo.
                     </div>
                   </dd>
 
                   {% if service.last_run_view %}
-                  <dt class="col-sm-5">Ultimo inicio registrado</dt>
+                  <dt class="col-sm-5">Ultimo horario previsto</dt>
+                  <dd class="col-sm-7">{{ service.last_run_view.scheduled_for_display }}</dd>
+
+                  <dt class="col-sm-5">Ultimo inicio real</dt>
                   <dd class="col-sm-7">{{ service.last_run_view.started_at_display }}</dd>
 
                   <dt class="col-sm-5">Ultimo fim registrado</dt>
@@ -110,6 +112,7 @@
                   <tr>
                     <th>Servico</th>
                     <th>Status</th>
+                    <th>Previsto</th>
                     <th>Inicio</th>
                     <th>Fim</th>
                     <th>Duracao</th>
@@ -121,6 +124,7 @@
                   <tr>
                     <td>{{ row.service_key }}</td>
                     <td><span class="badge {{ row.status_class }}">{{ row.status_label }}</span></td>
+                    <td>{{ row.scheduled_for_display }}</td>
                     <td>{{ row.started_at_display }}</td>
                     <td>{{ row.finished_at_display }}</td>
                     <td>{{ row.duration_display }}</td>

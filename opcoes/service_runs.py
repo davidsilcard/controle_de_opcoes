@@ -24,8 +24,9 @@ class ServiceDefinition:
     description: str
     schedule_label: str
     weekdays: tuple[int, ...]
-    run_hour_utc: int
-    run_minute_utc: int
+    run_hour_local: int
+    run_minute_local: int
+    timezone: ZoneInfo
     stale_after_seconds: int
 
 
@@ -277,8 +278,9 @@ def _service_definitions() -> List[ServiceDefinition]:
             ),
             schedule_label="Dias uteis as 03:00 (America/Sao_Paulo)",
             weekdays=(0, 1, 2, 3, 4),
-            run_hour_utc=6,
-            run_minute_utc=0,
+            run_hour_local=3,
+            run_minute_local=0,
+            timezone=_LOCAL_TZ,
             stale_after_seconds=4 * 60 * 60,
         )
     ]
@@ -286,20 +288,46 @@ def _service_definitions() -> List[ServiceDefinition]:
 
 def _compute_next_run(definition: ServiceDefinition, *, now_utc: Optional[dt.datetime] = None) -> dt.datetime:
     current = _coerce_datetime(now_utc) or dt.datetime.now(_UTC)
-    base = current.replace(
-        hour=definition.run_hour_utc,
-        minute=definition.run_minute_utc,
+    current_local = current.astimezone(definition.timezone)
+    base_local = current_local.replace(
+        hour=definition.run_hour_local,
+        minute=definition.run_minute_local,
         second=0,
         microsecond=0,
     )
     for day_offset in range(0, 8):
-        candidate = base + dt.timedelta(days=day_offset)
-        if candidate.weekday() not in definition.weekdays:
+        candidate_local = base_local + dt.timedelta(days=day_offset)
+        if candidate_local.weekday() not in definition.weekdays:
             continue
-        if candidate <= current:
+        if candidate_local <= current_local:
             continue
-        return candidate
-    return base + dt.timedelta(days=1)
+        return candidate_local.astimezone(_UTC)
+    return (base_local + dt.timedelta(days=1)).astimezone(_UTC)
+
+
+def _infer_scheduled_run(
+    definition: ServiceDefinition,
+    *,
+    reference_utc: Optional[dt.datetime],
+) -> Optional[dt.datetime]:
+    reference = _coerce_datetime(reference_utc)
+    if reference is None:
+        return None
+    reference_local = reference.astimezone(definition.timezone)
+    base_local = reference_local.replace(
+        hour=definition.run_hour_local,
+        minute=definition.run_minute_local,
+        second=0,
+        microsecond=0,
+    )
+    for day_offset in range(0, 8):
+        candidate_local = base_local - dt.timedelta(days=day_offset)
+        if candidate_local.weekday() not in definition.weekdays:
+            continue
+        if candidate_local > reference_local:
+            continue
+        return candidate_local.astimezone(_UTC)
+    return None
 
 
 def _decorate_run_for_monitoring(
@@ -340,6 +368,13 @@ def _decorate_run_for_monitoring(
             )
 
     decorated["display_duration_seconds"] = display_duration
+    scheduled_for = _coerce_datetime(decorated.get("scheduled_for"))
+    if scheduled_for is None and definition is not None:
+        scheduled_for = _infer_scheduled_run(
+            definition,
+            reference_utc=_coerce_datetime(decorated.get("started_at")),
+        )
+    decorated["scheduled_for_display_utc"] = scheduled_for
     return decorated
 
 

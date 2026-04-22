@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from opcoes.strategies.covered_call import get_covered_call_context
+from opcoes.strategies.covered_call import (
+    get_covered_call_context,
+    get_covered_call_shell_context,
+)
 from opcoes.web import create_app
 
 
@@ -535,3 +538,56 @@ def test_covered_call_partial_live_does_not_persist_settings(monkeypatch) -> Non
 
     assert response.status_code == 200
     assert update_calls == []
+
+
+def test_covered_call_shell_context_persists_settings(monkeypatch) -> None:
+    update_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_positions",
+        lambda include_closed=False: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.list_holding_snapshots",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.get_covered_call_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "underlying": "PETR4",
+                "min_extrinsic": 0.0,
+                "min_days": 1,
+                "max_days": 30,
+                "min_dist_strike": 0.0,
+                "buyback_target_pct": 70.0,
+                "only_target_hits": False,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.update_covered_call_settings",
+        lambda **kwargs: update_calls.append(kwargs),
+    )
+
+    ctx = get_covered_call_shell_context(
+        {
+            "underlying": "VALE3",
+            "min_extrinsic": "2.5",
+            "min_days": "7",
+            "max_days": "40",
+            "min_dist_strike": "3.0",
+            "only_target_hits": "1",
+        },
+        persist_settings=True,
+    )
+
+    assert ctx["underlying"] == "VALE3"
+    assert len(update_calls) == 1
+    assert update_calls[0]["underlying"] == "VALE3"
+    assert update_calls[0]["min_extrinsic"] == 2.5
+    assert update_calls[0]["min_days"] == 7
+    assert update_calls[0]["max_days"] == 40
+    assert update_calls[0]["min_dist_strike"] == 3.0
+    assert update_calls[0]["only_target_hits"] is True

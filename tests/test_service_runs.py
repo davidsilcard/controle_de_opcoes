@@ -158,3 +158,26 @@ def test_service_dashboard_flags_possible_stall_and_watchdog_can_fail_run(monkey
     assert fake.rows[0]["status"] == "failed"
     assert fake.rows[0]["step"] == "watchdog"
     assert fake.rows[0]["error_message"] == "Servico nao estava mais ativo."
+
+
+def test_service_dashboard_infers_scheduled_slot_in_local_timezone(monkeypatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("opcoes.service_runs._connect", lambda: fake)
+
+    run_id = start_service_run(
+        service_key="scrape_cycle",
+        trigger_type="systemd",
+        summary="Ciclo iniciado",
+    )
+
+    assert run_id
+    fake.rows[0]["scheduled_for"] = None
+    fake.rows[0]["started_at"] = dt.datetime(2026, 4, 22, 9, 0, tzinfo=dt.timezone.utc)
+
+    dashboard = get_service_dashboard(
+        limit=5,
+        now_utc=dt.datetime(2026, 4, 22, 12, 0, tzinfo=dt.timezone.utc),
+    )
+    last_run = dashboard["services"][0]["last_run"]
+
+    assert last_run["scheduled_for_display_utc"].isoformat() == "2026-04-22T06:00:00+00:00"

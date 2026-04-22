@@ -980,7 +980,7 @@ Observacao de horario:
 - o timer versionado roda em `Mon..Fri *-*-* 06:00:00 UTC`, que equivale a `03:00` em `America/Sao_Paulo` no cenario atual.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
 - depois de atualizar o repositorio na VPS com `git pull`, rode `deploy/scripts/opcoes-compose-vps.sh up -d --build` para que o container use os comandos e telas novos.
-- na tela de configuracoes, `Proxima prevista` mostra o agendamento atual; `Ultimo inicio registrado` e `Ultimo fim registrado` mostram o historico real ja executado, que pode continuar refletindo o horario antigo ate a proxima rodada.
+- na tela de configuracoes, o painel de automacao separa `Ultimo horario previsto` de `Ultimo inicio real`, evitando confundir o horario agendado do servico com um disparo manual ou atrasado.
 - timestamps de cotacao agora sao exibidos para o usuario em `America/Sao_Paulo`, enquanto o timestamp bruto do provider continua visivel para auditoria.
 
 ## Usuários (acesso web)
@@ -1070,6 +1070,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - cadastro web de `covered_call`/`cash_put` agora normaliza a perna da opcao como `Vendida` no backend e reforca a orientacao do formulario para evitar registro incoerente.
 - painel de `covered_call` agora usa o ativo-base normalizado dos lotes em estoque, evitando sumir cobertura quando o ticker da acao foi digitado errado mas o `underlying` esta correto.
 - fluxo de `covered_call` agora usa estoque consolidado por ativo como referencia operacional, sem depender do `lote pai` para validar garantia.
+- shell cache de `covered_call` agora invalida depois de atualizar estoque consolidado, os filtros voltaram a persistir entre visitas e o parsing do ranking shell foi consolidado para evitar drift entre a home e o dashboard parcial.
+- painel de `Automacao e servicos` agora destaca o horario previsto em `America/Sao_Paulo` separado do inicio real da execucao, corrigindo a leitura do horario de inicio do ciclo agendado.
 - fluxo de PUT exercida agora destaca, na tela de `cash-covered-put`, o debito do exercicio, a atualizacao do estoque consolidado e os proximos passos de conferencia.
 - exercicio de CALL agora baixa o estoque consolidado automaticamente e preserva historico fechado para auditoria fiscal.
 - inferencia de ticker agora nao confunde acoes como `BBAS3` com opcoes, evitando que lotes em estoque aparecam indevidamente na lista de `Cash-Covered Put`.
