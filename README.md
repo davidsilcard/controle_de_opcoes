@@ -21,6 +21,14 @@ Regra do projeto:
 
 Na pratica, divida tecnica temporaria e preferivel a regressao operacional.
 
+Suite minima de contrato por estrategia:
+
+```bash
+uv run pytest tests/test_strategy_contracts.py -q
+```
+
+Essa suite valida os blocos operacionais obrigatorios de `Ranking`, `Covered Call`, `Cash-Covered Put`, `Fundamentus`, `Posicoes`, `DARF` e `Auditoria`, para impedir que refatoracoes de layout ou carregamento progressivo apaguem partes da estrategia.
+
 ## Instalação
 
 ```bash
