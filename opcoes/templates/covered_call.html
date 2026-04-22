@@ -114,6 +114,85 @@
             <div class="alert alert-success mb-4">{{ holding_notice }}</div>
           {% endif %}
 
+          <div class="row g-3 mb-4">
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-success-subtle">
+                <div class="card-header">Prêmios líquidos (Real)</div>
+                <div class="card-body small">
+                  {% if monthly_premiums %}
+                    {% for m in monthly_premiums %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem prêmios reais registrados.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-primary-subtle">
+                <div class="card-header">Resultado líquido (Real)</div>
+                <div class="card-body small">
+                  {% if monthly_operational_result %}
+                    {% for m in monthly_operational_result %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem resultado operacional real registrado.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-warning-subtle">
+                <div class="card-header">Prêmios líquidos (Simulado)</div>
+                <div class="card-body small">
+                  {% if simulated_monthly_premiums %}
+                    {% for m in simulated_monthly_premiums %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem prêmios simulados registrados.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+              <div class="card h-100 border-warning-subtle">
+                <div class="card-header">Resultado líquido (Simulado)</div>
+                <div class="card-body small">
+                  {% if simulated_monthly_operational_result %}
+                    {% for m in simulated_monthly_operational_result %}
+                      <div class="d-flex justify-content-between">
+                        <span>{{ m.month }}</span>
+                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
+                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
+                        </span>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-muted mb-0">Sem resultado operacional simulado registrado.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="card mb-4 border-0 shadow-sm">
             <div class="card-body">
               <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
@@ -222,85 +301,6 @@
                 <div class="d-flex align-items-center gap-3">
                   <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
                   <div class="text-muted small">Carregando painel ao vivo, cotacoes e sugestoes...</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="row g-3 mb-4">
-            <div class="col-md-6 col-xl-3">
-              <div class="card h-100 border-success-subtle">
-                <div class="card-header">Prêmios líquidos (Real)</div>
-                <div class="card-body small">
-                  {% if monthly_premiums %}
-                    {% for m in monthly_premiums %}
-                      <div class="d-flex justify-content-between">
-                        <span>{{ m.month }}</span>
-                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
-                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
-                        </span>
-                      </div>
-                    {% endfor %}
-                  {% else %}
-                    <p class="text-muted mb-0">Sem prêmios reais registrados.</p>
-                  {% endif %}
-                </div>
-              </div>
-            </div>
-            <div class="col-md-6 col-xl-3">
-              <div class="card h-100 border-primary-subtle">
-                <div class="card-header">Resultado líquido (Real)</div>
-                <div class="card-body small">
-                  {% if monthly_operational_result %}
-                    {% for m in monthly_operational_result %}
-                      <div class="d-flex justify-content-between">
-                        <span>{{ m.month }}</span>
-                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
-                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
-                        </span>
-                      </div>
-                    {% endfor %}
-                  {% else %}
-                    <p class="text-muted mb-0">Sem resultado operacional real registrado.</p>
-                  {% endif %}
-                </div>
-              </div>
-            </div>
-            <div class="col-md-6 col-xl-3">
-              <div class="card h-100 border-warning-subtle">
-                <div class="card-header">Prêmios líquidos (Simulado)</div>
-                <div class="card-body small">
-                  {% if simulated_monthly_premiums %}
-                    {% for m in simulated_monthly_premiums %}
-                      <div class="d-flex justify-content-between">
-                        <span>{{ m.month }}</span>
-                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
-                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
-                        </span>
-                      </div>
-                    {% endfor %}
-                  {% else %}
-                    <p class="text-muted mb-0">Sem prêmios simulados registrados.</p>
-                  {% endif %}
-                </div>
-              </div>
-            </div>
-            <div class="col-md-6 col-xl-3">
-              <div class="card h-100 border-warning-subtle">
-                <div class="card-header">Resultado líquido (Simulado)</div>
-                <div class="card-body small">
-                  {% if simulated_monthly_operational_result %}
-                    {% for m in simulated_monthly_operational_result %}
-                      <div class="d-flex justify-content-between">
-                        <span>{{ m.month }}</span>
-                        <span class="{% if m.total >= 0 %}text-success{% else %}text-danger{% endif %} fw-semibold">
-                          {{ '+' if m.total >= 0 else '-' }} R$ {{ "%.2f"|format((m.total if m.total >= 0 else -m.total)) }}
-                        </span>
-                      </div>
-                    {% endfor %}
-                  {% else %}
-                    <p class="text-muted mb-0">Sem resultado operacional simulado registrado.</p>
-                  {% endif %}
                 </div>
               </div>
             </div>

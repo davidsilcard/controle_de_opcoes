@@ -352,17 +352,24 @@ def get_monthly_premiums(
             from_clause = "FROM ledger l"
 
         query = f"""
-            SELECT substr(l.date, 1, 7) AS month, SUM(l.amount) AS total
+            SELECT l.date AS raw_date, l.amount AS amount
             {from_clause}
             WHERE {' AND '.join(where)}
-            GROUP BY month
-            ORDER BY month DESC
-            LIMIT ?
+            ORDER BY l.date ASC
         """
-        rows = conn.execute(query, (*params, int(limit_months))).fetchall()
-        # Inverte para ordem cronológica (gráfico)
-        results = [{"month": normalize_month_label(r["month"]), "total": r["total"]} for r in rows]
-        return results[::-1]
+        rows = conn.execute(query, params).fetchall()
+        monthly_totals: dict[str, float] = {}
+        for row in rows:
+            month = normalize_month_label(row["raw_date"])
+            if not month:
+                continue
+            monthly_totals[month] = float(monthly_totals.get(month, 0.0)) + float(
+                row["amount"] or 0.0
+            )
+        ordered_months = sorted(monthly_totals.keys())
+        if limit_months > 0:
+            ordered_months = ordered_months[-int(limit_months) :]
+        return [{"month": month, "total": monthly_totals[month]} for month in ordered_months]
     finally:
         conn.close()
 
@@ -373,11 +380,22 @@ def normalize_month_label(value: object) -> str:
         return ""
     if re.fullmatch(r"\d{4}-\d{2}", text):
         return text
-    match = re.match(r"^(?P<year>\d{4})-(?P<month>\d{1,2})\b", text)
+    match = re.search(r"(?P<year>\d{3,4})\D+(?P<month>\d{0,2})", text)
     if not match:
         return text
-    year = int(match.group("year"))
-    month = int(match.group("month"))
+    year_text = match.group("year")
+    month_text = match.group("month") or ""
+    year = int(year_text)
+    if len(year_text) == 3:
+        # Algumas datas antigas ficaram truncadas como "026-04-".
+        year = 2000 + year
+    if month_text == "0":
+        # Quando o mês veio truncado como "2026-0", tratamos como janeiro.
+        month = 1
+    elif month_text.isdigit():
+        month = int(month_text)
+    else:
+        return text
     if month < 1 or month > 12:
         return text
     return f"{year:04d}-{month:02d}"

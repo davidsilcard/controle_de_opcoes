@@ -9,7 +9,8 @@ def test_normalize_month_label_pads_single_digit_month() -> None:
     assert finance.normalize_month_label("2026-4") == "2026-04"
     assert finance.normalize_month_label("2026-04") == "2026-04"
     assert finance.normalize_month_label("2026-04-22") == "2026-04"
-    assert finance.normalize_month_label("2026-0") == "2026-0"
+    assert finance.normalize_month_label("2026-0") == "2026-01"
+    assert finance.normalize_month_label("026-04-") == "2026-04"
 
 
 def test_cash_covered_put_context_builds_open_put_quick_filter(monkeypatch) -> None:
