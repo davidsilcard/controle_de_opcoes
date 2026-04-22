@@ -176,6 +176,11 @@ def _sample_positions_context() -> dict[str, object]:
         "auth_enabled": False,
         "current_username": None,
         "positions": [position],
+        "live_market": {
+            "scope": "positions",
+            "symbols": ["PETR4", "PETRE500"],
+            "fallback_seconds": 60,
+        },
     }
 
 
@@ -329,6 +334,11 @@ def test_strategy_contract_covered_call_preserves_core_blocks(monkeypatch) -> No
             "monthly_operational_result": [{"month": "2026-04", "total": 523.85}],
             "simulated_monthly_premiums": [],
             "simulated_monthly_operational_result": [],
+            "live_market": {
+                "scope": "covered-call",
+                "symbols": ["PETR4", "PETRE500"],
+                "fallback_seconds": 60,
+            },
         },
     )
     app = create_app()

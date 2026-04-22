@@ -1,3 +1,4 @@
+<div data-live-symbols='{{ live_market.symbols|tojson }}'>
 <section class="mb-4">
   <div class="card border-0 shadow-sm">
     <div class="card-body">
@@ -9,7 +10,7 @@
           </p>
         </div>
         <div class="text-end">
-          <span class="badge text-bg-light">Atualização automática a cada 15s</span>
+          <span class="badge text-bg-primary" data-live-connection-status>Conectando</span>
           {% if underlying_quote and underlying_quote.market_status_label %}
             <div class="small text-muted mt-1">
               Fonte atual: {{ underlying_quote.market_status_label }}
@@ -204,6 +205,7 @@
     </table>
   </div>
 {% endif %}
+</div>
 
 <h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (simulado)</h2>
 {% if not covered_sim %}

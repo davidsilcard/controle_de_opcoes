@@ -9,9 +9,10 @@ import time
 from pathlib import Path
 from secrets import compare_digest, token_urlsafe
 from typing import Any, Optional
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from flask import Flask, g, redirect, render_template, request, session, url_for
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -202,6 +203,75 @@ def _build_inventory_overview_global(
     )
 
 
+def _normalize_live_market_symbols(symbols: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    normalized = {
+        str(symbol or "").strip().upper()
+        for symbol in symbols
+        if str(symbol or "").strip()
+    }
+    return sorted(normalized)
+
+
+def _collect_position_live_market_symbols(
+    positions: list[dict[str, Any]],
+) -> list[str]:
+    collected: list[str] = []
+    for pos in positions:
+        if (pos.get("status") or "").strip().lower() != "open":
+            continue
+        ticker = str(pos.get("ticker") or "").strip().upper()
+        underlying = str(pos.get("underlying") or "").strip().upper()
+        if ticker:
+            collected.append(ticker)
+        if underlying:
+            collected.append(underlying)
+    return _normalize_live_market_symbols(collected)
+
+
+def _collect_covered_call_live_market_symbols(ctx: Mapping[str, Any]) -> list[str]:
+    collected: list[str] = []
+    underlying = str(ctx.get("underlying") or "").strip().upper()
+    if underlying:
+        collected.append(underlying)
+    for key in ("covered_real", "covered_sim", "suggestions"):
+        for row in ctx.get(key) or []:
+            ticker = str((row or {}).get("ticker") or "").strip().upper()
+            row_underlying = str((row or {}).get("underlying") or underlying).strip().upper()
+            if ticker:
+                collected.append(ticker)
+            if row_underlying:
+                collected.append(row_underlying)
+    return _normalize_live_market_symbols(collected)
+
+
+def _live_market_scope_config(
+    *,
+    scope: str,
+    symbols: list[str],
+    refresh_url: str,
+    fallback_seconds: int = 60,
+) -> dict[str, Any]:
+    return {
+        "scope": scope,
+        "symbols": _normalize_live_market_symbols(symbols),
+        "refresh_url": refresh_url,
+        "fallback_seconds": max(int(fallback_seconds), 15),
+    }
+
+
+def _parse_requested_live_market_symbols(args: Any) -> list[str]:
+    raw_items: list[str] = []
+    for item in args.getlist("symbols"):
+        raw_items.extend(str(item or "").split(","))
+    for item in args.getlist("symbol"):
+        raw_items.extend(str(item or "").split(","))
+    if not raw_items:
+        single = str(args.get("symbols") or "").strip()
+        if single:
+            raw_items.extend(single.split(","))
+    return _normalize_live_market_symbols(raw_items)
+
+
 def _build_positions_page_context(
     *,
     ticker_contains: str,
@@ -286,7 +356,7 @@ def _build_positions_page_context(
         selected_month=result_month,
     )
     inventory_summary = _build_inventory_overview_global(positions)
-    return {
+    ctx = {
         "positions": positions_view,
         "filter_ticker": ticker_contains,
         "filter_underlying": underlying_contains,
@@ -297,6 +367,22 @@ def _build_positions_page_context(
         "realized_summary": realized_summary,
         "inventory_summary": inventory_summary,
     }
+    ctx["live_market"] = _live_market_scope_config(
+        scope="positions",
+        symbols=_collect_position_live_market_symbols(positions_view),
+        refresh_url=(
+            "/positions/partial/live"
+            f"?ticker={ticker_contains}"
+            f"&underlying={underlying_contains}"
+            f"&status={status}"
+            f"&strategy_tag={strategy_tag}"
+            f"&trade_type={trade_type}"
+            f"&is_simulated={is_simulated_raw}"
+            f"&result_year={result_year_raw}"
+            f"&result_month={result_month_raw}"
+        ),
+    )
+    return ctx
 
 
 def _build_covered_call_page_context(
@@ -322,6 +408,20 @@ def _build_covered_call_page_context(
         ctx["inventory_summary"] = []
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
+    ctx["live_market"] = _live_market_scope_config(
+        scope="covered-call",
+        symbols=_collect_covered_call_live_market_symbols(ctx),
+        refresh_url=(
+            "/covered-call/partial/live"
+            f"?underlying={ctx.get('underlying') or ''}"
+            f"&min_extrinsic={ctx.get('filters', {}).get('min_extrinsic') or ''}"
+            f"&min_days={ctx.get('filters', {}).get('min_days') or ''}"
+            f"&max_days={ctx.get('filters', {}).get('max_days') or ''}"
+            f"&min_dist_strike={ctx.get('filters', {}).get('min_dist_strike') or ''}"
+            f"&target_upside_pct={ctx.get('filters', {}).get('target_upside_pct') or ''}"
+            f"&only_target_hits={1 if ctx.get('filters', {}).get('only_target_hits') else 0}"
+        ),
+    )
     return ctx
 
 
@@ -329,6 +429,20 @@ def _build_covered_call_shell_page_context(*, args: Any) -> dict[str, Any]:
     ctx = get_covered_call_shell_context(args, persist_settings=True)
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
+    ctx["live_market"] = _live_market_scope_config(
+        scope="covered-call",
+        symbols=_collect_covered_call_live_market_symbols(ctx),
+        refresh_url=(
+            "/covered-call/partial/live"
+            f"?underlying={ctx.get('underlying') or ''}"
+            f"&min_extrinsic={ctx.get('filters', {}).get('min_extrinsic') or ''}"
+            f"&min_days={ctx.get('filters', {}).get('min_days') or ''}"
+            f"&max_days={ctx.get('filters', {}).get('max_days') or ''}"
+            f"&min_dist_strike={ctx.get('filters', {}).get('min_dist_strike') or ''}"
+            f"&target_upside_pct={ctx.get('filters', {}).get('target_upside_pct') or ''}"
+            f"&only_target_hits={1 if ctx.get('filters', {}).get('only_target_hits') else 0}"
+        ),
+    )
     return ctx
 
 
@@ -405,6 +519,16 @@ def create_app() -> Flask:
 
     def _utc_now_ts() -> int:
         return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+    def _csp_connect_sources() -> str:
+        sources = ["'self'"]
+        if market_data_client.config.enabled:
+            base_parts = urlsplit(market_data_client.config.base_url)
+            if base_parts.scheme and base_parts.netloc:
+                sources.append(f"{base_parts.scheme}://{base_parts.netloc}")
+                ws_scheme = "wss" if base_parts.scheme == "https" else "ws"
+                sources.append(f"{ws_scheme}://{base_parts.netloc}")
+        return " ".join(dict.fromkeys(sources))
 
     def _ranking_cache_ttl_seconds() -> int:
         raw = os.getenv("OPCOES_RANKING_CACHE_SECONDS", "45").strip()
@@ -746,6 +870,8 @@ def create_app() -> Flask:
 
         username = normalize_username(session.get("username") or "")
         if not username:
+            if endpoint == "live_market_bootstrap":
+                return jsonify({"error": "Sessao expirada ou nao autenticada."}), 401
             next_url = (
                 request.full_path
                 if request.full_path and request.full_path != "/?"
@@ -841,7 +967,7 @@ def create_app() -> Flask:
                     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
                     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
                     "font-src 'self' data: https://cdn.jsdelivr.net; "
-                    "connect-src 'self';"
+                    f"connect-src {_csp_connect_sources()};"
                 ),
             )
             if request.is_secure:
@@ -1034,6 +1160,49 @@ def create_app() -> Flask:
                     )
         with timed_stage("route.covered_call.render"):
             return render_template("covered_call.html", **ctx)
+
+    @app.get("/live-market/bootstrap")
+    def live_market_bootstrap():
+        requested_symbols = _parse_requested_live_market_symbols(request.args)
+        try:
+            fallback_seconds = max(
+                int(request.args.get("fallback_seconds") or 60),
+                15,
+            )
+        except (TypeError, ValueError):
+            fallback_seconds = 60
+        if not requested_symbols:
+            return (
+                jsonify(
+                    {
+                        "error": "Nenhum simbolo informado para bootstrap do mercado ao vivo.",
+                    }
+                ),
+                400,
+            )
+        try:
+            bootstrap = market_data_client.create_ws_token()
+        except Exception as exc:
+            return (
+                jsonify(
+                    {
+                        "error": "Nao foi possivel inicializar o mercado ao vivo.",
+                        "details": exc.__class__.__name__,
+                    }
+                ),
+                503,
+            )
+        return jsonify(
+            {
+                "ws_url": bootstrap["ws_url"],
+                "token": bootstrap["token"],
+                "expires_in": bootstrap["expires_in"],
+                "symbols": requested_symbols,
+                "stale_after_seconds": bootstrap["stale_after_seconds"],
+                "fallback_seconds": fallback_seconds,
+                "scope": (request.args.get("scope") or "").strip(),
+            }
+        )
 
     @app.route("/covered-call/partial/live")
     def covered_call_partial_live() -> str:

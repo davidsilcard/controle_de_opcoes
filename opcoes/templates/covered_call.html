@@ -292,8 +292,13 @@
 
           <div
             id="covered-call-live"
+            data-live-scope="{{ live_market.scope }}"
+            data-live-bootstrap-url="{{ url_for('live_market_bootstrap') }}"
+            data-live-refresh-url="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
+            data-live-symbols='{{ live_market.symbols|tojson }}'
+            data-live-fallback-seconds="{{ live_market.fallback_seconds }}"
             hx-get="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
-            hx-trigger="load, every 15s"
+            hx-trigger="load"
             hx-swap="innerHTML"
           >
             <div class="card border-0 shadow-sm mb-4">
@@ -361,46 +366,6 @@
       </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-    <script>
-      function formatCoveredCallMarketTimes(root) {
-        const scope = root || document;
-        const nodes = scope.querySelectorAll("[data-local-datetime]");
-        const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
-          timeZone: "America/Sao_Paulo",
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
-        for (const node of nodes) {
-          const raw = (node.getAttribute("data-local-datetime") || "").trim();
-          if (!raw) continue;
-          if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-            const [year, month, day] = raw.split("-");
-            node.textContent = `${day}/${month}/${year}`;
-            node.title = raw;
-            continue;
-          }
-          const parsed = new Date(raw);
-          if (Number.isNaN(parsed.getTime())) {
-            node.textContent = raw;
-            continue;
-          }
-          node.textContent = dateFormatter.format(parsed);
-          node.title = raw;
-        }
-      }
-
-      document.addEventListener("DOMContentLoaded", function () {
-        formatCoveredCallMarketTimes(document);
-      });
-
-      document.body.addEventListener("htmx:afterSwap", function (event) {
-        formatCoveredCallMarketTimes(event.target);
-      });
-    </script>
+    <script src="{{ url_for('static', filename='live_market.js') }}"></script>
   </body>
 </html>

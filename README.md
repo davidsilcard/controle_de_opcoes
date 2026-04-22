@@ -270,12 +270,15 @@ uv run python -m opcoes.web
 
 Atualizacao parcial da interface:
 
-- a aplicacao continua em `Flask`, mas agora as telas `Posicoes` e `Covered Call` usam blocos `HTMX` so para leitura dinamica.
+- a aplicacao continua em `Flask`, sem migracao para `React`.
+- as telas `Posicoes` e `Covered Call` continuam server-rendered, mas agora usam `HTMX` com um controlador JS compartilhado para mercado ao vivo.
 - os formularios `POST` continuam server-rendered, o que reduz risco operacional para cadastro, baixa e auditoria.
-- os blocos ao vivo consultam rotas parciais internas a cada `15s`:
+- os blocos ao vivo agora usam `WebSocket` no navegador para quotes e refresh de partial no backend por evento relevante, mantendo o servidor como dono do recálculo:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
-- isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA.
+- o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
+- quando o `WebSocket` falha, a interface cai para fallback mais lento, preservando a tela em modo `Snapshot` em vez de quebrar o painel.
+- isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA e sem mover formulas financeiras para o cliente.
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
 - em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
@@ -288,6 +291,12 @@ Atualizacao parcial da interface:
 - os paineis ao vivo agora mostram de forma explicita a origem do preco (`Ao vivo`, `Atrasado` ou `Snapshot`), a referencia usada (`Bid`, `Ask`, `Ultimo` ou `Snapshot`) e o horario/data util da ultima atualizacao.
 - quando a cotacao ao vivo nao estiver disponivel, a aplicacao continua usando o snapshot local, mas sem confundir esse fallback com status `Offline` quando ja existe um preco valido na base.
 - quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.
+
+Suite focada para validar a arquitetura ao vivo:
+
+```bash
+uv run pytest tests/test_live_market_bootstrap.py tests/test_covered_call_live_market.py tests/test_positions_live_market_render.py -q
+```
 
 ### Governanca de skills locais e subagentes
 

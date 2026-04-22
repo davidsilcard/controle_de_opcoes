@@ -291,6 +291,11 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
             "monthly_operational_result": [{"month": "2026-01", "total": 40.00}],
             "simulated_monthly_premiums": [],
             "simulated_monthly_operational_result": [],
+            "live_market": {
+                "scope": "covered-call",
+                "symbols": ["PETR4", "PETRE500"],
+                "fallback_seconds": 60,
+            },
         },
     )
 
@@ -304,6 +309,9 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="covered-call-live"' in html
     assert 'hx-get="/covered-call/partial/live?' in html
+    assert 'data-live-scope="covered-call"' in html
+    assert "data-live-symbols=" in html
+    assert "PETRE500" in html
     assert 'id="covered-call-audit"' in html
     assert 'hx-get="/covered-call/partial/audit?' in html
     assert "Cadastro do estoque consolidado" in html
@@ -314,6 +322,7 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     assert "Resultado líquido (Real)" in html
     assert "2026-01" in html
     assert "Aberta" in html
+    assert "every 15s" not in html
     assert "Painel ao vivo de covered call" not in html
     assert "Auditoria e detalhes operacionais" not in html
 
@@ -399,6 +408,11 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
             "buyback_candidates_simulated": [],
             "sell_target": {"base_price": None, "target_price": None},
             "underlying_quick_filter": [],
+            "live_market": {
+                "scope": "covered-call",
+                "symbols": ["PETR4", "PETRD999"],
+                "fallback_seconds": 60,
+            },
         },
     )
 
@@ -423,6 +437,9 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert "(America/Sao_Paulo)" in html
     assert "Timestamp bruto do provider" in html
     assert "Ao vivo" in html
+    assert "data-live-symbols=" in html
+    assert "PETRD999" in html
+    assert "Conectando" in html
 
 
 def test_covered_call_partial_audit_renders_operational_details(monkeypatch) -> None:
@@ -483,6 +500,11 @@ def test_covered_call_partial_audit_renders_operational_details(monkeypatch) -> 
             "buyback_candidates_simulated": [],
             "sell_target": {"base_price": None, "target_price": None},
             "underlying_quick_filter": [],
+            "live_market": {
+                "scope": "covered-call",
+                "symbols": ["PETR4", "PETRD999"],
+                "fallback_seconds": 60,
+            },
         },
     )
 

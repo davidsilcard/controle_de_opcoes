@@ -1,3 +1,4 @@
+<div data-live-symbols='{{ live_market.symbols|tojson }}'>
 {% if inventory_summary %}
   <section class="mb-4">
     <div class="card border-0 shadow-sm">
@@ -265,7 +266,7 @@
             Painel somente leitura atualizado automaticamente. A tabela editável completa fica logo abaixo e não é recarregada para evitar perda de alterações em andamento.
           </p>
         </div>
-        <span class="badge text-bg-light">Atualização automática a cada 15s</span>
+        <span class="badge text-bg-primary" data-live-connection-status>Conectando</span>
       </div>
       {% if not positions %}
         <p class="text-muted mb-0">Nenhuma posição aberta para monitorar neste filtro.</p>
@@ -318,3 +319,4 @@
     </div>
   </div>
 </section>
+</div>

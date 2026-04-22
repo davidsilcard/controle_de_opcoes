@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -235,6 +236,32 @@ class MarketDataClient:
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
+
+    @property
+    def websocket_quotes_url(self) -> str:
+        base = self.config.base_url.rstrip("/")
+        parts = urlsplit(base)
+        scheme = "wss" if parts.scheme == "https" else "ws"
+        path = "/v1/ws/quotes"
+        return urlunsplit((scheme, parts.netloc, path, "", ""))
+
+    def create_ws_token(self) -> dict[str, Any]:
+        if not self.config.enabled:
+            raise RuntimeError("Mercado ao vivo desabilitado.")
+        headers = {"Authorization": f"Bearer {self.config.bearer_token}"}
+        response = self._client.post("/v1/ws/token", headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+        token = str(payload.get("token") or "").strip()
+        expires_in = int(payload.get("expires_in") or 0)
+        if not token or expires_in <= 0:
+            raise RuntimeError("Resposta inválida ao solicitar token de WebSocket.")
+        return {
+            "token": token,
+            "expires_in": expires_in,
+            "ws_url": self.websocket_quotes_url,
+            "stale_after_seconds": self.config.stale_after_seconds,
+        }
 
     def fetch_quotes(self, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
         normalized = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
