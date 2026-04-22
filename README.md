@@ -9,6 +9,18 @@ Arquitetura operacional consolidada em **PostgreSQL** para manter histórico ún
 - `uv`
 - PostgreSQL acessível (rede + credenciais)
 
+## Regra de evolucao por estrategia
+
+Cada aba principal da aplicacao representa uma estrategia operacional com contrato funcional proprio, por exemplo `Covered Call`, `Cash-Covered Put`, `Fundamentus`, `DARF`, `Auditoria`, `Posicoes` e `Ranking`.
+
+Regra do projeto:
+
+- refatoracoes de UI, shell, partial, cache ou backend nao podem retirar funcionalidades existentes de uma estrategia;
+- se a nova arquitetura ainda nao cobrir tudo, mantenha a implementacao especifica da aba ou duplique temporariamente o comportamento por estrategia;
+- remocao de fluxo legado so deve acontecer depois que houver paridade funcional validada.
+
+Na pratica, divida tecnica temporaria e preferivel a regressao operacional.
+
 ## Instalação
 
 ```bash
