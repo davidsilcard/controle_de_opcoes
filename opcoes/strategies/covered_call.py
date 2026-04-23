@@ -20,6 +20,8 @@ from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_
 from ..settings import get_covered_call_settings, update_covered_call_settings
 from ..utils import infer_option_type, parse_ptbr_number
 
+LIVE_OPTION_QUOTE_LIMIT = 120
+
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
     try:
@@ -208,6 +210,77 @@ def _normalize_monthly_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
         item["month"] = finance.normalize_month_label(item.get("month"))
         normalized.append(item)
     return normalized
+
+
+def _apply_underlying_live_quote_to_option_rows(
+    rows: List[Dict[str, Any]],
+    quote: Mapping[str, Any] | None,
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return rows
+    price = _parse_float((quote or {}).get("price"))
+    if price is None:
+        return rows
+    output: List[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["underlying_price"] = price
+        item["underlying_market_status"] = (quote or {}).get("market_status")
+        item["underlying_market_time_utc"] = (quote or {}).get(
+            "market_time_utc"
+        ) or (quote or {}).get("price_date")
+        output.append(item)
+    return output
+
+
+def _select_option_rows_for_live_quotes(
+    rows: List[Dict[str, Any]],
+    *,
+    min_days: int,
+    max_days: int,
+    min_dist_strike: float,
+    limit: int = LIVE_OPTION_QUOTE_LIMIT,
+) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for row in rows:
+        opt_type = (row.get("option_type") or infer_option_type(row.get("ticker")) or "").upper()
+        if opt_type and opt_type != "CALL":
+            continue
+        dias_uteis = _parse_float(row.get("dias_uteis"))
+        if dias_uteis is None or dias_uteis < min_days or dias_uteis > max_days:
+            continue
+        dist = _parse_float(row.get("dist_perc_strike"))
+        if dist is None or dist < min_dist_strike:
+            continue
+        candidates.append(row)
+
+    candidates.sort(
+        key=lambda row: (
+            _parse_float(row.get("dias_uteis")) or 999999.0,
+            -(_parse_float(row.get("extrinsic_pct_spot")) or 0.0),
+            -(_parse_float(row.get("score_total")) or 0.0),
+            str(row.get("ticker") or ""),
+        )
+    )
+    return candidates[: max(int(limit), 0)]
+
+
+def _merge_live_option_rows(
+    rows: List[Dict[str, Any]],
+    live_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    live_by_ticker = {
+        str(item.get("ticker") or "").strip().upper(): item
+        for item in live_rows
+        if str(item.get("ticker") or "").strip()
+    }
+    if not live_by_ticker:
+        return rows
+    output: List[Dict[str, Any]] = []
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        output.append(dict(live_by_ticker.get(ticker) or row))
+    return output
 
 
 def _bova_coverage(
@@ -744,11 +817,6 @@ def get_covered_call_context(
     # We fetch rows here instead of inside the helper
     with timed_stage("covered_call.options_rows"):
         options_rows = fetch_latest_underlying_options(underlying=underlying)
-    options_rows = enrich_option_rows_with_live_market_data(
-        options_rows,
-        underlying=underlying,
-        client=market_data_client,
-    )
     with timed_stage("covered_call.underlying_quote"):
         quote = fetch_latest_underlying_quote(underlying)
     quote = enrich_underlying_quote_with_live_market_data(
@@ -756,6 +824,19 @@ def get_covered_call_context(
         underlying=underlying,
         client=market_data_client,
     )
+    options_rows = _apply_underlying_live_quote_to_option_rows(options_rows, quote)
+    live_option_rows = _select_option_rows_for_live_quotes(
+        options_rows,
+        min_days=min_days,
+        max_days=max_days,
+        min_dist_strike=min_dist_strike,
+    )
+    live_option_rows = enrich_option_rows_with_live_market_data(
+        live_option_rows,
+        underlying=underlying,
+        client=market_data_client,
+    )
+    options_rows = _merge_live_option_rows(options_rows, live_option_rows)
 
     ctx = calculate_covered_call_strategy(
         underlying=underlying,

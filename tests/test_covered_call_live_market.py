@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from opcoes.strategies.covered_call import (
+    LIVE_OPTION_QUOTE_LIMIT,
     get_covered_call_context,
     get_covered_call_shell_context,
 )
@@ -13,6 +14,38 @@ class FakeMarketClient:
 
     def fetch_quotes(self, _symbols) -> dict[str, dict]:
         return dict(self.payload)
+
+
+class RecordingMarketClient:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def fetch_quotes(self, symbols) -> dict[str, dict]:
+        requested = [str(symbol).strip().upper() for symbol in symbols]
+        self.calls.append(requested)
+        payload: dict[str, dict] = {}
+        for symbol in requested:
+            if symbol == "PETR4":
+                payload[symbol] = {
+                    "symbol": symbol,
+                    "ok": True,
+                    "last": 47.25,
+                    "time_utc": "2026-04-23T16:30:00Z",
+                    "market_status": "live",
+                    "stale_seconds": 0,
+                }
+            else:
+                payload[symbol] = {
+                    "symbol": symbol,
+                    "ok": True,
+                    "bid": 0.25,
+                    "ask": 0.27,
+                    "last": 0.26,
+                    "time_utc": "2026-04-23T16:30:00Z",
+                    "market_status": "live",
+                    "stale_seconds": 0,
+                }
+        return payload
 
 
 def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
@@ -247,6 +280,65 @@ def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
     assert ctx["covered_real"][0]["market_status_label"] == "Snapshot"
     assert ctx["covered_real"][0]["underlying_market_status_label"] == "Snapshot"
     assert ctx["covered_real"][0]["underlying_market_time_display"] == "15/04/2026"
+
+
+def test_covered_call_context_limits_live_option_quote_universe(monkeypatch) -> None:
+    monkeypatch.setattr("opcoes.strategies.covered_call.list_positions", lambda include_closed=False: [])
+    monkeypatch.setattr("opcoes.strategies.covered_call.list_holding_snapshots", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_options",
+        lambda underlying: [
+            {
+                "ticker": f"PETRE{i:03d}",
+                "underlying": underlying,
+                "option_type": "CALL",
+                "vencimento": "15/05/2026",
+                "dias_uteis": 10 + (i % 20),
+                "strike": 50.0 + (i / 100),
+                "underlying_price": 47.0,
+                "dist_perc_strike": 5.0 + (i / 100),
+                "ultimo": 0.2,
+                "best_bid": 0.19,
+                "pct_2x": 4.0,
+                "score_total": float(i),
+                "extrinsic_pct_spot": 0.8,
+            }
+            for i in range(LIVE_OPTION_QUOTE_LIMIT + 80)
+        ],
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.fetch_latest_underlying_quote",
+        lambda underlying: {"underlying": underlying, "price": 47.0, "price_date": "2026-04-23"},
+    )
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.get_covered_call_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "underlying": "PETR4",
+                "min_extrinsic": 0.0,
+                "min_days": 1,
+                "max_days": 90,
+                "min_dist_strike": 2.0,
+                "buyback_target_pct": 70.0,
+                "only_target_hits": False,
+            },
+        )(),
+    )
+    monkeypatch.setattr("opcoes.strategies.covered_call.update_covered_call_settings", lambda **_kwargs: None)
+
+    client = RecordingMarketClient()
+    ctx = get_covered_call_context(
+        {"underlying": "PETR4", "only_target_hits": "0"},
+        market_data_client=client,
+        persist_settings=False,
+        include_financial_sections=False,
+    )
+
+    assert ctx["underlying_quote"]["market_status_label"] == "Ao vivo"
+    assert len(ctx["suggestions"]) == LIVE_OPTION_QUOTE_LIMIT + 80
+    assert max(len(call) for call in client.calls) <= LIVE_OPTION_QUOTE_LIMIT + 1
 
 
 def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
