@@ -81,8 +81,11 @@
       this.socket = null;
       this.refreshTimer = null;
       this.fallbackTimer = null;
+      this.liveHeartbeatTimer = null;
       this.previousQuotes = new Map();
       this.bootstrapInFlight = false;
+      this.connectionKind = "connecting";
+      this.connectionText = "Conectando";
     }
 
     start() {
@@ -95,12 +98,22 @@
       this.connect();
     }
 
+    setStatus(kind, text) {
+      this.connectionKind = kind;
+      this.connectionText = text;
+      updateStatus(this.container, kind, text);
+    }
+
+    applyStatus() {
+      updateStatus(this.container, this.connectionKind, this.connectionText);
+    }
+
     connect() {
       if (this.bootstrapInFlight || this.symbols.length === 0) {
         return;
       }
       this.bootstrapInFlight = true;
-      updateStatus(this.container, "connecting", "Conectando");
+      this.setStatus("connecting", "Conectando");
       const params = new URLSearchParams();
       params.set("scope", this.scope);
       params.set("symbols", this.symbols.join(","));
@@ -117,7 +130,7 @@
         })
         .then((payload) => this.openSocket(payload))
         .catch(() => {
-          updateStatus(this.container, "fallback", "Snapshot (fallback)");
+          this.setStatus("fallback", "Snapshot (fallback)");
           this.ensureFallback();
         })
         .finally(() => {
@@ -127,7 +140,7 @@
 
     openSocket(payload) {
       if (!payload || !payload.ws_url || !payload.token) {
-        updateStatus(this.container, "fallback", "Snapshot (fallback)");
+        this.setStatus("fallback", "Snapshot (fallback)");
         this.ensureFallback();
         return;
       }
@@ -135,21 +148,49 @@
       this.closeSocket();
       this.socket = new WebSocket(url);
       this.socket.addEventListener("open", () => {
-        updateStatus(this.container, "live", "Ao vivo");
-        this.clearFallback();
-        this.socket.send(JSON.stringify({ action: "subscribe", symbols: this.symbols }));
+        this.setStatus("live", "Ao vivo");
+        this.subscribe();
+        this.startLiveHeartbeat();
       });
       this.socket.addEventListener("message", (event) => this.handleMessage(event));
       this.socket.addEventListener("close", () => {
-        updateStatus(this.container, "reconnecting", "Reconectando");
+        this.stopLiveHeartbeat();
+        this.setStatus("reconnecting", "Reconectando");
         this.socket = null;
         this.ensureFallback();
         window.setTimeout(() => this.connect(), 3000);
       });
       this.socket.addEventListener("error", () => {
-        updateStatus(this.container, "fallback", "Snapshot (fallback)");
+        this.stopLiveHeartbeat();
+        this.setStatus("fallback", "Snapshot (fallback)");
         this.ensureFallback();
       });
+    }
+
+    subscribe() {
+      if (!this.socket || this.socket.readyState !== WebSocket.OPEN || this.symbols.length === 0) {
+        return;
+      }
+      this.socket.send(JSON.stringify({ action: "subscribe", symbols: this.symbols }));
+    }
+
+    startLiveHeartbeat() {
+      if (this.liveHeartbeatTimer) {
+        return;
+      }
+      const intervalMs = Math.max(Math.min(this.fallbackSeconds, 15), 5) * 1000;
+      this.liveHeartbeatTimer = window.setInterval(() => {
+        this.subscribe();
+        this.scheduleRefresh();
+      }, intervalMs);
+    }
+
+    stopLiveHeartbeat() {
+      if (!this.liveHeartbeatTimer) {
+        return;
+      }
+      window.clearInterval(this.liveHeartbeatTimer);
+      this.liveHeartbeatTimer = null;
     }
 
     handleMessage(event) {
@@ -204,16 +245,19 @@
       const next = nextSymbols.join(",");
       if (current === next) {
         formatLocalDatetimes(this.container);
+        this.applyStatus();
         return;
       }
       this.symbols = nextSymbols;
       this.previousQuotes.clear();
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({ action: "subscribe", symbols: this.symbols }));
+        this.subscribe();
+        this.scheduleRefresh();
       } else {
         this.connect();
       }
       formatLocalDatetimes(this.container);
+      this.applyStatus();
     }
 
     ensureFallback() {
@@ -235,6 +279,7 @@
       if (!this.socket) {
         return;
       }
+      this.stopLiveHeartbeat();
       try {
         this.socket.close();
       } catch (_error) {

@@ -278,9 +278,10 @@ Atualizacao parcial da interface:
 - os blocos ao vivo agora usam `WebSocket` no navegador para quotes e refresh de partial no backend por evento relevante, mantendo o servidor como dono do recálculo:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
+- enquanto o `WebSocket` esta aberto, o controlador mantem um heartbeat curto para reassinar os simbolos visiveis e pedir novo recálculo do partial; isso evita painel parado quando a edge entrega snapshot inicial, mas nao empurra stream continuo para todos os ativos.
 - o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
 - em VPS com Docker, mantenha `OPCOES_EDGE_BASE_URL` como endereco interno do container, por exemplo `http://edge:8001`, e configure `OPCOES_EDGE_PUBLIC_BASE_URL` com o host publico, por exemplo `https://api.moven.cloud`, para o browser receber um `wss://...` valido.
-- quando o `WebSocket` falha, a interface cai para fallback mais lento, preservando a tela em modo `Snapshot` em vez de quebrar o painel.
+- quando o `WebSocket` falha, a interface cai para fallback mais lento e o badge muda para `Snapshot (fallback)` ou `Reconectando`, preservando a tela em vez de quebrar o painel.
 - isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA e sem mover formulas financeiras para o cliente.
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
 - em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
