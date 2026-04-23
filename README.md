@@ -282,6 +282,7 @@ Atualizacao parcial da interface:
 - o script `live_market.js` e servido com query de versao para evitar que o navegador mantenha controlador antigo apos deploy.
 - quando a edge falha em um batch misto de ativo-base + opcoes, o cliente divide o lote e recupera as cotacoes validas em chamadas menores; assim `PETR4` pode continuar ao vivo mesmo que uma opcao especifica siga em `Snapshot`.
 - em `Covered Call`, o fluxo filtra os candidatos pelo snapshot antes de pedir cotacao ao vivo de opcoes; o ativo-base continua ao vivo para recalculo de spot/distancia/extrinseco, e apenas um subconjunto relevante de opcoes e consultado no gateway MT5 para evitar milhares de simbolos por refresh.
+- `OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT` controla quantas opcoes candidatas da `Covered Call` recebem cotacao ao vivo por refresh; o padrao e `24`, com maximo operacional de `120`.
 - o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
 - em VPS com Docker, mantenha `OPCOES_EDGE_BASE_URL` como endereco interno do container, por exemplo `http://edge:8001`, e configure `OPCOES_EDGE_PUBLIC_BASE_URL` com o host publico, por exemplo `https://api.moven.cloud`, para o browser receber um `wss://...` valido.
 - quando o `WebSocket` falha, a interface cai para fallback mais lento e o badge muda para `Snapshot (fallback)` ou `Reconectando`, preservando a tela em vez de quebrar o painel.

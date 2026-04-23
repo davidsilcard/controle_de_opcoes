@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from opcoes.strategies.covered_call import (
-    LIVE_OPTION_QUOTE_LIMIT,
+    DEFAULT_LIVE_OPTION_QUOTE_LIMIT,
     get_covered_call_context,
     get_covered_call_shell_context,
 )
@@ -283,6 +283,7 @@ def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
 
 
 def test_covered_call_context_limits_live_option_quote_universe(monkeypatch) -> None:
+    monkeypatch.delenv("OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT", raising=False)
     monkeypatch.setattr("opcoes.strategies.covered_call.list_positions", lambda include_closed=False: [])
     monkeypatch.setattr("opcoes.strategies.covered_call.list_holding_snapshots", lambda **_kwargs: [])
     monkeypatch.setattr(
@@ -303,7 +304,7 @@ def test_covered_call_context_limits_live_option_quote_universe(monkeypatch) -> 
                 "score_total": float(i),
                 "extrinsic_pct_spot": 0.8,
             }
-            for i in range(LIVE_OPTION_QUOTE_LIMIT + 80)
+            for i in range(DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 80)
         ],
     )
     monkeypatch.setattr(
@@ -337,8 +338,8 @@ def test_covered_call_context_limits_live_option_quote_universe(monkeypatch) -> 
     )
 
     assert ctx["underlying_quote"]["market_status_label"] == "Ao vivo"
-    assert len(ctx["suggestions"]) == LIVE_OPTION_QUOTE_LIMIT + 80
-    assert max(len(call) for call in client.calls) <= LIVE_OPTION_QUOTE_LIMIT + 1
+    assert len(ctx["suggestions"]) == DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 80
+    assert max(len(call) for call in client.calls) <= DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 1
 
 
 def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:

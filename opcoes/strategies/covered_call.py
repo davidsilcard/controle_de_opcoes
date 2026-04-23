@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List, Mapping, Tuple
 
@@ -20,7 +21,7 @@ from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_
 from ..settings import get_covered_call_settings, update_covered_call_settings
 from ..utils import infer_option_type, parse_ptbr_number
 
-LIVE_OPTION_QUOTE_LIMIT = 120
+DEFAULT_LIVE_OPTION_QUOTE_LIMIT = 24
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -60,6 +61,17 @@ def _get_bool_arg(args: Mapping[str, Any], name: str, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "nao", "não", "n", ""}:
         return False
     return default
+
+
+def _live_option_quote_limit() -> int:
+    raw = (os.getenv("OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT") or "").strip()
+    if not raw:
+        return DEFAULT_LIVE_OPTION_QUOTE_LIMIT
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_LIVE_OPTION_QUOTE_LIMIT
+    return max(min(value, 120), 0)
 
 
 def _safe_int(value: Any) -> int:
@@ -239,8 +251,10 @@ def _select_option_rows_for_live_quotes(
     min_days: int,
     max_days: int,
     min_dist_strike: float,
-    limit: int = LIVE_OPTION_QUOTE_LIMIT,
+    limit: int | None = None,
 ) -> List[Dict[str, Any]]:
+    if limit is None:
+        limit = _live_option_quote_limit()
     candidates: List[Dict[str, Any]] = []
     for row in rows:
         opt_type = (row.get("option_type") or infer_option_type(row.get("ticker")) or "").upper()
