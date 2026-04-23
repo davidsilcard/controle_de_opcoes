@@ -279,6 +279,7 @@ Atualizacao parcial da interface:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
 - enquanto o `WebSocket` esta aberto, o controlador mantem um heartbeat curto para reassinar os simbolos visiveis e pedir novo recálculo do partial; isso evita painel parado quando a edge entrega snapshot inicial, mas nao empurra stream continuo para todos os ativos.
+- o script `live_market.js` e servido com query de versao para evitar que o navegador mantenha controlador antigo apos deploy.
 - o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
 - em VPS com Docker, mantenha `OPCOES_EDGE_BASE_URL` como endereco interno do container, por exemplo `http://edge:8001`, e configure `OPCOES_EDGE_PUBLIC_BASE_URL` com o host publico, por exemplo `https://api.moven.cloud`, para o browser receber um `wss://...` valido.
 - quando o `WebSocket` falha, a interface cai para fallback mais lento e o badge muda para `Snapshot (fallback)` ou `Reconectando`, preservando a tela em vez de quebrar o painel.

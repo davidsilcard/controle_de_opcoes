@@ -118,6 +118,7 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
     assert "0.12" in html
     assert 'id="positions-live"' in html
     assert 'hx-get="/positions/partial/live?' in html
+    assert "live_market.js?v=" in html
     assert 'data-live-scope="positions"' in html
     assert "Tabela editável de posições" in html
     assert 'action="/positions/update/7"' in html

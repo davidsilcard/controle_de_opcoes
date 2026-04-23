@@ -309,6 +309,7 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="covered-call-live"' in html
     assert 'hx-get="/covered-call/partial/live?' in html
+    assert "live_market.js?v=" in html
     assert 'data-live-scope="covered-call"' in html
     assert "data-live-symbols=" in html
     assert "PETRE500" in html

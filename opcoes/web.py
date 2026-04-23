@@ -485,6 +485,14 @@ def create_app() -> Flask:
     app.secret_key = secret_key
     ensure_bootstrap_user_from_env()
     market_data_client = MarketDataClient()
+    live_market_asset = Path(app.static_folder or "") / "live_market.js"
+    try:
+        default_static_asset_version = str(int(live_market_asset.stat().st_mtime))
+    except OSError:
+        default_static_asset_version = "1"
+    static_asset_version = (
+        os.getenv("OPCOES_STATIC_ASSET_VERSION") or default_static_asset_version
+    ).strip()
     ranking_cache: dict[str, tuple[float, dict]] = {}
     ranking_cache_lock = threading.Lock()
     strategy_page_cache: dict[str, tuple[float, dict]] = {}
@@ -995,6 +1003,7 @@ def create_app() -> Flask:
             ),
             "csrf_token": _csrf_token_value,
             "csrf_input": _csrf_input,
+            "static_asset_version": static_asset_version,
         }
 
     @app.route("/login", methods=["GET", "POST"])
