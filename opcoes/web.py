@@ -82,7 +82,6 @@ from .holdings import (
 )
 from .market_data import (
     MarketDataClient,
-    enrich_positions_with_live_market_data,
     format_market_timestamp_label,
     market_source_label,
     market_status_label,
@@ -272,6 +271,22 @@ def _parse_requested_live_market_symbols(args: Any) -> list[str]:
     return _normalize_live_market_symbols(raw_items)
 
 
+def _mark_positions_snapshot_market_fields(
+    positions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for pos in positions:
+        item = dict(pos)
+        if item.get("last_price") is not None and not item.get("market_status"):
+            item["market_status"] = "snapshot"
+        if item.get("market_status") == "snapshot" and not item.get("market_price_source"):
+            item["market_price_source"] = "snapshot"
+        if item.get("underlying_price") is not None and not item.get("underlying_market_status"):
+            item["underlying_market_status"] = "snapshot"
+        normalized.append(item)
+    return normalized
+
+
 def _build_positions_page_context(
     *,
     ticker_contains: str,
@@ -284,6 +299,9 @@ def _build_positions_page_context(
     result_month_raw: str,
     market_data_client: MarketDataClient,
 ) -> dict[str, Any]:
+    # Mantido na assinatura para não quebrar chamadas internas antigas. As telas
+    # principais usam dados de scrape/snapshot como contrato oficial.
+    _ = market_data_client
     include_closed = True
     only_closed = False
     if status == "open":
@@ -321,11 +339,7 @@ def _build_positions_page_context(
             trade_type=trade_type or None,
             is_simulated=is_simulated,
         )
-    with timed_stage("positions.enrich_market_data"):
-        positions = enrich_positions_with_live_market_data(
-            positions,
-            client=market_data_client,
-        )
+    positions = _mark_positions_snapshot_market_fields(positions)
     position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
     with timed_stage("positions.get_premium_ids"):
         premium_ids = finance.get_premium_position_ids(position_ids)
@@ -367,21 +381,6 @@ def _build_positions_page_context(
         "realized_summary": realized_summary,
         "inventory_summary": inventory_summary,
     }
-    ctx["live_market"] = _live_market_scope_config(
-        scope="positions",
-        symbols=_collect_position_live_market_symbols(positions_view),
-        refresh_url=(
-            "/positions/partial/live"
-            f"?ticker={ticker_contains}"
-            f"&underlying={underlying_contains}"
-            f"&status={status}"
-            f"&strategy_tag={strategy_tag}"
-            f"&trade_type={trade_type}"
-            f"&is_simulated={is_simulated_raw}"
-            f"&result_year={result_year_raw}"
-            f"&result_month={result_month_raw}"
-        ),
-    )
     return ctx
 
 
@@ -408,20 +407,6 @@ def _build_covered_call_page_context(
         ctx["inventory_summary"] = []
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
-    ctx["live_market"] = _live_market_scope_config(
-        scope="covered-call",
-        symbols=_collect_covered_call_live_market_symbols(ctx),
-        refresh_url=(
-            "/covered-call/partial/live"
-            f"?underlying={ctx.get('underlying') or ''}"
-            f"&min_extrinsic={ctx.get('filters', {}).get('min_extrinsic') or ''}"
-            f"&min_days={ctx.get('filters', {}).get('min_days') or ''}"
-            f"&max_days={ctx.get('filters', {}).get('max_days') or ''}"
-            f"&min_dist_strike={ctx.get('filters', {}).get('min_dist_strike') or ''}"
-            f"&target_upside_pct={ctx.get('filters', {}).get('target_upside_pct') or ''}"
-            f"&only_target_hits={1 if ctx.get('filters', {}).get('only_target_hits') else 0}"
-        ),
-    )
     return ctx
 
 
@@ -429,20 +414,6 @@ def _build_covered_call_shell_page_context(*, args: Any) -> dict[str, Any]:
     ctx = get_covered_call_shell_context(args, persist_settings=True)
     ctx["holding_notice"] = (args.get("holding_notice") or "").strip()
     ctx["holding_error"] = (args.get("holding_error") or "").strip()
-    ctx["live_market"] = _live_market_scope_config(
-        scope="covered-call",
-        symbols=_collect_covered_call_live_market_symbols(ctx),
-        refresh_url=(
-            "/covered-call/partial/live"
-            f"?underlying={ctx.get('underlying') or ''}"
-            f"&min_extrinsic={ctx.get('filters', {}).get('min_extrinsic') or ''}"
-            f"&min_days={ctx.get('filters', {}).get('min_days') or ''}"
-            f"&max_days={ctx.get('filters', {}).get('max_days') or ''}"
-            f"&min_dist_strike={ctx.get('filters', {}).get('min_dist_strike') or ''}"
-            f"&target_upside_pct={ctx.get('filters', {}).get('target_upside_pct') or ''}"
-            f"&only_target_hits={1 if ctx.get('filters', {}).get('only_target_hits') else 0}"
-        ),
-    )
     return ctx
 
 

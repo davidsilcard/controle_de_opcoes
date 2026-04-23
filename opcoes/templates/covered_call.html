@@ -292,11 +292,6 @@
 
           <div
             id="covered-call-live"
-            data-live-scope="{{ live_market.scope }}"
-            data-live-bootstrap-url="{{ url_for('live_market_bootstrap') }}"
-            data-live-refresh-url="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
-            data-live-symbols='{{ live_market.symbols|tojson }}'
-            data-live-fallback-seconds="{{ live_market.fallback_seconds }}"
             hx-get="/covered-call/partial/live?underlying={{ underlying|urlencode }}&min_extrinsic={{ filters.min_extrinsic|urlencode }}&min_days={{ filters.min_days|urlencode }}&max_days={{ filters.max_days|urlencode }}&min_dist_strike={{ filters.min_dist_strike|urlencode }}&target_upside_pct={{ filters.target_upside_pct|urlencode }}&only_target_hits={{ (1 if filters.only_target_hits else 0)|string|urlencode }}"
             hx-trigger="load"
             hx-swap="innerHTML"
@@ -305,7 +300,7 @@
               <div class="card-body py-4">
                 <div class="d-flex align-items-center gap-3">
                   <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
-                  <div class="text-muted small">Carregando painel ao vivo, cotacoes e sugestoes...</div>
+                  <div class="text-muted small">Carregando painel por snapshot, cotacoes e sugestoes...</div>
                 </div>
               </div>
             </div>
@@ -366,6 +361,5 @@
       </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-    <script src="{{ url_for('static', filename='live_market.js', v=static_asset_version) }}"></script>
   </body>
 </html>

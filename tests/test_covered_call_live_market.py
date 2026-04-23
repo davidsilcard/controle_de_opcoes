@@ -1,54 +1,10 @@
 from __future__ import annotations
 
-from opcoes.strategies.covered_call import (
-    DEFAULT_LIVE_OPTION_QUOTE_LIMIT,
-    get_covered_call_context,
-    get_covered_call_shell_context,
-)
+from opcoes.strategies.covered_call import get_covered_call_context, get_covered_call_shell_context
 from opcoes.web import create_app
 
 
-class FakeMarketClient:
-    def __init__(self, payload: dict[str, dict]) -> None:
-        self.payload = payload
-
-    def fetch_quotes(self, _symbols) -> dict[str, dict]:
-        return dict(self.payload)
-
-
-class RecordingMarketClient:
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def fetch_quotes(self, symbols) -> dict[str, dict]:
-        requested = [str(symbol).strip().upper() for symbol in symbols]
-        self.calls.append(requested)
-        payload: dict[str, dict] = {}
-        for symbol in requested:
-            if symbol == "PETR4":
-                payload[symbol] = {
-                    "symbol": symbol,
-                    "ok": True,
-                    "last": 47.25,
-                    "time_utc": "2026-04-23T16:30:00Z",
-                    "market_status": "live",
-                    "stale_seconds": 0,
-                }
-            else:
-                payload[symbol] = {
-                    "symbol": symbol,
-                    "ok": True,
-                    "bid": 0.25,
-                    "ask": 0.27,
-                    "last": 0.26,
-                    "time_utc": "2026-04-23T16:30:00Z",
-                    "market_status": "live",
-                    "stale_seconds": 0,
-                }
-        return payload
-
-
-def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
+def test_covered_call_context_uses_snapshot_data_in_primary_flow(monkeypatch) -> None:
     monkeypatch.setattr(
         "opcoes.strategies.covered_call.list_positions",
         lambda include_closed=False: [
@@ -147,40 +103,16 @@ def test_covered_call_context_prefers_live_market_data(monkeypatch) -> None:
         lambda **_kwargs: None,
     )
 
-    client = FakeMarketClient(
-        {
-            "PETR4": {
-                "symbol": "PETR4",
-                "ok": True,
-                "last": 48.9,
-                "time_utc": "2026-04-14T13:00:00Z",
-                "market_status": "live",
-                "stale_seconds": 1,
-            },
-            "PETRD999": {
-                "symbol": "PETRD999",
-                "ok": True,
-                "bid": 0.1,
-                "ask": 0.12,
-                "last": 0.11,
-                "time_utc": "2026-04-14T13:00:00Z",
-                "market_status": "live",
-                "stale_seconds": 1,
-            },
-        }
-    )
+    ctx = get_covered_call_context({"underlying": "PETR4"}, market_data_client=object())
 
-    ctx = get_covered_call_context({"underlying": "PETR4"}, market_data_client=client)
-
-    assert ctx["underlying_quote"]["price"] == 48.9
-    assert ctx["underlying_quote"]["market_status_label"] == "Ao vivo"
-    assert ctx["covered_real"][0]["last_price"] == 0.12
-    assert ctx["covered_real"][0]["market_price_source"] == "ask"
-    assert ctx["covered_real"][0]["market_source_label"] == "Ask"
-    assert ctx["covered_real"][0]["underlying_price"] == 48.9
-    assert ctx["suggestions"][0]["premium_ref"] == 0.1
-    assert ctx["suggestions"][0]["market_status_label"] == "Ao vivo"
-    assert ctx["underlying_quote"]["market_time_display"] == "14/04 10:00:00"
+    assert ctx["underlying_quote"]["price"] == 47.0
+    assert ctx["underlying_quote"]["market_status_label"] == "Snapshot"
+    assert ctx["covered_real"][0]["last_price"] == 0.05
+    assert ctx["covered_real"][0]["market_source_label"] == "Snapshot"
+    assert ctx["covered_real"][0]["underlying_price"] == 47.0
+    assert ctx["suggestions"][0]["premium_ref"] == 0.08
+    assert ctx["suggestions"][0]["market_status_label"] == "Snapshot"
+    assert ctx["underlying_quote"]["market_time_display"] == "14/04/2026"
 
 
 def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
@@ -273,73 +205,13 @@ def test_covered_call_context_marks_snapshot_fallbacks(monkeypatch) -> None:
         lambda **_kwargs: None,
     )
 
-    ctx = get_covered_call_context({"underlying": "GGBR4"}, market_data_client=FakeMarketClient({}))
+    ctx = get_covered_call_context({"underlying": "GGBR4"}, market_data_client=object())
 
     assert ctx["underlying_quote"]["market_status_label"] == "Snapshot"
     assert ctx["underlying_quote"]["market_source_label"] == "Snapshot"
     assert ctx["covered_real"][0]["market_status_label"] == "Snapshot"
     assert ctx["covered_real"][0]["underlying_market_status_label"] == "Snapshot"
     assert ctx["covered_real"][0]["underlying_market_time_display"] == "15/04/2026"
-
-
-def test_covered_call_context_limits_live_option_quote_universe(monkeypatch) -> None:
-    monkeypatch.delenv("OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT", raising=False)
-    monkeypatch.setattr("opcoes.strategies.covered_call.list_positions", lambda include_closed=False: [])
-    monkeypatch.setattr("opcoes.strategies.covered_call.list_holding_snapshots", lambda **_kwargs: [])
-    monkeypatch.setattr(
-        "opcoes.strategies.covered_call.fetch_latest_underlying_options",
-        lambda underlying: [
-            {
-                "ticker": f"PETRE{i:03d}",
-                "underlying": underlying,
-                "option_type": "CALL",
-                "vencimento": "15/05/2026",
-                "dias_uteis": 10 + (i % 20),
-                "strike": 50.0 + (i / 100),
-                "underlying_price": 47.0,
-                "dist_perc_strike": 5.0 + (i / 100),
-                "ultimo": 0.2,
-                "best_bid": 0.19,
-                "pct_2x": 4.0,
-                "score_total": float(i),
-                "extrinsic_pct_spot": 0.8,
-            }
-            for i in range(DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 80)
-        ],
-    )
-    monkeypatch.setattr(
-        "opcoes.strategies.covered_call.fetch_latest_underlying_quote",
-        lambda underlying: {"underlying": underlying, "price": 47.0, "price_date": "2026-04-23"},
-    )
-    monkeypatch.setattr(
-        "opcoes.strategies.covered_call.get_covered_call_settings",
-        lambda: type(
-            "Settings",
-            (),
-            {
-                "underlying": "PETR4",
-                "min_extrinsic": 0.0,
-                "min_days": 1,
-                "max_days": 90,
-                "min_dist_strike": 2.0,
-                "buyback_target_pct": 70.0,
-                "only_target_hits": False,
-            },
-        )(),
-    )
-    monkeypatch.setattr("opcoes.strategies.covered_call.update_covered_call_settings", lambda **_kwargs: None)
-
-    client = RecordingMarketClient()
-    ctx = get_covered_call_context(
-        {"underlying": "PETR4", "only_target_hits": "0"},
-        market_data_client=client,
-        persist_settings=False,
-        include_financial_sections=False,
-    )
-
-    assert ctx["underlying_quote"]["market_status_label"] == "Ao vivo"
-    assert len(ctx["suggestions"]) == DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 80
-    assert max(len(call) for call in client.calls) <= DEFAULT_LIVE_OPTION_QUOTE_LIMIT + 1
 
 
 def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
@@ -384,11 +256,6 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
             "monthly_operational_result": [{"month": "2026-01", "total": 40.00}],
             "simulated_monthly_premiums": [],
             "simulated_monthly_operational_result": [],
-            "live_market": {
-                "scope": "covered-call",
-                "symbols": ["PETR4", "PETRE500"],
-                "fallback_seconds": 60,
-            },
         },
     )
 
@@ -402,22 +269,21 @@ def test_covered_call_route_renders_htmx_live_block(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="covered-call-live"' in html
     assert 'hx-get="/covered-call/partial/live?' in html
-    assert "live_market.js?v=" in html
-    assert 'data-live-scope="covered-call"' in html
-    assert "data-live-symbols=" in html
-    assert "PETRE500" in html
+    assert "live_market.js?v=" not in html
+    assert 'data-live-scope="covered-call"' not in html
+    assert "data-live-symbols=" not in html
     assert 'id="covered-call-audit"' in html
     assert 'hx-get="/covered-call/partial/audit?' in html
     assert "Cadastro do estoque consolidado" in html
     assert 'action="/holdings/upsert"' in html
-    assert "Carregando painel ao vivo, cotacoes e sugestoes..." in html
+    assert "Carregando painel por snapshot, cotacoes e sugestoes..." in html
     assert "Carregando auditoria e detalhes operacionais..." in html
     assert "Prêmios líquidos (Real)" in html
     assert "Resultado líquido (Real)" in html
     assert "2026-01" in html
     assert "Aberta" in html
     assert "every 15s" not in html
-    assert "Painel ao vivo de covered call" not in html
+    assert "Painel de covered call por snapshot" not in html
     assert "Auditoria e detalhes operacionais" not in html
 
 
@@ -467,8 +333,8 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
                 "underlying_quote": {
                     "price": 48.9,
                     "price_date": "2026-04-14",
-                    "market_status_label": "Ao vivo",
-                    "market_source_label": "Ultimo",
+                    "market_status_label": "Snapshot",
+                    "market_source_label": "Snapshot",
                     "market_time_display": "14/04 10:00:00",
                 },
             "covered_real": [],
@@ -479,12 +345,12 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
                     "vencimento": "17/04/2026",
                     "strike": 49.0,
                     "underlying_price": 48.9,
-                    "underlying_market_status_label": "Ao vivo",
+                    "underlying_market_status_label": "Snapshot",
                     "dist_perc_strike": 0.2,
                     "extrinsic_pct_spot": 0.1,
                     "premium_ref": 0.12,
-                    "market_status_label": "Ao vivo",
-                    "market_source_label": "Bid",
+                    "market_status_label": "Snapshot",
+                    "market_source_label": "Snapshot",
                     "target_hit": True,
                     "strike_target_hit": True,
                 }
@@ -502,11 +368,6 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
             "buyback_candidates_simulated": [],
             "sell_target": {"base_price": None, "target_price": None},
             "underlying_quick_filter": [],
-            "live_market": {
-                "scope": "covered-call",
-                "symbols": ["PETR4", "PETRD999"],
-                "fallback_seconds": 60,
-            },
         },
     )
 
@@ -518,7 +379,7 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Painel ao vivo de covered call" in html
+    assert "Painel de covered call por snapshot" in html
     assert "Resumo didático da cobertura atual" in html
     assert "Cotação PETR4" in html
     assert "PETRD999" in html
@@ -529,11 +390,11 @@ def test_covered_call_partial_live_renders_quote_and_suggestions(monkeypatch) ->
     assert 'data-local-datetime="2026-04-14"' in html
     assert "14/04 10:00:00" in html
     assert "(America/Sao_Paulo)" in html
-    assert "Timestamp bruto do provider" in html
-    assert "Ao vivo" in html
-    assert "data-live-symbols=" in html
-    assert "PETRD999" in html
-    assert "Conectando" in html
+    assert "Timestamp bruto do snapshot" in html
+    assert "Ao vivo" not in html
+    assert "data-live-symbols=" not in html
+    assert "Conectando" not in html
+    assert "Snapshot" in html
 
 
 def test_covered_call_partial_audit_renders_operational_details(monkeypatch) -> None:
@@ -594,11 +455,6 @@ def test_covered_call_partial_audit_renders_operational_details(monkeypatch) -> 
             "buyback_candidates_simulated": [],
             "sell_target": {"base_price": None, "target_price": None},
             "underlying_quick_filter": [],
-            "live_market": {
-                "scope": "covered-call",
-                "symbols": ["PETR4", "PETRD999"],
-                "fallback_seconds": 60,
-            },
         },
     )
 

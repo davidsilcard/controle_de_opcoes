@@ -51,21 +51,6 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "opcoes.web.enrich_positions_with_live_market_data",
-        lambda positions, client=None: [
-            {
-                **positions[0],
-                "last_price": 0.12,
-                "pl": 7.0,
-                "pl_pct": 35.0,
-                "market_status": "live",
-                "market_price_source": "ask",
-                "market_time_utc": "2026-04-14T13:00:00Z",
-                "underlying_market_status": "live",
-            }
-        ],
-    )
-    monkeypatch.setattr(
         "opcoes.web.finance.get_premium_position_ids",
         lambda _position_ids: set(),
     )
@@ -112,14 +97,12 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Ao vivo" in html
-    assert "Ask" in html
-    assert "14/04 10:00:00" in html
-    assert "0.12" in html
+    assert "Snapshot" in html
+    assert "0.05" in html
     assert 'id="positions-live"' in html
     assert 'hx-get="/positions/partial/live?' in html
-    assert "live_market.js?v=" in html
-    assert 'data-live-scope="positions"' in html
+    assert "live_market.js?v=" not in html
+    assert 'data-live-scope="positions"' not in html
     assert "Tabela editável de posições" in html
     assert 'action="/positions/update/7"' in html
 
@@ -172,10 +155,6 @@ def test_positions_partial_live_renders_table(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "opcoes.web.enrich_positions_with_live_market_data",
-        lambda positions, client=None: positions,
-    )
-    monkeypatch.setattr(
         "opcoes.web.finance.get_premium_position_ids",
         lambda _position_ids: set(),
     )
@@ -224,6 +203,7 @@ def test_positions_partial_live_renders_table(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Resultados realizados" in html
     assert "PETRE111" in html
-    assert "Monitor de mercado das posições" in html
-    assert "Conectando" in html
+    assert "Monitor por snapshot das posições" in html
+    assert "Conectando" not in html
+    assert "Snapshot" in html
     assert 'action="/positions/update/8"' not in html

@@ -105,11 +105,6 @@
 
       <div
         id="positions-live"
-        data-live-scope="{{ live_market.scope }}"
-        data-live-bootstrap-url="{{ url_for('live_market_bootstrap') }}"
-        data-live-refresh-url="/positions/partial/live?ticker={{ filter_ticker|urlencode }}&underlying={{ filter_underlying|urlencode }}&status={{ filter_status|urlencode }}&strategy_tag={{ filter_strategy_tag|urlencode }}&trade_type={{ filter_trade_type|urlencode }}&is_simulated={{ filter_is_simulated|urlencode }}&result_year={{ (realized_summary.selected_year or '')|string|urlencode }}&result_month={{ (realized_summary.selected_month or '')|string|urlencode }}&next_url={{ next_url|urlencode }}"
-        data-live-symbols='{{ live_market.symbols|tojson }}'
-        data-live-fallback-seconds="{{ live_market.fallback_seconds }}"
         hx-get="/positions/partial/live?ticker={{ filter_ticker|urlencode }}&underlying={{ filter_underlying|urlencode }}&status={{ filter_status|urlencode }}&strategy_tag={{ filter_strategy_tag|urlencode }}&trade_type={{ filter_trade_type|urlencode }}&is_simulated={{ filter_is_simulated|urlencode }}&result_year={{ (realized_summary.selected_year or '')|string|urlencode }}&result_month={{ (realized_summary.selected_month or '')|string|urlencode }}&next_url={{ next_url|urlencode }}"
         hx-trigger="load"
         hx-swap="innerHTML"
@@ -248,7 +243,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-    <script src="{{ url_for('static', filename='live_market.js', v=static_asset_version) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
       // Preencher data atual no modal

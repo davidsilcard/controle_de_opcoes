@@ -1,4 +1,4 @@
-<div data-live-symbols='{{ live_market.symbols|tojson }}'>
+<div>
 {% if inventory_summary %}
   <section class="mb-4">
     <div class="card border-0 shadow-sm">
@@ -261,12 +261,12 @@
     <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
-          <h2 class="h5 mb-1">Monitor de mercado das posições</h2>
+          <h2 class="h5 mb-1">Monitor por snapshot das posições</h2>
           <p class="text-muted small mb-0">
-            Painel somente leitura atualizado automaticamente. A tabela editável completa fica logo abaixo e não é recarregada para evitar perda de alterações em andamento.
+            Painel somente leitura com dados do último snapshot. A tabela editável completa fica logo abaixo e não é recarregada para evitar perda de alterações em andamento.
           </p>
         </div>
-        <span class="badge text-bg-primary" data-live-connection-status>Conectando</span>
+        <span class="badge text-bg-secondary">Snapshot</span>
       </div>
       {% if not positions %}
         <p class="text-muted mb-0">Nenhuma posição aberta para monitorar neste filtro.</p>

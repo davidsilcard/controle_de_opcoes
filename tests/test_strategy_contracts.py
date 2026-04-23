@@ -86,9 +86,9 @@ def _sample_positions_context() -> dict[str, object]:
         "irrf": None,
         "is_option": True,
         "premium_recorded": True,
-        "market_status_label": "Ao vivo",
-        "market_source_label": "Ask",
-        "market_time_display": "22/04 11:00:00",
+        "market_status_label": "Snapshot",
+        "market_source_label": "Snapshot",
+        "market_time_display": "22/04/2026",
         "exit_date": None,
         "exit_price": None,
         "strike": 50.0,
@@ -176,11 +176,6 @@ def _sample_positions_context() -> dict[str, object]:
         "auth_enabled": False,
         "current_username": None,
         "positions": [position],
-        "live_market": {
-            "scope": "positions",
-            "symbols": ["PETR4", "PETRE500"],
-            "fallback_seconds": 60,
-        },
     }
 
 
@@ -334,11 +329,6 @@ def test_strategy_contract_covered_call_preserves_core_blocks(monkeypatch) -> No
             "monthly_operational_result": [{"month": "2026-04", "total": 523.85}],
             "simulated_monthly_premiums": [],
             "simulated_monthly_operational_result": [],
-            "live_market": {
-                "scope": "covered-call",
-                "symbols": ["PETR4", "PETRE500"],
-                "fallback_seconds": 60,
-            },
         },
     )
     app = create_app()
@@ -597,7 +587,7 @@ def test_strategy_contract_positions_preserves_core_blocks(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Estoque consolidado por ativo" in html
     assert "Resultados realizados" in html
-    assert "Monitor de mercado das posições" in html
+    assert "Monitor por snapshot das posições" in html
     assert "Tabela editável de posições" in html
     assert 'action="/positions/update/7"' in html
 

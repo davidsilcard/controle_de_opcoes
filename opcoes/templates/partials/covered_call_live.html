@@ -1,16 +1,16 @@
-<div data-live-symbols='{{ live_market.symbols|tojson }}'>
+<div>
 <section class="mb-4">
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-0">
         <div>
-          <h2 class="h5 mb-1">Painel ao vivo de covered call</h2>
+          <h2 class="h5 mb-1">Painel de covered call por snapshot</h2>
           <p class="text-muted small mb-0">
-            Este painel é somente leitura e atualiza automaticamente a cotação do ativo-base, o status das calls abertas e as oportunidades sugeridas.
+            Este painel é somente leitura e usa o último scrape/snapshot de opções como fonte oficial para calls abertas e oportunidades sugeridas.
           </p>
         </div>
         <div class="text-end">
-          <span class="badge text-bg-primary" data-live-connection-status>Conectando</span>
+          <span class="badge text-bg-secondary">Snapshot</span>
           {% if underlying_quote and underlying_quote.market_status_label %}
             <div class="small text-muted mt-1">
               Fonte atual: {{ underlying_quote.market_status_label }}
@@ -100,7 +100,7 @@
             -
           {% endif %}
         </div>
-        <div class="text-muted small mt-2">Timestamp bruto do provider</div>
+        <div class="text-muted small mt-2">Timestamp bruto do snapshot</div>
         <div>
           {% if underlying_quote and (underlying_quote.market_time_utc or underlying_quote.price_date) %}
             <span

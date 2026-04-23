@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
 from typing import Any, Dict, List, Mapping, Tuple
 
 from .. import finance
 from ..holdings import list_holding_snapshots
 from ..market_data import (
-    MarketDataClient,
-    enrich_option_rows_with_live_market_data,
-    enrich_positions_with_live_market_data,
-    enrich_underlying_quote_with_live_market_data,
     format_market_timestamp_label,
     market_source_label,
     market_status_label,
@@ -20,8 +15,6 @@ from ..perf import timed_stage
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..settings import get_covered_call_settings, update_covered_call_settings
 from ..utils import infer_option_type, parse_ptbr_number
-
-DEFAULT_LIVE_OPTION_QUOTE_LIMIT = 24
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -61,17 +54,6 @@ def _get_bool_arg(args: Mapping[str, Any], name: str, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "nao", "não", "n", ""}:
         return False
     return default
-
-
-def _live_option_quote_limit() -> int:
-    raw = (os.getenv("OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT") or "").strip()
-    if not raw:
-        return DEFAULT_LIVE_OPTION_QUOTE_LIMIT
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_LIVE_OPTION_QUOTE_LIMIT
-    return max(min(value, 120), 0)
 
 
 def _safe_int(value: Any) -> int:
@@ -224,77 +206,38 @@ def _normalize_monthly_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return normalized
 
 
-def _apply_underlying_live_quote_to_option_rows(
-    rows: List[Dict[str, Any]],
-    quote: Mapping[str, Any] | None,
-) -> List[Dict[str, Any]]:
-    if not rows:
-        return rows
-    price = _parse_float((quote or {}).get("price"))
-    if price is None:
-        return rows
-    output: List[Dict[str, Any]] = []
-    for row in rows:
+def _mark_snapshot_quote(quote: Mapping[str, Any] | None) -> Dict[str, Any]:
+    item = dict(quote or {})
+    if _parse_float(item.get("price")) is not None and not item.get("market_status"):
+        item["market_status"] = "snapshot"
+    if item.get("market_status") == "snapshot" and not item.get("market_price_source"):
+        item["market_price_source"] = "snapshot"
+    return item
+
+
+def _mark_snapshot_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for row in rows or []:
         item = dict(row)
-        item["underlying_price"] = price
-        item["underlying_market_status"] = (quote or {}).get("market_status")
-        item["underlying_market_time_utc"] = (quote or {}).get(
-            "market_time_utc"
-        ) or (quote or {}).get("price_date")
-        output.append(item)
-    return output
-
-
-def _select_option_rows_for_live_quotes(
-    rows: List[Dict[str, Any]],
-    *,
-    min_days: int,
-    max_days: int,
-    min_dist_strike: float,
-    limit: int | None = None,
-) -> List[Dict[str, Any]]:
-    if limit is None:
-        limit = _live_option_quote_limit()
-    candidates: List[Dict[str, Any]] = []
-    for row in rows:
-        opt_type = (row.get("option_type") or infer_option_type(row.get("ticker")) or "").upper()
-        if opt_type and opt_type != "CALL":
-            continue
-        dias_uteis = _parse_float(row.get("dias_uteis"))
-        if dias_uteis is None or dias_uteis < min_days or dias_uteis > max_days:
-            continue
-        dist = _parse_float(row.get("dist_perc_strike"))
-        if dist is None or dist < min_dist_strike:
-            continue
-        candidates.append(row)
-
-    candidates.sort(
-        key=lambda row: (
-            _parse_float(row.get("dias_uteis")) or 999999.0,
-            -(_parse_float(row.get("extrinsic_pct_spot")) or 0.0),
-            -(_parse_float(row.get("score_total")) or 0.0),
-            str(row.get("ticker") or ""),
+        has_option_quote = any(
+            _parse_float(item.get(field)) is not None
+            for field in ("last_price", "ultimo", "best_bid", "premium_ref")
         )
-    )
-    return candidates[: max(int(limit), 0)]
-
-
-def _merge_live_option_rows(
-    rows: List[Dict[str, Any]],
-    live_rows: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    live_by_ticker = {
-        str(item.get("ticker") or "").strip().upper(): item
-        for item in live_rows
-        if str(item.get("ticker") or "").strip()
-    }
-    if not live_by_ticker:
-        return rows
-    output: List[Dict[str, Any]] = []
-    for row in rows:
-        ticker = str(row.get("ticker") or "").strip().upper()
-        output.append(dict(live_by_ticker.get(ticker) or row))
-    return output
+        if has_option_quote and not item.get("market_status"):
+            item["market_status"] = "snapshot"
+        if item.get("market_status") == "snapshot":
+            if _parse_float(item.get("last_price")) is not None and not item.get("market_price_source"):
+                item["market_price_source"] = "snapshot"
+            if (
+                _parse_float(item.get("last_price")) is None
+                and not item.get("market_premium_source")
+                and any(_parse_float(item.get(field)) is not None for field in ("ultimo", "best_bid", "premium_ref"))
+            ):
+                item["market_premium_source"] = "snapshot"
+        if _parse_float(item.get("underlying_price")) is not None and not item.get("underlying_market_status"):
+            item["underlying_market_status"] = "snapshot"
+        normalized.append(item)
+    return normalized
 
 
 def _bova_coverage(
@@ -793,10 +736,13 @@ def calculate_covered_call_strategy(
 def get_covered_call_context(
     args: Mapping[str, Any],
     *,
-    market_data_client: MarketDataClient | None = None,
+    market_data_client: Any | None = None,
     persist_settings: bool = True,
     include_financial_sections: bool = True,
 ) -> Dict[str, Any]:
+    # Mantido por compatibilidade com chamadas antigas. O fluxo principal de
+    # covered call usa apenas scrape/snapshot porque opções ao vivo são instáveis.
+    _ = market_data_client
     defaults = get_covered_call_settings()
     resolved = _resolve_covered_call_inputs(
         args,
@@ -814,10 +760,7 @@ def get_covered_call_context(
     # IO / Data Fetching
     with timed_stage("covered_call.positions_open"):
         positions_open = list_positions(include_closed=False)
-    positions_open = enrich_positions_with_live_market_data(
-        positions_open,
-        client=market_data_client,
-    )
+    positions_open = _mark_snapshot_market_rows(positions_open)
     with timed_stage("covered_call.holding_snapshots"):
         holding_snapshots = list_holding_snapshots(
             underlying_filter=underlying or None,
@@ -831,26 +774,10 @@ def get_covered_call_context(
     # We fetch rows here instead of inside the helper
     with timed_stage("covered_call.options_rows"):
         options_rows = fetch_latest_underlying_options(underlying=underlying)
+    options_rows = _mark_snapshot_market_rows(options_rows)
     with timed_stage("covered_call.underlying_quote"):
         quote = fetch_latest_underlying_quote(underlying)
-    quote = enrich_underlying_quote_with_live_market_data(
-        quote,
-        underlying=underlying,
-        client=market_data_client,
-    )
-    options_rows = _apply_underlying_live_quote_to_option_rows(options_rows, quote)
-    live_option_rows = _select_option_rows_for_live_quotes(
-        options_rows,
-        min_days=min_days,
-        max_days=max_days,
-        min_dist_strike=min_dist_strike,
-    )
-    live_option_rows = enrich_option_rows_with_live_market_data(
-        live_option_rows,
-        underlying=underlying,
-        client=market_data_client,
-    )
-    options_rows = _merge_live_option_rows(options_rows, live_option_rows)
+    quote = _mark_snapshot_quote(quote)
 
     ctx = calculate_covered_call_strategy(
         underlying=underlying,

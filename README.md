@@ -273,22 +273,17 @@ uv run python -m opcoes.web
 Atualizacao parcial da interface:
 
 - a aplicacao continua em `Flask`, sem migracao para `React`.
-- as telas `Posicoes` e `Covered Call` continuam server-rendered, mas agora usam `HTMX` com um controlador JS compartilhado para mercado ao vivo.
+- as telas `Posicoes` e `Covered Call` continuam server-rendered com `HTMX`, mas o contrato oficial dessas abas voltou a ser `scrape/snapshot`.
 - os formularios `POST` continuam server-rendered, o que reduz risco operacional para cadastro, baixa e auditoria.
-- os blocos ao vivo agora usam `WebSocket` no navegador para quotes e refresh de partial no backend por evento relevante, mantendo o servidor como dono do recálculo:
+- os blocos principais continuam carregando via partial HTMX:
   - `/positions/partial/live`
   - `/covered-call/partial/live`
-- enquanto o `WebSocket` esta aberto, o controlador mantem um heartbeat curto para reassinar os simbolos visiveis e pedir novo recálculo do partial; isso evita painel parado quando a edge entrega snapshot inicial, mas nao empurra stream continuo para todos os ativos.
-- o script `live_market.js` e servido com query de versao para evitar que o navegador mantenha controlador antigo apos deploy.
-- quando a edge falha em um batch misto de ativo-base + opcoes, o cliente divide o lote e recupera as cotacoes validas em chamadas menores; assim `PETR4` pode continuar ao vivo mesmo que uma opcao especifica siga em `Snapshot`.
-- em `Covered Call`, o fluxo filtra os candidatos pelo snapshot antes de pedir cotacao ao vivo de opcoes; o ativo-base continua ao vivo para recalculo de spot/distancia/extrinseco, e apenas um subconjunto relevante de opcoes e consultado no gateway MT5 para evitar milhares de simbolos por refresh.
-- `OPCOES_COVERED_CALL_LIVE_OPTION_LIMIT` controla quantas opcoes candidatas da `Covered Call` recebem cotacao ao vivo por refresh; o padrao e `24`, com maximo operacional de `120`.
-- o bootstrap autenticado do mercado ao vivo e feito por `GET /live-market/bootstrap`, que entrega `ws_url`, token curto, simbolos normalizados e janela de staleness sem expor o bearer permanente da edge ao navegador.
+- as tentativas de cotacao ao vivo para opcoes foram removidas do fluxo principal porque a aplicacao e centrada em mercado de opcoes e o provider externo nao entrega confiabilidade suficiente para ticker de opcao.
+- o navegador nao depende mais de `WebSocket` nem de `live_market.js` nessas duas abas principais.
+- a edge e o bootstrap de mercado ao vivo permanecem apenas como infraestrutura auxiliar/diagnostica, fora do fluxo principal das estrategias.
 - em VPS com Docker, mantenha `OPCOES_EDGE_BASE_URL` como endereco interno do container, por exemplo `http://edge:8001`, e configure `OPCOES_EDGE_PUBLIC_BASE_URL` com o host publico, por exemplo `https://api.moven.cloud`, para o browser receber um `wss://...` valido.
-- quando o `WebSocket` falha, a interface cai para fallback mais lento e o badge muda para `Snapshot (fallback)` ou `Reconectando`, preservando a tela em vez de quebrar o painel.
-- isso melhora a percepcao de fluidez sem forcar uma migracao prematura para SPA e sem mover formulas financeiras para o cliente.
 - a tabela editavel de `Posicoes` nao e mais recarregada pelo polling; o refresh automatico ficou restrito ao painel de monitoramento para evitar perda de digitacao em andamento.
-- em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel ao vivo` somente leitura.
+- em `Covered Call`, o cadastro de estoque consolidado voltou a ficar visivel na pagina principal, enquanto o bloco HTMX atua como `painel por snapshot` somente leitura.
 - em `Covered Call`, os quadros legados e financeiros agora ficam recolhidos em `Auditoria e detalhes operacionais`, evitando duplicidade visual entre o fluxo principal e a camada de conferência.
 - em `Covered Call`, o resumo mensal de `premios liquidos` e `resultado liquido` voltou a ficar sempre visivel na pagina principal, mesmo quando nao existe call aberta no ativo.
 - em `Covered Call`, o filtro rapido agora marca com selo `Aberta` os ativos da garantia que ja tem call em aberto, sem esconder o badge de quantidade consolidada.
@@ -296,14 +291,13 @@ Atualizacao parcial da interface:
 - a auditoria da `Covered Call` preserva o detalhamento rico de `calls em aberto`, incluindo `recompra`, `% do prêmio`, `extrínseco`, `% p/ 2x`, `P/L` e ações operacionais.
 - quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
 - a tela `Cash-Covered Put` agora ganhou um `Filtro rapido` com o mesmo padrao visual da `Covered Call`, listando apenas ativos com puts abertas e sinalizando cada um com selo `Aberta`.
-- os paineis ao vivo agora mostram de forma explicita a origem do preco (`Ao vivo`, `Atrasado` ou `Snapshot`), a referencia usada (`Bid`, `Ask`, `Ultimo` ou `Snapshot`) e o horario/data util da ultima atualizacao.
-- quando a cotacao ao vivo nao estiver disponivel, a aplicacao continua usando o snapshot local, mas sem confundir esse fallback com status `Offline` quando ja existe um preco valido na base.
+- os paineis principais agora mostram explicitamente que os precos usados nessas abas sao `Snapshot`, preservando a leitura didatica e evitando prometer cotacao ao vivo que nao e confiavel para opcoes.
 - quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.
 
-Suite focada para validar a arquitetura ao vivo:
+Suite focada para validar o contrato atual das abas principais:
 
 ```bash
-uv run pytest tests/test_live_market_bootstrap.py tests/test_covered_call_live_market.py tests/test_positions_live_market_render.py -q
+uv run pytest tests/test_covered_call_live_market.py tests/test_positions_live_market_render.py tests/test_strategy_contracts.py -q
 ```
 
 ### Governanca de skills locais e subagentes
@@ -396,8 +390,8 @@ Camada interna de market data ao vivo:
 - a aplicacao web principal continua dona das formulas e das decisoes didaticas
 - o gateway privado segue como fonte bruta de mercado, mesmo com backend local mudando de MT5 para `BTG Trader Desk`
 - o `opcoes-edge` distribui quotes com cache curto e autenticacao interna
-- `Posicoes` e `Covered Call` agora tentam usar quotes ao vivo no backend a cada carregamento da pagina
-- se o edge ou o gateway falharem, a UI volta para os snapshots sem quebrar a tela
+- a camada live ficou relegada a uso diagnostico/experimental
+- `Posicoes` e `Covered Call` usam snapshots como fonte oficial para evitar regressao operacional em tickers de opcao
 
 Variaveis opcionais para a camada live do backend:
 
@@ -420,7 +414,7 @@ Observacoes:
 - se `OPCOES_MARKET_DATA_TOKEN` nao for definido, a aplicacao tenta reutilizar o token `app` de `OPCOES_EDGE_API_TOKENS`
 - para backend via `BTG Trader Desk`, `OPCOES_MARKET_DATA_TIMEOUT_SECONDS=15` tende a ser um valor inicial mais seguro que `5`, porque alguns lotes parciais podem levar varios segundos antes de fechar com timeout por item
 - a marcacao padrao usa `last` para acoes e regra hibrida para opcoes: `ask` em posicoes vendidas e `bid` em posicoes compradas, com fallback para `last`
-- a UI marca cada preco como `Ao vivo`, `Atrasado`, `Snapshot` ou `Offline`
+- a UI principal das estrategias nao depende dessa camada live; nessas abas o rotulo esperado agora e `Snapshot`
 - com `OPCOES_PERF_TIMING_ENABLED=1`, a app Flask emite `Server-Timing` nas respostas web e log estruturado `web_request_timing`
 - `OPCOES_RANKING_CACHE_SECONDS` agora funciona como cache L1 em memoria + cache L2 persistido em PostgreSQL para a home de ranking
 - `OPCOES_STRATEGY_PAGE_CACHE_SECONDS` controla o cache L1/L2 persistido das paginas cheias de estrategia, reduzindo o custo de troca entre abas
@@ -733,7 +727,9 @@ docker compose up -d --build
 Para evitar repetir essas variaveis na VPS, use o helper versionado:
 
 ```bash
+git pull origin main
 deploy/scripts/opcoes-compose-vps.sh up -d --build
+docker builder prune -f --filter "until=24h"
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
@@ -1100,7 +1096,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - README detalha melhor o rate limit de login por IP, incluindo a dependencia de `ProxyFix` e a persistencia no schema de autenticacao.
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
-- README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild e `db check`.
+- README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild, limpeza de cache Docker recente e `db check`.
 - painel de `Configuracoes` agora sinaliza `Possivel travamento` quando um ciclo fica tempo demais sem finalizar, e o host passa a ter um watchdog para reconciliar status `running` orfao.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.
