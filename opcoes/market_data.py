@@ -270,6 +270,91 @@ class MarketDataClient:
             "stale_after_seconds": self.config.stale_after_seconds,
         }
 
+    def _fetch_quote_chunk(
+        self,
+        chunk: list[str],
+        *,
+        headers: Mapping[str, str],
+    ) -> dict[str, dict[str, Any]]:
+        try:
+            response = self._client.post(
+                "/v1/quotes/batch",
+                headers=headers,
+                json={"symbols": chunk, "include_raw": False},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            if len(chunk) > 1:
+                midpoint = max(len(chunk) // 2, 1)
+                logger.warning(
+                    "market_data_batch_failed_split",
+                    extra={
+                        "base_url": self.config.base_url,
+                        "chunk_size": len(chunk),
+                        "exception_type": exc.__class__.__name__,
+                    },
+                )
+                results: dict[str, dict[str, Any]] = {}
+                results.update(self._fetch_quote_chunk(chunk[:midpoint], headers=headers))
+                results.update(self._fetch_quote_chunk(chunk[midpoint:], headers=headers))
+                return results
+            logger.warning(
+                "market_data_symbol_failed",
+                extra={
+                    "base_url": self.config.base_url,
+                    "symbol": chunk[0] if chunk else "",
+                    "exception_type": exc.__class__.__name__,
+                },
+            )
+            return {}
+
+        items = payload.get("items") if isinstance(payload, Mapping) else None
+        if not isinstance(items, list):
+            logger.warning(
+                "market_data_batch_invalid_payload",
+                extra={
+                    "base_url": self.config.base_url,
+                    "chunk_size": len(chunk),
+                    "payload_type": type(payload).__name__,
+                },
+            )
+            return {}
+        success_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok", True))
+        error_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok") is False)
+        error_items = [
+            {
+                "symbol": _symbol_from_item(item),
+                "error_code": _error_code_from_item(item),
+            }
+            for item in items
+            if isinstance(item, Mapping) and item.get("ok") is False
+        ]
+        logger.info(
+            "market_data_batch_processed",
+            extra={
+                "base_url": self.config.base_url,
+                "chunk_size": len(chunk),
+                "count_total": len(items),
+                "count_success": success_count,
+                "count_error": error_count,
+                "partial": bool(payload.get("partial")) if isinstance(payload, Mapping) else False,
+                "error_items": error_items,
+            },
+        )
+        results: dict[str, dict[str, Any]] = {}
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            normalized_item = _normalize_quote_item(
+                item,
+                stale_after_seconds=self.config.stale_after_seconds,
+            )
+            if normalized_item is None:
+                continue
+            results[normalized_item["symbol"]] = normalized_item
+        return results
+
     def fetch_quotes(self, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
         normalized = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
         if not normalized or not self.config.enabled:
@@ -277,67 +362,7 @@ class MarketDataClient:
         headers = {"Authorization": f"Bearer {self.config.bearer_token}"}
         results: dict[str, dict[str, Any]] = {}
         for chunk in _chunked(normalized, 100):
-            try:
-                response = self._client.post(
-                    "/v1/quotes/batch",
-                    headers=headers,
-                    json={"symbols": chunk, "include_raw": False},
-                )
-                response.raise_for_status()
-                payload = response.json()
-            except Exception as exc:
-                logger.warning(
-                    "market_data_batch_failed",
-                    extra={
-                        "base_url": self.config.base_url,
-                        "chunk_size": len(chunk),
-                        "exception_type": exc.__class__.__name__,
-                    },
-                )
-                return results
-            items = payload.get("items") if isinstance(payload, Mapping) else None
-            if not isinstance(items, list):
-                logger.warning(
-                    "market_data_batch_invalid_payload",
-                    extra={
-                        "base_url": self.config.base_url,
-                        "chunk_size": len(chunk),
-                        "payload_type": type(payload).__name__,
-                    },
-                )
-                continue
-            success_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok", True))
-            error_count = sum(1 for item in items if isinstance(item, Mapping) and item.get("ok") is False)
-            error_items = [
-                {
-                    "symbol": _symbol_from_item(item),
-                    "error_code": _error_code_from_item(item),
-                }
-                for item in items
-                if isinstance(item, Mapping) and item.get("ok") is False
-            ]
-            logger.info(
-                "market_data_batch_processed",
-                extra={
-                    "base_url": self.config.base_url,
-                    "chunk_size": len(chunk),
-                    "count_total": len(items),
-                    "count_success": success_count,
-                    "count_error": error_count,
-                    "partial": bool(payload.get("partial")) if isinstance(payload, Mapping) else False,
-                    "error_items": error_items,
-                },
-            )
-            for item in items:
-                if not isinstance(item, Mapping):
-                    continue
-                normalized_item = _normalize_quote_item(
-                    item,
-                    stale_after_seconds=self.config.stale_after_seconds,
-                )
-                if normalized_item is None:
-                    continue
-                results[normalized_item["symbol"]] = normalized_item
+            results.update(self._fetch_quote_chunk(chunk, headers=headers))
         return results
 
 
@@ -566,6 +591,7 @@ def enrich_option_rows_with_live_market_data(
         if underlying_last is not None:
             item["underlying_price"] = underlying_last
             item["underlying_market_status"] = underlying_quote.get("market_status") if underlying_quote else None
+            item["underlying_market_time_utc"] = underlying_quote.get("time_utc") if underlying_quote else None
         output.append(item)
     return output
 

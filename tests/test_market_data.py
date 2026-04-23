@@ -262,6 +262,52 @@ def test_market_data_client_batch_posts_json_body() -> None:
     assert payload["GGBR4"]["ok"] is True
 
 
+def test_market_data_client_splits_failed_batch_and_keeps_valid_quotes() -> None:
+    requests: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        symbols = body["symbols"]
+        requests.append(symbols)
+        if len(symbols) > 1:
+            return httpx.Response(502, json={"detail": "gateway failed"})
+        if symbols == ["PETR4"]:
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "requested_symbol": "PETR4",
+                            "symbol": "PETR4",
+                            "last": 46.99,
+                            "time_utc": "2026-04-23T13:41:12.408000Z",
+                            "ok": True,
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(502, json={"detail": "symbol failed"})
+
+    client = MarketDataClient(
+        config=MarketDataConfig(
+            base_url="http://edge-test",
+            bearer_token="token-app",
+            timeout_seconds=5.0,
+            stale_after_seconds=60,
+        ),
+        http_client=httpx.Client(base_url="http://edge-test", transport=httpx.MockTransport(handler)),
+    )
+
+    payload = client.fetch_quotes(["PETR4", "PETRE500"])
+
+    assert requests[0] == ["PETR4", "PETRE500"]
+    assert ["PETR4"] in requests
+    assert ["PETRE500"] in requests
+    assert payload["PETR4"]["ok"] is True
+    assert payload["PETR4"]["last"] == 46.99
+    assert "PETRE500" not in payload
+
+
 def test_market_data_client_keeps_partial_batch_and_logs_item_errors(caplog) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
