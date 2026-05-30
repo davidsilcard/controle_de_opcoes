@@ -4,7 +4,8 @@ import re
 from typing import Any, Dict, List, Mapping, Tuple
 
 from .. import finance
-from ..holdings import list_holding_snapshots
+from ..covered_call_guard import audit_covered_call_positions
+from ..holdings import list_holding_events, list_holding_snapshots
 from ..market_data import (
     format_market_timestamp_label,
     market_source_label,
@@ -760,6 +761,8 @@ def get_covered_call_context(
     # IO / Data Fetching
     with timed_stage("covered_call.positions_open"):
         positions_open = list_positions(include_closed=False)
+    with timed_stage("covered_call.positions_all"):
+        positions_all = list_positions(include_closed=True)
     positions_open = _mark_snapshot_market_rows(positions_open)
     with timed_stage("covered_call.holding_snapshots"):
         holding_snapshots = list_holding_snapshots(
@@ -778,6 +781,24 @@ def get_covered_call_context(
     with timed_stage("covered_call.underlying_quote"):
         quote = fetch_latest_underlying_quote(underlying)
     quote = _mark_snapshot_quote(quote)
+    with timed_stage("covered_call.audit"):
+        audit_holding_snapshots = list_holding_snapshots()
+        covered_call_ledger_sums = finance.get_ledger_sums_by_position(
+            types=[
+                finance.TransactionType.PREMIUM,
+                finance.TransactionType.DARF,
+                finance.TransactionType.BUY,
+                finance.TransactionType.SELL,
+                finance.TransactionType.REALIZED,
+                finance.TransactionType.ASSIGNMENT,
+            ]
+        )
+        covered_call_audit_issues = audit_covered_call_positions(
+            positions_all,
+            ledger_sums=covered_call_ledger_sums,
+            holding_snapshots=audit_holding_snapshots,
+            holding_events=list_holding_events(),
+        )
 
     ctx = calculate_covered_call_strategy(
         underlying=underlying,
@@ -846,6 +867,7 @@ def get_covered_call_context(
     ctx["simulated_monthly_premiums"] = simulated_monthly_premiums
     ctx["monthly_operational_result"] = monthly_operational_result
     ctx["simulated_monthly_operational_result"] = simulated_monthly_operational_result
+    ctx["covered_call_audit_issues"] = covered_call_audit_issues
     if ctx.get("underlying_quote"):
         ctx["underlying_quote"]["market_status_label"] = market_status_label(
             ctx["underlying_quote"].get("market_status")
@@ -940,6 +962,8 @@ def get_covered_call_shell_context(
 
     with timed_stage("covered_call.shell.positions_open"):
         positions_open = list_positions(include_closed=False)
+    with timed_stage("covered_call.shell.positions_all"):
+        positions_all = list_positions(include_closed=True)
     with timed_stage("covered_call.shell.holding_snapshots"):
         holding_snapshots = list_holding_snapshots(
             underlying_filter=underlying or None,
@@ -998,6 +1022,24 @@ def get_covered_call_shell_context(
             strategy_tag="covered_call",
         )
     )
+    with timed_stage("covered_call.shell.audit"):
+        audit_holding_snapshots = list_holding_snapshots()
+        covered_call_ledger_sums = finance.get_ledger_sums_by_position(
+            types=[
+                finance.TransactionType.PREMIUM,
+                finance.TransactionType.DARF,
+                finance.TransactionType.BUY,
+                finance.TransactionType.SELL,
+                finance.TransactionType.REALIZED,
+                finance.TransactionType.ASSIGNMENT,
+            ]
+        )
+        covered_call_audit_issues = audit_covered_call_positions(
+            positions_all,
+            ledger_sums=covered_call_ledger_sums,
+            holding_snapshots=audit_holding_snapshots,
+            holding_events=list_holding_events(),
+        )
 
     return {
         "underlying": underlying,
@@ -1016,4 +1058,5 @@ def get_covered_call_shell_context(
         "simulated_monthly_premiums": simulated_monthly_premiums,
         "monthly_operational_result": monthly_operational_result,
         "simulated_monthly_operational_result": simulated_monthly_operational_result,
+        "covered_call_audit_issues": covered_call_audit_issues,
     }

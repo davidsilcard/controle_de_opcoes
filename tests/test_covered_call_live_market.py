@@ -1,7 +1,18 @@
 from __future__ import annotations
 
+import pytest
+
 from opcoes.strategies.covered_call import get_covered_call_context, get_covered_call_shell_context
 from opcoes.web import create_app
+
+
+@pytest.fixture(autouse=True)
+def _covered_call_audit_db_mocks(monkeypatch):
+    monkeypatch.setattr(
+        "opcoes.strategies.covered_call.finance.get_ledger_sums_by_position",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr("opcoes.strategies.covered_call.list_holding_events", lambda **_kwargs: [])
 
 
 def test_covered_call_context_uses_snapshot_data_in_primary_flow(monkeypatch) -> None:

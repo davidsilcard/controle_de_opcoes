@@ -113,6 +113,21 @@
           {% if holding_notice %}
             <div class="alert alert-success mb-4">{{ holding_notice }}</div>
           {% endif %}
+          {% if covered_call_audit_issues %}
+            <div class="alert alert-danger border-danger mb-4">
+              <div class="fw-semibold mb-1">A estrategia encontrou dados que precisam de conferencia.</div>
+              <ul class="mb-0 small">
+                {% for issue in covered_call_audit_issues[:8] %}
+                  <li>
+                    {% if issue.position_id %}#{{ issue.position_id }} {% endif %}{{ issue.ticker }} - {{ issue.message }}
+                  </li>
+                {% endfor %}
+              </ul>
+              {% if covered_call_audit_issues|length > 8 %}
+                <div class="small mt-1">Mais {{ covered_call_audit_issues|length - 8 }} alerta(s) na auditoria.</div>
+              {% endif %}
+            </div>
+          {% endif %}
 
           <div class="row g-3 mb-4">
             <div class="col-md-6 col-xl-3">

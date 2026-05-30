@@ -72,6 +72,11 @@ from .strategies import (
 )
 from .flows import FlowError, assign_put, callaway
 from .cash_put_guard import CashPutValidationError, validate_cash_put_input
+from .covered_call_guard import (
+    CoveredCallValidationError,
+    find_duplicate_covered_call,
+    validate_covered_call_input,
+)
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -1548,7 +1553,20 @@ def create_app() -> Flask:
     def finance_callaway():
         form = request.form
         position_id = int(form.get("position_id"))
-        date = _parse_form_date(form.get("date")) or datetime.date.today().isoformat()
+        pos = get_position(position_id)
+        underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
+        date = _parse_form_date(form.get("date"))
+        if not date:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying,
+                    holding_error=(
+                        "Nao foi possivel confirmar a data de vencimento/exercicio da CALL. "
+                        "A baixa foi bloqueada para evitar registro na data errada."
+                    ),
+                )
+            )
         try:
             underlying = callaway(position_id=position_id, date=date)
         except FlowError as exc:
@@ -1568,7 +1586,8 @@ def create_app() -> Flask:
         except (TypeError, ValueError):
             return redirect(url_for("positions"))
 
-        date = _parse_form_date(form.get("date")) or datetime.date.today().isoformat()
+        parsed_date = _parse_form_date(form.get("date"))
+        date = parsed_date or datetime.date.today().isoformat()
 
         pos = get_position(position_id)
         if not pos:
@@ -1601,7 +1620,7 @@ def create_app() -> Flask:
         if (
             opt_type == "PUT"
             and (pos.get("strategy_tag") or "").strip().lower() == "cash_put"
-            and not _parse_form_date(form.get("date"))
+            and not parsed_date
         ):
             return redirect(
                 url_for(
@@ -1609,6 +1628,21 @@ def create_app() -> Flask:
                     underlying=underlying,
                     position_error=(
                         "Nao foi possivel confirmar o vencimento da PUT. "
+                        "A expiracao foi bloqueada para evitar fechamento na data errada."
+                    ),
+                )
+            )
+        if (
+            opt_type == "CALL"
+            and (pos.get("strategy_tag") or "").strip().lower() == "covered_call"
+            and not parsed_date
+        ):
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying,
+                    holding_error=(
+                        "Nao foi possivel confirmar o vencimento da CALL. "
                         "A expiracao foi bloqueada para evitar fechamento na data errada."
                     ),
                 )
@@ -2340,6 +2374,26 @@ def create_app() -> Flask:
                 )
             )
         try:
+            _validate_covered_call_position_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=qty,
+                entry_price=entry_price,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status="open",
+                is_simulated=is_simulated,
+            )
+        except CoveredCallValidationError as exc:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying or ticker,
+                    holding_error=str(exc),
+                )
+            )
+        try:
             validate_cash_put_input(
                 ticker=ticker,
                 underlying=underlying,
@@ -2658,6 +2712,38 @@ def create_app() -> Flask:
                     holding_error=str(exc),
                 )
             )
+        try:
+            _validate_covered_call_position_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=int(form["qty"]) if form.get("qty") else 0,
+                entry_price=(
+                    _parse_form_float(form.get("entry_price"))
+                    if form.get("entry_price")
+                    else 0.0
+                ),
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status=status or "open",
+                exit_date=exit_date,
+                exit_price=exit_price,
+                exit_reason=exit_reason,
+                is_simulated=(
+                    form.get("is_simulated") == "1"
+                    if form.get("is_simulated") is not None
+                    else bool((persisted_pos or {}).get("is_simulated") or 0)
+                ),
+                current_position_id=position_id,
+            )
+        except CoveredCallValidationError as exc:
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying or ticker,
+                    holding_error=str(exc),
+                )
+            )
         update_position(
             position_id=position_id,
             ticker=ticker or None,
@@ -2893,6 +2979,58 @@ def create_app() -> Flask:
             is_simulated=is_simulated,
             exclude_position_id=current_position_id,
         )
+
+    def _validate_covered_call_position_input(
+        *,
+        ticker: str,
+        underlying: str,
+        trade_date: str | None,
+        qty: int,
+        entry_price: float,
+        side: str | None,
+        strategy_tag: str | None,
+        status: str | None,
+        is_simulated: bool,
+        exit_date: str | None = None,
+        exit_price: float | None = None,
+        exit_reason: str | None = None,
+        current_position_id: int | None = None,
+    ) -> None:
+        validate_covered_call_input(
+            ticker=ticker,
+            underlying=underlying,
+            trade_date=trade_date,
+            qty=qty,
+            entry_price=entry_price,
+            side=side,
+            strategy_tag=strategy_tag,
+            status=status or "open",
+            exit_date=exit_date,
+            exit_price=exit_price,
+            exit_reason=exit_reason,
+        )
+        candidate = {
+            "ticker": ticker,
+            "underlying": underlying,
+            "trade_date": trade_date,
+            "qty": qty,
+            "entry_price": entry_price,
+            "side": side,
+            "strategy_tag": strategy_tag,
+            "is_simulated": 1 if is_simulated else 0,
+        }
+        duplicate = find_duplicate_covered_call(
+            list_positions(include_closed=True),
+            candidate=candidate,
+            current_position_id=current_position_id,
+        )
+        if duplicate is not None:
+            raise CoveredCallValidationError(
+                (
+                    "Ja existe uma covered_call com mesmo ticker, data, quantidade e preco "
+                    f"(posicao #{duplicate.get('id')}). Revise a posicao existente antes de salvar."
+                )
+            )
 
     def _auto_fees(
         *,

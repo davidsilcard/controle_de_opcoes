@@ -247,6 +247,7 @@
                         <form method="post" action="/finance/callaway" class="d-inline">
                           {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                           <button
                             type="submit"
                             class="btn btn-outline-primary btn-sm"
@@ -374,6 +375,7 @@
                         <form method="post" action="/finance/callaway" class="d-inline">
                           {{ csrf_input() }}
                           <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                           <button
                             type="submit"
                             class="btn btn-outline-primary btn-sm"

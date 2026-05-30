@@ -19,7 +19,7 @@ def _ensure_snapshot_tables() -> None:
 def _build_update_payload(**overrides) -> dict:
     data = {
         "ticker": "WIZCB103",
-        "underlying": "WICZ3",
+        "underlying": "WIZC3",
         "status": "closed",
         "trade_type": "swing",
         "side": "short",
@@ -60,7 +60,7 @@ def test_closing_short_option_creates_buyback_tx_and_is_idempotent() -> None:
 
     pos_id = portfolio.add_position(
         ticker="WIZCB103",
-        underlying="WICZ3",
+        underlying="WIZC3",
         trade_date="2026-02-05",
         qty=300,
         entry_price=0.23,
@@ -370,7 +370,7 @@ def test_audit_shows_operational_net_with_buyback() -> None:
 
     pos_id = portfolio.add_position(
         ticker="WIZCB103",
-        underlying="WICZ3",
+        underlying="WIZC3",
         trade_date="2026-02-05",
         qty=300,
         entry_price=0.23,
