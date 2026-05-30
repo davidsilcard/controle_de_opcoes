@@ -1092,6 +1092,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 - `Cash-Covered Put` agora tem guarda isolada de estrategia: bloqueia cadastro/edicao com ticker que nao seja PUT, data invalida, posicao nao vendida, ativo-base ausente, fechamento sem motivo e recompra/exercicio incoerentes.
 - ao cadastrar `cash_put`, a aplicacao registra premio e provisao DARF automaticamente, mesmo que o usuario esqueca o checkbox, evitando posicao sem ledger financeiro.
+- o cadastro de `cash_put` agora e atomico: se falhar qualquer lancamento financeiro obrigatorio, a posicao tambem nao fica gravada pela metade.
 - a aba `Cash-Covered Put` passa a se denunciar quando encontrar dados legados divergentes, como premio, recompra, exercicio ou resultado realizado fora do esperado.
 - higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.

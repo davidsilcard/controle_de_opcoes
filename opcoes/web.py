@@ -30,7 +30,7 @@ from .config import (
     reset_pg_schema_override,
     set_pg_schema_override,
 )
-from .db import open_db
+from .db import db_transaction, open_db
 from .runtime_env import load_dotenv_once
 from .portfolio import (
     add_position,
@@ -1231,6 +1231,7 @@ def create_app() -> Flask:
                     route_name="cash_covered_put",
                 )
         with timed_stage("route.cash_put.render"):
+            ctx["position_error"] = (request.args.get("position_error") or "").strip()
             return render_template("cash_covered_put.html", **ctx)
 
     @app.route("/fundamentus")
@@ -1597,6 +1598,21 @@ def create_app() -> Flask:
 
         if opt_type not in {"PUT", "CALL"}:
             return redirect(url_for("positions"))
+        if (
+            opt_type == "PUT"
+            and (pos.get("strategy_tag") or "").strip().lower() == "cash_put"
+            and not _parse_form_date(form.get("date"))
+        ):
+            return redirect(
+                url_for(
+                    "cash_covered_put",
+                    underlying=underlying,
+                    position_error=(
+                        "Nao foi possivel confirmar o vencimento da PUT. "
+                        "A expiracao foi bloqueada para evitar fechamento na data errada."
+                    ),
+                )
+            )
 
         close_position(
             position_id=position_id,
@@ -2346,62 +2362,73 @@ def create_app() -> Flask:
                 entry_price=entry_price,
             )
 
-        pos_id = add_position(
-            ticker=ticker,
-            underlying=underlying,
-            trade_date=trade_date or form.get("trade_date", ""),
-            qty=qty,
-            entry_price=entry_price,
-            fees=fees,
-            trade_type=form.get("trade_type", "swing"),
-            side=side_raw,
-            irrf=float(form["irrf"]) if form.get("irrf") else None,
-            notes=form.get("notes") or None,
-            is_simulated=is_simulated,
-            parent_position_id=parent_id,
-            strategy_tag=strategy_tag_raw,
-        )
+        def _insert_position_and_optional_premium(conn: Any = None) -> int:
+            pos_id_inner = add_position(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date or form.get("trade_date", ""),
+                qty=qty,
+                entry_price=entry_price,
+                fees=fees,
+                trade_type=form.get("trade_type", "swing"),
+                side=side_raw,
+                irrf=float(form["irrf"]) if form.get("irrf") else None,
+                notes=form.get("notes") or None,
+                is_simulated=is_simulated,
+                parent_position_id=parent_id,
+                strategy_tag=strategy_tag_raw,
+                conn=conn,
+            )
 
-        # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
-        if (
-            entry_price > 0
-            and qty > 0
-            and (form.get("record_premium") == "1" or strategy_norm == "cash_put")
-        ):
-            t = (ticker or "").strip().upper()
-            is_option = _is_option_ticker(t)
+            # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
+            if (
+                entry_price > 0
+                and qty > 0
+                and (form.get("record_premium") == "1" or strategy_norm == "cash_put")
+            ):
+                t = (ticker or "").strip().upper()
+                is_option = _is_option_ticker(t)
 
-            if is_option:
-                total_premium = finance.calculate_option_premium(
-                    entry_price=entry_price,
-                    qty=qty,
-                    fees=fees,
-                )
-                finance.add_transaction(
-                    date=trade_date or form.get("trade_date", ""),
-                    type=finance.TransactionType.PREMIUM,
-                    amount=total_premium,
-                    description=f"Prêmio {ticker} ({qty}x)",
-                    position_id=pos_id,
-                    is_simulated=is_simulated,
-                )
-
-                if form.get("reserve_darf") == "1" or strategy_norm == "cash_put":
-                    trade_type = (form.get("trade_type") or "swing").strip().lower()
-                    darf_amount = finance.calculate_darf_provision(
-                        premium_amount=total_premium,
-                        trade_type=trade_type,
+                if is_option:
+                    total_premium = finance.calculate_option_premium(
+                        entry_price=entry_price,
+                        qty=qty,
+                        fees=fees,
                     )
-                    if darf_amount != 0.0:
-                        aliquota_opts = finance.option_tax_rate(trade_type)
-                        finance.add_transaction(
-                            date=trade_date or form.get("trade_date", ""),
-                            type=finance.TransactionType.DARF,
-                            amount=darf_amount,
-                            description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
-                            position_id=pos_id,
-                            is_simulated=is_simulated,
+                    finance.add_transaction(
+                        date=trade_date or form.get("trade_date", ""),
+                        type=finance.TransactionType.PREMIUM,
+                        amount=total_premium,
+                        description=f"Prêmio {ticker} ({qty}x)",
+                        position_id=pos_id_inner,
+                        is_simulated=is_simulated,
+                        conn=conn,
+                    )
+
+                    if form.get("reserve_darf") == "1" or strategy_norm == "cash_put":
+                        trade_type = (form.get("trade_type") or "swing").strip().lower()
+                        darf_amount = finance.calculate_darf_provision(
+                            premium_amount=total_premium,
+                            trade_type=trade_type,
                         )
+                        if darf_amount != 0.0:
+                            aliquota_opts = finance.option_tax_rate(trade_type)
+                            finance.add_transaction(
+                                date=trade_date or form.get("trade_date", ""),
+                                type=finance.TransactionType.DARF,
+                                amount=darf_amount,
+                                description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
+                                position_id=pos_id_inner,
+                                is_simulated=is_simulated,
+                                conn=conn,
+                            )
+            return pos_id_inner
+
+        if strategy_norm == "cash_put":
+            with db_transaction() as conn:
+                _insert_position_and_optional_premium(conn)
+        else:
+            _insert_position_and_optional_premium()
 
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 

@@ -129,3 +129,70 @@ def test_cash_put_web_add_records_premium_and_darf_automatically() -> None:
     by_type = {tx.type.value: tx.amount for tx in txs}
     assert round(by_type[finance.TransactionType.PREMIUM.value], 2) == 243.67
     assert round(by_type[finance.TransactionType.DARF.value], 2) == -36.55
+
+
+@pytest.mark.requires_postgres
+def test_cash_put_web_add_rolls_back_if_ledger_fails(monkeypatch) -> None:
+    original_add_transaction = finance.add_transaction
+
+    def _fail_on_darf(*args, **kwargs):
+        if kwargs.get("type") == finance.TransactionType.DARF:
+            raise RuntimeError("falha simulada no ledger")
+        return original_add_transaction(*args, **kwargs)
+
+    monkeypatch.setattr(finance, "add_transaction", _fail_on_darf)
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    with pytest.raises(RuntimeError):
+        client.post(
+            "/positions/add",
+            data={
+                "ticker": "PETRN312",
+                "underlying": "PETR4",
+                "trade_date": "2026-01-09",
+                "qty": "400",
+                "entry_price": "0.61",
+                "fees": "0.33",
+                "trade_type": "swing",
+                "side": "short",
+                "strategy_tag": "cash_put",
+                "is_simulated": "0",
+                "next": "/positions",
+            },
+        )
+
+    assert portfolio.list_positions(include_closed=True) == []
+    assert finance.get_transactions(limit=20) == []
+
+
+@pytest.mark.requires_postgres
+def test_cash_put_expiration_without_confirmed_date_is_blocked() -> None:
+    pos_id = portfolio.add_position(
+        ticker="PETRN312",
+        underlying="PETR4",
+        trade_date="2026-01-09",
+        qty=400,
+        entry_price=0.61,
+        fees=0.33,
+        trade_type="swing",
+        side="short",
+        strategy_tag="cash_put",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post(
+        "/finance/expire",
+        data={"position_id": str(pos_id), "date": ""},
+    )
+
+    assert response.status_code in (302, 303)
+    assert "position_error=" in response.headers["Location"]
+    pos = portfolio.get_position(pos_id)
+    assert pos is not None
+    assert pos["status"] == "open"
