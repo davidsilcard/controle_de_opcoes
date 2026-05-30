@@ -5,7 +5,11 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ..holdings import get_holding_snapshot, list_holding_events
 from ..perf import timed_stage
-from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
+from ..snapshot_repository import (
+    fetch_latest_option_snapshots,
+    fetch_latest_underlying_options,
+    fetch_latest_underlying_quote,
+)
 from ..utils import infer_option_type, parse_ptbr_number
 from .. import finance
 from ..cash_put_guard import audit_cash_put_positions
@@ -48,6 +52,83 @@ def _premium_from_row(row: Mapping[str, Any]) -> Tuple[Optional[float], str]:
         if val is not None and val > 0:
             return val, key
     return None, ""
+
+
+def _option_ticker_candidates(value: Any) -> List[str]:
+    ticker = (value or "").strip().upper()
+    if not ticker:
+        return []
+    candidates = [ticker]
+    for suffix in ("ON", "PN"):
+        if ticker.endswith(suffix) and len(ticker) > len(suffix):
+            candidates.append(ticker[: -len(suffix)])
+    return list(dict.fromkeys(candidates))
+
+
+def _option_snapshot_lookup_keys(pos: Mapping[str, Any]) -> List[str]:
+    ticker = (pos.get("ticker") or "").strip().upper()
+    if infer_option_type(ticker) not in {"CALL", "PUT"}:
+        return []
+    return _option_ticker_candidates(ticker)
+
+
+def _snapshot_value(row: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _enrich_cash_put_positions(
+    positions: List[Dict[str, Any]],
+    *,
+    options_rows: List[Dict[str, Any]],
+    snapshot_rows: Mapping[str, Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    options_by_ticker: Dict[str, Mapping[str, Any]] = {
+        (row.get("ticker") or "").strip().upper(): row
+        for row in options_rows
+        if (row.get("ticker") or "").strip()
+    }
+
+    enriched: List[Dict[str, Any]] = []
+    for pos in positions:
+        item = dict(pos)
+        if not _is_put_option_position(item):
+            enriched.append(item)
+            continue
+
+        matched: Optional[Mapping[str, Any]] = None
+        for key in _option_snapshot_lookup_keys(item):
+            matched = options_by_ticker.get(key) or snapshot_rows.get(key)
+            if matched:
+                break
+        if matched:
+            strike = _parse_float(_snapshot_value(matched, "strike", "last_strike"))
+            if strike is not None and strike > 0 and not item.get("strike"):
+                item["strike"] = strike
+            last_price = _parse_float(_snapshot_value(matched, "ultimo", "last_price_raw"))
+            if last_price is not None and item.get("last_price") is None:
+                item["last_price"] = last_price
+            underlying_price = _parse_float(
+                _snapshot_value(matched, "underlying_price", "last_underlying_price")
+            )
+            if underlying_price is not None and item.get("underlying_price") is None:
+                item["underlying_price"] = underlying_price
+            vencimento = _snapshot_value(matched, "vencimento", "last_vencimento")
+            if vencimento and not item.get("vencimento"):
+                item["vencimento"] = vencimento
+            dias_uteis = _snapshot_value(matched, "dias_uteis", "last_dias_uteis")
+            if dias_uteis not in (None, "") and item.get("dias_uteis") is None:
+                parsed_days = _parse_float(dias_uteis)
+                item["dias_uteis"] = int(parsed_days) if parsed_days is not None else dias_uteis
+            canonical_ticker = (matched.get("ticker") or "").strip().upper()
+            if canonical_ticker:
+                item["market_ticker"] = canonical_ticker
+
+        enriched.append(item)
+    return enriched
 
 
 def _is_put_option_position(pos: Mapping[str, Any]) -> bool:
@@ -442,6 +523,11 @@ def calculate_cash_covered_put_strategy(
     Pure strategy logic for Cash Covered Put.
     Filters positions, derives metrics, and builds suggestions from provided data.
     """
+    positions_open = _enrich_cash_put_positions(
+        positions_open,
+        options_rows=options_rows,
+        snapshot_rows={},
+    )
     puts_real: List[Dict[str, Any]] = []
     puts_simulated: List[Dict[str, Any]] = []
     simulated_monthly_premiums_fallback = _aggregate_put_premiums_by_month(
@@ -586,6 +672,19 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     ]
     with timed_stage("cash_put.options_rows"):
         rows = fetch_latest_underlying_options(underlying=underlying)
+    with timed_stage("cash_put.position_snapshots"):
+        snapshot_keys: List[str] = []
+        for pos in positions_open:
+            snapshot_keys.extend(_option_snapshot_lookup_keys(pos))
+        try:
+            position_snapshots = fetch_latest_option_snapshots(snapshot_keys)
+        except RuntimeError:
+            position_snapshots = {}
+    positions_open_enriched = _enrich_cash_put_positions(
+        positions_open,
+        options_rows=rows,
+        snapshot_rows=position_snapshots,
+    )
     with timed_stage("cash_put.underlying_quote"):
         quote = fetch_latest_underlying_quote(underlying)
 
@@ -610,7 +709,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
 
     ctx = calculate_cash_covered_put_strategy(
         underlying=underlying,
-        positions_open=positions_open,
+        positions_open=positions_open_enriched,
         options_rows=rows,
         quote=quote,
         min_yield_pct=min_yield_pct,
@@ -623,7 +722,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         total_balance=total_balance,
         buyback_target_pct=buyback_target_pct,
     )
-    puts_all = [pos for pos in positions_open if _is_put_option_position(pos)]
+    puts_all = [pos for pos in positions_open_enriched if _is_put_option_position(pos)]
     puts_real_all = [pos for pos in puts_all if not bool(pos.get("is_simulated"))]
     puts_simulated_all = [pos for pos in puts_all if bool(pos.get("is_simulated"))]
 
@@ -693,7 +792,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         positions_all=positions_all,
         is_simulated=summary_simulated_filter,
     )
-    open_put_quick_filter = _build_open_put_quick_filter(positions_open, underlying)
+    open_put_quick_filter = _build_open_put_quick_filter(positions_open_enriched, underlying)
     cash_put_ledger_sums = finance.get_ledger_sums_by_position(
         types=[
             finance.TransactionType.PREMIUM,
