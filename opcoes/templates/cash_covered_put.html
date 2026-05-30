@@ -44,6 +44,22 @@
         <div class="col-lg-9 col-xl-10">
           <h1 class="h4 mb-3">Cash-Covered Put – {{ underlying }}</h1>
 
+      {% if cash_put_audit_issues %}
+        <div class="alert alert-danger border-danger mb-4">
+          <div class="fw-semibold mb-1">A estratégia encontrou dados que precisam de conferência.</div>
+          <ul class="mb-0 small">
+            {% for issue in cash_put_audit_issues[:8] %}
+              <li>
+                #{{ issue.position_id }} {{ issue.ticker }} – {{ issue.message }}
+              </li>
+            {% endfor %}
+          </ul>
+          {% if cash_put_audit_issues|length > 8 %}
+            <div class="small mt-1">Mais {{ cash_put_audit_issues|length - 8 }} alerta(s) na auditoria.</div>
+          {% endif %}
+        </div>
+      {% endif %}
+
       <form class="row g-2 mb-4" method="get" action="/cash-covered-put">
         <div class="col-sm-2">
           <label class="form-label">Ativo</label>

@@ -71,6 +71,7 @@ from .strategies import (
     get_ranking_shell_context,
 )
 from .flows import FlowError, assign_put, callaway
+from .cash_put_guard import CashPutValidationError, validate_cash_put_input
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -1902,6 +1903,7 @@ def create_app() -> Flask:
                     route_name="positions",
                 )
         ctx["next_url"] = next_url
+        ctx["position_error"] = (request.args.get("position_error") or "").strip()
         with timed_stage("route.positions.render"):
             return render_template("positions.html", **ctx)
 
@@ -2288,12 +2290,15 @@ def create_app() -> Flask:
             # Se marcou prêmio, assume venda (short). Caso contrário, default long.
             side_raw = "short" if form.get("record_premium") == "1" else "long"
         strategy_tag_raw = form.get("strategy_tag") or None
+        strategy_norm = (strategy_tag_raw or "").strip().lower()
         side_raw = _normalize_form_side(
             ticker=ticker,
             side=side_raw,
             strategy_tag=strategy_tag_raw,
-            record_premium=form.get("record_premium") == "1",
+            record_premium=form.get("record_premium") == "1"
+            or strategy_norm == "cash_put",
         )
+        trade_date = _parse_form_date(form.get("trade_date"))
         underlying = _resolve_underlying_for_position(
             ticker=ticker,
             underlying=underlying_input,
@@ -2318,6 +2323,19 @@ def create_app() -> Flask:
                     holding_error=str(exc),
                 )
             )
+        try:
+            validate_cash_put_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=qty,
+                entry_price=entry_price,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status="open",
+            )
+        except CashPutValidationError as exc:
+            return redirect(url_for("positions", position_error=str(exc)))
         if fees_input:
             fees = _parse_form_float(fees_input)
         else:
@@ -2331,7 +2349,7 @@ def create_app() -> Flask:
         pos_id = add_position(
             ticker=ticker,
             underlying=underlying,
-            trade_date=form.get("trade_date", ""),
+            trade_date=trade_date or form.get("trade_date", ""),
             qty=qty,
             entry_price=entry_price,
             fees=fees,
@@ -2345,7 +2363,11 @@ def create_app() -> Flask:
         )
 
         # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
-        if entry_price > 0 and qty > 0 and form.get("record_premium") == "1":
+        if (
+            entry_price > 0
+            and qty > 0
+            and (form.get("record_premium") == "1" or strategy_norm == "cash_put")
+        ):
             t = (ticker or "").strip().upper()
             is_option = _is_option_ticker(t)
 
@@ -2356,7 +2378,7 @@ def create_app() -> Flask:
                     fees=fees,
                 )
                 finance.add_transaction(
-                    date=form.get("trade_date", ""),
+                    date=trade_date or form.get("trade_date", ""),
                     type=finance.TransactionType.PREMIUM,
                     amount=total_premium,
                     description=f"Prêmio {ticker} ({qty}x)",
@@ -2364,7 +2386,7 @@ def create_app() -> Flask:
                     is_simulated=is_simulated,
                 )
 
-                if form.get("reserve_darf") == "1":
+                if form.get("reserve_darf") == "1" or strategy_norm == "cash_put":
                     trade_type = (form.get("trade_type") or "swing").strip().lower()
                     darf_amount = finance.calculate_darf_provision(
                         premium_amount=total_premium,
@@ -2373,7 +2395,7 @@ def create_app() -> Flask:
                     if darf_amount != 0.0:
                         aliquota_opts = finance.option_tax_rate(trade_type)
                         finance.add_transaction(
-                            date=form.get("trade_date", ""),
+                            date=trade_date or form.get("trade_date", ""),
                             type=finance.TransactionType.DARF,
                             amount=darf_amount,
                             description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
@@ -2518,11 +2540,14 @@ def create_app() -> Flask:
         ticker = (form.get("ticker") or "").strip()
         side_raw = form.get("side") or None
         strategy_tag_raw = form.get("strategy_tag") or None
+        strategy_norm = (strategy_tag_raw or "").strip().lower()
         side_raw = _normalize_form_side(
             ticker=ticker,
             side=side_raw,
             strategy_tag=strategy_tag_raw,
+            record_premium=strategy_norm == "cash_put",
         )
+        trade_date = _parse_form_date(form.get("trade_date"))
         underlying = _resolve_underlying_for_position(
             ticker=ticker,
             underlying=form.get("underlying") or "",
@@ -2557,6 +2582,32 @@ def create_app() -> Flask:
             exit_price = None
             exit_reason = None
         try:
+            validate_cash_put_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=int(form["qty"]) if form.get("qty") else 0,
+                entry_price=(
+                    _parse_form_float(form.get("entry_price"))
+                    if form.get("entry_price")
+                    else 0.0
+                ),
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                status=status or "open",
+                exit_date=exit_date,
+                exit_price=exit_price,
+                exit_reason=exit_reason,
+            )
+        except CashPutValidationError as exc:
+            return redirect(
+                url_for(
+                    "positions",
+                    strategy_tag="cash_put",
+                    position_error=str(exc),
+                )
+            )
+        try:
             persisted_pos = get_position(position_id)
             _validate_covered_call_stock(
                 ticker=ticker,
@@ -2584,7 +2635,7 @@ def create_app() -> Flask:
             position_id=position_id,
             ticker=ticker or None,
             underlying=underlying,
-            trade_date=form.get("trade_date") or None,
+            trade_date=trade_date or form.get("trade_date") or None,
             qty=int(form["qty"]) if form.get("qty") else None,
             entry_price=(
                 _parse_form_float(form.get("entry_price"))

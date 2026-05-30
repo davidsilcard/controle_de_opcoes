@@ -8,6 +8,7 @@ from ..perf import timed_stage
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..utils import infer_option_type, parse_ptbr_number
 from .. import finance
+from ..cash_put_guard import audit_cash_put_positions
 from ..portfolio import list_positions
 from ..settings import get_cash_put_settings, update_cash_put_settings
 
@@ -693,6 +694,20 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         is_simulated=summary_simulated_filter,
     )
     open_put_quick_filter = _build_open_put_quick_filter(positions_open, underlying)
+    cash_put_ledger_sums = finance.get_ledger_sums_by_position(
+        types=[
+            finance.TransactionType.PREMIUM,
+            finance.TransactionType.DARF,
+            finance.TransactionType.BUY,
+            finance.TransactionType.ASSIGNMENT,
+            finance.TransactionType.REALIZED,
+        ],
+        is_simulated=summary_simulated_filter,
+    )
+    cash_put_audit_issues = audit_cash_put_positions(
+        positions_all,
+        ledger_sums=cash_put_ledger_sums,
+    )
 
     return {
         **ctx,
@@ -712,6 +727,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "recent_transactions": transactions,
         "latest_assignment_summary": latest_assignment_summary,
         "open_put_quick_filter": open_put_quick_filter,
+        "cash_put_audit_issues": cash_put_audit_issues,
     }
 
 
