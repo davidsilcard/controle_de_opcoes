@@ -823,6 +823,18 @@ def sync_long_option_entry_buy(
             db.close()
 
 
+def long_option_entry_buy_fees(position: Mapping[str, Any]) -> float:
+    """Retorna a taxa que pertence ao BUY de entrada de uma opcao comprada."""
+
+    status = str(position.get("status") or "").strip().lower()
+    has_close = bool(str(position.get("exit_date") or "").strip()) and position.get(
+        "exit_price"
+    ) is not None
+    if status == "closed" and has_close:
+        return 0.0
+    return float(position.get("fees") or 0.0)
+
+
 def sync_position_realized_pnl(
     *,
     position_id: Optional[int] = None,
@@ -983,7 +995,7 @@ def sync_position_closure_effects(
                 trade_date=str(pos.get("trade_date") or ""),
                 qty=int(pos.get("qty") or 0),
                 entry_price=float(pos.get("entry_price") or 0.0),
-                fees=float(pos.get("fees") or 0.0),
+                fees=long_option_entry_buy_fees(pos),
                 side=side,
                 strategy_tag=str(pos.get("strategy_tag") or ""),
                 is_simulated=bool(pos.get("is_simulated") or 0),

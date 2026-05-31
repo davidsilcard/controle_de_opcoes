@@ -111,7 +111,7 @@ def audit_ranking_positions(
                 finance.calculate_option_purchase(
                     entry_price=float(pos.get("entry_price") or 0.0),
                     qty=int(pos.get("qty") or 0),
-                    fees=float(pos.get("fees") or 0.0),
+                    fees=finance.long_option_entry_buy_fees(pos),
                 ),
                 2,
             )

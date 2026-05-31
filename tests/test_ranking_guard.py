@@ -51,6 +51,30 @@ def test_ranking_audit_flags_missing_buy_ledger() -> None:
     assert any(issue.code == "COMPRA_SEM_LEDGER" for issue in issues)
 
 
+def test_ranking_audit_keeps_closed_option_buy_separate_from_exit_fees() -> None:
+    issues = audit_ranking_positions(
+        [
+            {
+                "id": 6,
+                "ticker": "PETRA456",
+                "underlying": "PETR4",
+                "trade_date": "2025-11-19",
+                "qty": 100,
+                "entry_price": 1.95,
+                "fees": 1.60,
+                "side": "long",
+                "status": "closed",
+                "exit_date": "2026-03-30",
+                "exit_price": 12.00,
+                "strategy_tag": "ranking",
+            }
+        ],
+        ledger_sums={6: {finance.TransactionType.BUY.value: -195.00}},
+    )
+
+    assert issues == []
+
+
 @pytest.mark.requires_postgres
 def test_ranking_web_add_records_buy_automatically() -> None:
     _ensure_snapshot_tables()
