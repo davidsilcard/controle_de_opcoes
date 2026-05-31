@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping
 
+from .. import finance
 from ..report import ReportData, generate_report
 from ..perf import timed_stage
+from ..portfolio import list_positions
+from ..ranking_guard import audit_ranking_positions
 from ..utils import infer_option_type, parse_ptbr_number
 from ..settings import (
     get_ranking_view_settings,
@@ -247,6 +250,7 @@ def calculate_ranking_strategy(
         "positions_simulated": positions_simulated,
         "segments": segments,
         "book_availability": book_availability,
+        "ranking_audit_issues": [],
     }
 
 
@@ -372,6 +376,16 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             recurring_limit=recurring_limit,
             underlying_filter=underlying_filter,
             option_type_filter=option_type_filter,
+        )
+    with timed_stage("ranking.audit"):
+        ctx["ranking_audit_issues"] = audit_ranking_positions(
+            list_positions(include_closed=True),
+            ledger_sums=finance.get_ledger_sums_by_position(
+                types=[
+                    finance.TransactionType.BUY,
+                    finance.TransactionType.REALIZED,
+                ]
+            ),
         )
     if empty_state_message:
         ctx["empty_state_message"] = empty_state_message

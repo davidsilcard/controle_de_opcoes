@@ -222,6 +222,11 @@ def calculate_option_premium(*, entry_price: float, qty: int, fees: float = 0.0)
     return (float(entry_price) * int(qty)) - float(fees or 0.0)
 
 
+def calculate_option_purchase(*, entry_price: float, qty: int, fees: float = 0.0) -> float:
+    """Calcula desembolso total para compra de opção."""
+    return -((float(entry_price) * int(qty)) + float(fees or 0.0))
+
+
 def calculate_darf_provision(*, premium_amount: float, trade_type: str) -> float:
     """Calcula provisão de DARF (valor negativo), arredondada a centavos."""
     base_ir = max(0.0, float(premium_amount))
@@ -726,6 +731,98 @@ def sync_short_option_buyback(
             db.close()
 
 
+def sync_long_option_entry_buy(
+    *,
+    position_id: int,
+    ticker: str,
+    trade_date: str,
+    qty: int,
+    entry_price: float,
+    fees: float,
+    side: str,
+    strategy_tag: str | None,
+    is_simulated: bool,
+    conn: Optional[Any] = None,
+) -> float:
+    """Mantem o BUY de entrada para opcao comprada de ranking."""
+
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
+    try:
+        ticker_norm = str(ticker or "").strip().upper()
+        applies = (
+            infer_option_type(ticker_norm) in {"CALL", "PUT"}
+            and str(side or "").strip().lower() == "long"
+            and str(strategy_tag or "").strip().lower() == "ranking"
+            and int(qty or 0) > 0
+            and float(entry_price or 0.0) > 0
+            and str(trade_date or "").strip()
+        )
+        rows = db.execute(
+            """
+            SELECT id
+            FROM ledger
+            WHERE position_id = ? AND type = ? AND description LIKE ?
+            ORDER BY id
+            """,
+            (int(position_id), TransactionType.BUY.value, "Compra opção %"),
+        ).fetchall()
+        ids = [int(row["id"] if isinstance(row, Mapping) else row[0]) for row in rows]
+
+        if not applies:
+            if ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in ids)})",
+                    ids,
+                )
+            if owns_conn:
+                db.commit()
+            return 0.0
+
+        amount = round(
+            calculate_option_purchase(entry_price=entry_price, qty=qty, fees=fees),
+            2,
+        )
+        description = f"Compra opção {ticker_norm} ({int(qty)}x)"
+        if ids:
+            first_id, *extra_ids = ids
+            db.execute(
+                """
+                UPDATE ledger
+                SET date = ?, amount = ?, description = ?, is_simulated = ?
+                WHERE id = ?
+                """,
+                (
+                    str(trade_date),
+                    amount,
+                    description,
+                    1 if is_simulated else 0,
+                    first_id,
+                ),
+            )
+            if extra_ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in extra_ids)})",
+                    extra_ids,
+                )
+        else:
+            add_transaction(
+                date=str(trade_date),
+                type=TransactionType.BUY,
+                amount=amount,
+                description=description,
+                position_id=int(position_id),
+                is_simulated=is_simulated,
+                conn=db,
+            )
+
+        if owns_conn:
+            db.commit()
+        return amount
+    finally:
+        if owns_conn:
+            db.close()
+
+
 def sync_position_realized_pnl(
     *,
     position_id: Optional[int] = None,
@@ -876,6 +973,19 @@ def sync_position_closure_effects(
                     if pos.get("exit_price") is not None
                     else None
                 ),
+                is_simulated=bool(pos.get("is_simulated") or 0),
+                conn=db,
+            )
+        if infer_option_type(ticker) in {"CALL", "PUT"} and side == "long":
+            sync_long_option_entry_buy(
+                position_id=int(position_id),
+                ticker=ticker,
+                trade_date=str(pos.get("trade_date") or ""),
+                qty=int(pos.get("qty") or 0),
+                entry_price=float(pos.get("entry_price") or 0.0),
+                fees=float(pos.get("fees") or 0.0),
+                side=side,
+                strategy_tag=str(pos.get("strategy_tag") or ""),
                 is_simulated=bool(pos.get("is_simulated") or 0),
                 conn=db,
             )

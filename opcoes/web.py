@@ -77,6 +77,7 @@ from .covered_call_guard import (
     find_duplicate_covered_call,
     validate_covered_call_input,
 )
+from .ranking_guard import RankingValidationError, validate_ranking_option_input
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -2406,6 +2407,18 @@ def create_app() -> Flask:
             )
         except CashPutValidationError as exc:
             return redirect(url_for("positions", position_error=str(exc)))
+        try:
+            validate_ranking_option_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=qty,
+                entry_price=entry_price,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+            )
+        except RankingValidationError as exc:
+            return redirect(url_for("positions", strategy_tag="ranking", position_error=str(exc)))
         if fees_input:
             fees = _parse_form_float(fees_input)
         else:
@@ -2476,9 +2489,22 @@ def create_app() -> Flask:
                                 is_simulated=is_simulated,
                                 conn=conn,
                             )
+            if strategy_norm == "ranking" and _is_option_ticker(ticker) and side_raw == "long":
+                finance.sync_long_option_entry_buy(
+                    position_id=pos_id_inner,
+                    ticker=ticker,
+                    trade_date=trade_date or form.get("trade_date", ""),
+                    qty=qty,
+                    entry_price=entry_price,
+                    fees=fees,
+                    side=side_raw,
+                    strategy_tag=strategy_tag_raw,
+                    is_simulated=is_simulated,
+                    conn=conn,
+                )
             return pos_id_inner
 
-        if strategy_norm == "cash_put":
+        if strategy_norm in {"cash_put", "ranking"}:
             with db_transaction() as conn:
                 _insert_position_and_optional_premium(conn)
         else:
@@ -2685,6 +2711,28 @@ def create_app() -> Flask:
                 url_for(
                     "positions",
                     strategy_tag="cash_put",
+                    position_error=str(exc),
+                )
+            )
+        try:
+            validate_ranking_option_input(
+                ticker=ticker,
+                underlying=underlying,
+                trade_date=trade_date,
+                qty=int(form["qty"]) if form.get("qty") else 0,
+                entry_price=(
+                    _parse_form_float(form.get("entry_price"))
+                    if form.get("entry_price")
+                    else 0.0
+                ),
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+            )
+        except RankingValidationError as exc:
+            return redirect(
+                url_for(
+                    "positions",
+                    strategy_tag="ranking",
                     position_error=str(exc),
                 )
             )

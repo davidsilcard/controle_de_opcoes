@@ -7,6 +7,19 @@
   Snapshot: {{ data.snapshot_date }} |
   Tipo: {% if option_type_filter == "CALL" %}CALLs{% elif option_type_filter == "PUT" %}PUTs{% else %}Todas{% endif %}
 </p>
+{% if ranking_audit_issues %}
+  <div class="alert alert-danger border-danger py-2" role="alert">
+    <div class="fw-semibold mb-1">A estrategia encontrou dados que precisam de conferencia.</div>
+    <ul class="mb-0 small">
+      {% for issue in ranking_audit_issues[:8] %}
+        <li>#{{ issue.position_id }} {{ issue.ticker }} - {{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+    {% if ranking_audit_issues|length > 8 %}
+      <div class="small mt-1">Mais {{ ranking_audit_issues|length - 8 }} alerta(s) na auditoria.</div>
+    {% endif %}
+  </div>
+{% endif %}
 <h2 class="h5 mt-4">Top oportunidades</h2>
       <p class="text-muted small">
         IV impl = última do book; IV Rank = faixa 180d; HV (21/63/126/252) = vol. hist. a partir dos snapshots diários.
