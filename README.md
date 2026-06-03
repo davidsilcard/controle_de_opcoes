@@ -1107,6 +1107,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - a aba `Posicoes` agora tem guarda transversal isolada em `opcoes/positions_guard.py`: denuncia data invalida, status incoerente, posicao aberta com campos de saida, posicao fechada sem data/motivo/preco e divergencias herdadas dos guards das estrategias.
 - a excecao para posicao de estoque fechada sem preco e restrita a consolidacao tecnica documentada de `Covered Call`, quando outra CALL exercida do mesmo ativo/data ja registrou o SELL economico no ledger. Sem essa prova, o sistema pede nota/preco e nao presume o resultado.
 - a aba `Auditoria` agora usa reconciliacao isolada em `opcoes/audit_reconciliation.py`: confere premio, DARF, recompra, compra de opcao comprada, ASSIGN de PUT, SELL de CALL exercida e resultado realizado sem misturar significados.
+- em PUT exercida antiga, a `Auditoria` aceita lote legado como prova do exercicio somente quando a posicao de estoque tem `parent_position_id` apontando para a PUT; sem esse vinculo, o sistema denuncia a falta de evento `PUT_ASSIGNMENT`.
 - divergencias da `Auditoria` passam a aparecer como alertas de regra no topo da tela, em vez de ficarem apenas como numeros vermelhos na tabela larga.
 - higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.

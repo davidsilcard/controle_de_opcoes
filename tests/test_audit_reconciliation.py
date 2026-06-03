@@ -132,3 +132,60 @@ def test_audit_reconciliation_separates_long_option_buy_from_short_buyback() -> 
     assert row["actual_buyback"] is None
     assert row["diff_option_buy"] == 0.0
     assert not ctx["audit_issues"]
+
+
+def test_audit_reconciliation_accepts_legacy_stock_lot_for_put_assignment() -> None:
+    positions = [
+        {
+            "id": 37,
+            "ticker": "GGBRO215",
+            "underlying": "GGBR4",
+            "trade_date": "2026-02-19",
+            "qty": 800,
+            "entry_price": 0.76,
+            "fees": 0.80,
+            "trade_type": "swing",
+            "side": "short",
+            "status": "closed",
+            "exit_date": "2026-03-20",
+            "exit_price": 0.0,
+            "exit_reason": "Exercicio",
+            "strategy_tag": "cash_put",
+        },
+        {
+            "id": 43,
+            "ticker": "GGBR4",
+            "underlying": "GGBR4",
+            "trade_date": "2026-03-20",
+            "qty": 800,
+            "entry_price": 21.46,
+            "fees": 0.0,
+            "trade_type": "stock",
+            "side": "long",
+            "status": "closed",
+            "exit_date": "2026-05-15",
+            "exit_price": None,
+            "exit_reason": "Consolidado no exercicio da call",
+            "strategy_tag": "covered_call",
+            "parent_position_id": 37,
+        },
+    ]
+
+    ctx = build_audit_reconciliation(
+        positions,
+        ledger_sums={
+            37: {
+                finance.TransactionType.PREMIUM.value: 607.20,
+                finance.TransactionType.DARF.value: -91.08,
+                finance.TransactionType.ASSIGNMENT.value: -17168.0,
+                finance.TransactionType.REALIZED.value: 607.20,
+            }
+        },
+        include_closed=True,
+        holding_events=[],
+    )
+
+    put_row = next(row for row in ctx["rows"] if row["id"] == 37)
+    assert put_row["expected_assignment"] == -17168.0
+    assert put_row["diff_assignment"] == 0.0
+    assert not ctx["audit_issues"]

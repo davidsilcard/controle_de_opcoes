@@ -80,6 +80,30 @@ def _exercise_cash_from_event(
     return round(sign * qty * float(price), 2)
 
 
+def _stock_assignment_from_legacy_position(
+    *,
+    positions: Sequence[Mapping[str, Any]],
+    option_position_id: int,
+    underlying: str,
+) -> tuple[str, int, float, float] | None:
+    for candidate in positions:
+        if _int_value(candidate.get("parent_position_id")) != int(option_position_id):
+            continue
+        ticker = _norm_upper(candidate.get("ticker"))
+        if ticker != _norm_upper(underlying):
+            continue
+        if infer_option_type(ticker) in {"CALL", "PUT"}:
+            continue
+        if _norm_lower(candidate.get("side")) != "long":
+            continue
+        qty = _int_value(candidate.get("qty"))
+        price = _float_or_none(candidate.get("entry_price"))
+        if qty <= 0 or price is None:
+            continue
+        return ticker, qty, price, -round(qty * price, 2)
+    return None
+
+
 def build_audit_reconciliation(
     positions: Sequence[Mapping[str, Any]],
     *,
@@ -197,6 +221,19 @@ def build_audit_reconciliation(
                         sell_stock_price = _float_or_none(event.get("price_reference"))
 
             if opt_type == "PUT" and status_norm == "closed" and "exerc" in exit_reason:
+                if expected_assignment is None:
+                    legacy_assignment = _stock_assignment_from_legacy_position(
+                        positions=positions,
+                        option_position_id=pid,
+                        underlying=underlying,
+                    )
+                    if legacy_assignment is not None:
+                        (
+                            assignment_stock_ticker,
+                            assignment_stock_qty,
+                            assignment_stock_price,
+                            expected_assignment,
+                        ) = legacy_assignment
                 if expected_assignment is None:
                     add_issue(
                         pid,
