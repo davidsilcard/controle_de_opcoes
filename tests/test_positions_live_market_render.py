@@ -55,6 +55,12 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
         lambda _position_ids: set(),
     )
     monkeypatch.setattr(
+        "opcoes.web.finance.get_ledger_sums_by_position",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr("opcoes.web.list_holding_snapshots", lambda **_kwargs: [])
+    monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
+    monkeypatch.setattr(
         "opcoes.web.summarize_realized_positions",
         lambda **_kwargs: {
             "available_years": [],
@@ -158,6 +164,12 @@ def test_positions_partial_live_renders_table(monkeypatch) -> None:
         "opcoes.web.finance.get_premium_position_ids",
         lambda _position_ids: set(),
     )
+    monkeypatch.setattr(
+        "opcoes.web.finance.get_ledger_sums_by_position",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr("opcoes.web.list_holding_snapshots", lambda **_kwargs: [])
+    monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
     monkeypatch.setattr(
         "opcoes.web.summarize_realized_positions",
         lambda **_kwargs: {

@@ -1,4 +1,25 @@
 <div>
+{% if positions_audit_issues %}
+  <section class="mb-4">
+    <div class="alert alert-danger mb-0" role="alert">
+      <div class="fw-semibold mb-2">A aba Posições encontrou dados que precisam de conferência.</div>
+      <ul class="mb-0">
+        {% for issue in positions_audit_issues[:8] %}
+          <li>
+            <strong>#{{ issue.position_id }} {{ issue.ticker }}</strong>
+            <span class="badge text-bg-light text-danger border ms-1">{{ issue.scope }}</span>
+            {{ issue.message }}
+            <span class="text-muted">{{ issue.action }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if positions_audit_issues|length > 8 %}
+        <div class="small mt-2">Mais {{ positions_audit_issues|length - 8 }} alerta(s) ocultos. Use a Auditoria para detalhar antes de lançar novas operações.</div>
+      {% endif %}
+    </div>
+  </section>
+{% endif %}
+
 {% if inventory_summary %}
   <section class="mb-4">
     <div class="card border-0 shadow-sm">

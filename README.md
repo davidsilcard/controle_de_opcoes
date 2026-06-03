@@ -291,6 +291,8 @@ Atualizacao parcial da interface:
 - a auditoria da `Covered Call` preserva o detalhamento rico de `calls em aberto`, incluindo `recompra`, `% do prêmio`, `extrínseco`, `% p/ 2x`, `P/L` e ações operacionais.
 - quando existir call real em aberto, a auditoria da `Covered Call` abre automaticamente e destaca onde estao `recompra`, `P/L` e os botoes operacionais, para o usuario nao precisar procurar essas informacoes.
 - a tela `Cash-Covered Put` agora ganhou um `Filtro rapido` com o mesmo padrao visual da `Covered Call`, listando apenas ativos com puts abertas e sinalizando cada um com selo `Aberta`.
+- a tela `Posicoes` agora tem auditoria propria no bloco dinamico: ela compoe os guards de `cash_put`, `covered_call` e `ranking`, e adiciona regras transversais para impedir posicao fechada sem data, motivo ou preco sem justificativa objetiva.
+- consolidacoes tecnicas de estoque em `Covered Call`, como lote legado baixado por exercicio de CALL em outra posicao, so deixam de gerar alerta quando a posicao estiver documentada como consolidada e existir SELL real associado a CALL exercida no mesmo ativo/data.
 - os paineis principais agora mostram explicitamente que os precos usados nessas abas sao `Snapshot`, preservando a leitura didatica e evitando prometer cotacao ao vivo que nao e confiavel para opcoes.
 - quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.
 
@@ -1100,6 +1102,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - em opcao comprada ja encerrada, o `BUY` de entrada fica separado dos custos de fechamento; as taxas de venda continuam abatendo o resultado realizado, evitando falso alerta em operacoes como compra e venda posterior da mesma CALL.
 - a aba `Ranking` agora mostra um quadro de lucros e prejuizos para compras de CALL/PUT: resultado realizado, lucros, prejuizos, capital ainda em risco nas opcoes abertas e ultimas operacoes por tipo.
 - a aba `Ranking` passa a se denunciar quando uma opcao comprada nao tem compra registrada no ledger ou quando o cadastro deixa de parecer uma opcao comprada valida.
+- a aba `Posicoes` agora tem guarda transversal isolada em `opcoes/positions_guard.py`: denuncia data invalida, status incoerente, posicao aberta com campos de saida, posicao fechada sem data/motivo/preco e divergencias herdadas dos guards das estrategias.
+- a excecao para posicao de estoque fechada sem preco e restrita a consolidacao tecnica documentada de `Covered Call`, quando outra CALL exercida do mesmo ativo/data ja registrou o SELL economico no ledger. Sem essa prova, o sistema pede nota/preco e nao presume o resultado.
 - higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.
 - README agora documenta `db optimize` para criar os indices recomendados apos bootstrap ou migracao.

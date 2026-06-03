@@ -12,7 +12,16 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -78,6 +87,7 @@ from .covered_call_guard import (
     validate_covered_call_input,
 )
 from .ranking_guard import RankingValidationError, validate_ranking_option_input
+from .positions_guard import audit_positions_page
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -143,7 +153,9 @@ def _inventory_key_for_position_global(pos: dict[str, Any]) -> str:
         return underlying or ticker
     if underlying and ticker == underlying:
         return underlying
-    if _looks_like_equity_ticker_global(ticker) and not _is_option_ticker_global(ticker):
+    if _looks_like_equity_ticker_global(ticker) and not _is_option_ticker_global(
+        ticker
+    ):
         return underlying or ticker
     return ""
 
@@ -177,7 +189,10 @@ def _hide_replaced_legacy_stock_positions_global(
     positions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     explicit_holdings = {
-        ((item.get("ticker") or "").strip().upper(), bool(item.get("is_simulated") or 0))
+        (
+            (item.get("ticker") or "").strip().upper(),
+            bool(item.get("is_simulated") or 0),
+        )
         for item in list_holdings()
     }
     if not explicit_holdings:
@@ -209,7 +224,9 @@ def _build_inventory_overview_global(
     )
 
 
-def _normalize_live_market_symbols(symbols: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+def _normalize_live_market_symbols(
+    symbols: list[str] | tuple[str, ...] | set[str],
+) -> list[str]:
     normalized = {
         str(symbol or "").strip().upper()
         for symbol in symbols
@@ -242,7 +259,9 @@ def _collect_covered_call_live_market_symbols(ctx: Mapping[str, Any]) -> list[st
     for key in ("covered_real", "covered_sim", "suggestions"):
         for row in ctx.get(key) or []:
             ticker = str((row or {}).get("ticker") or "").strip().upper()
-            row_underlying = str((row or {}).get("underlying") or underlying).strip().upper()
+            row_underlying = (
+                str((row or {}).get("underlying") or underlying).strip().upper()
+            )
             if ticker:
                 collected.append(ticker)
             if row_underlying:
@@ -286,9 +305,13 @@ def _mark_positions_snapshot_market_fields(
         item = dict(pos)
         if item.get("last_price") is not None and not item.get("market_status"):
             item["market_status"] = "snapshot"
-        if item.get("market_status") == "snapshot" and not item.get("market_price_source"):
+        if item.get("market_status") == "snapshot" and not item.get(
+            "market_price_source"
+        ):
             item["market_price_source"] = "snapshot"
-        if item.get("underlying_price") is not None and not item.get("underlying_market_status"):
+        if item.get("underlying_price") is not None and not item.get(
+            "underlying_market_status"
+        ):
             item["underlying_market_status"] = "snapshot"
         normalized.append(item)
     return normalized
@@ -367,6 +390,33 @@ def _build_positions_page_context(
             or pos.get("last_snapshot_date")
         )
     positions_view = _hide_replaced_legacy_stock_positions_global(positions)
+    with timed_stage("positions.audit"):
+        audit_positions = list_positions(include_closed=True)
+        audit_open_positions = [
+            p
+            for p in audit_positions
+            if (p.get("status") or "").strip().lower() == "open"
+        ]
+        audit_holding_snapshots = list_holding_snapshots(
+            positions_open=audit_open_positions
+        )
+        audit_holding_events = list_holding_events(limit=500)
+        ledger_sums = finance.get_ledger_sums_by_position(
+            types=[
+                finance.TransactionType.PREMIUM,
+                finance.TransactionType.DARF,
+                finance.TransactionType.BUY,
+                finance.TransactionType.SELL,
+                finance.TransactionType.ASSIGNMENT,
+                finance.TransactionType.REALIZED,
+            ]
+        )
+        positions_audit_issues = audit_positions_page(
+            audit_positions,
+            ledger_sums=ledger_sums,
+            holding_snapshots=audit_holding_snapshots,
+            holding_events=audit_holding_events,
+        )
     realized_summary = summarize_realized_positions(
         ticker_contains=ticker_contains or None,
         underlying_contains=underlying_contains or None,
@@ -387,6 +437,7 @@ def _build_positions_page_context(
         "filter_is_simulated": is_simulated_raw,
         "realized_summary": realized_summary,
         "inventory_summary": inventory_summary,
+        "positions_audit_issues": positions_audit_issues,
     }
     return ctx
 
@@ -591,9 +642,7 @@ def create_app() -> Flask:
             ranking_cache[cache_key] = (expires_at, payload)
             if len(ranking_cache) > 256:
                 stale_keys = [
-                    key
-                    for key, (exp, _ctx) in ranking_cache.items()
-                    if exp <= now
+                    key for key, (exp, _ctx) in ranking_cache.items() if exp <= now
                 ]
                 for key in stale_keys:
                     ranking_cache.pop(key, None)
@@ -619,7 +668,11 @@ def create_app() -> Flask:
         if not namespace:
             return
         with ranking_cache_lock:
-            keys = [key for key in ranking_cache.keys() if f'"namespace":"{namespace}"' in key]
+            keys = [
+                key
+                for key in ranking_cache.keys()
+                if f'"namespace":"{namespace}"' in key
+            ]
             for key in keys:
                 ranking_cache.pop(key, None)
         try:
@@ -646,7 +699,9 @@ def create_app() -> Flask:
             if key not in ignored
         )
 
-    def _strategy_page_cache_key(route_name: str, *, ignore_keys: set[str] | None = None) -> str:
+    def _strategy_page_cache_key(
+        route_name: str, *, ignore_keys: set[str] | None = None
+    ) -> str:
         return build_persisted_page_cache_key(
             route_name=route_name,
             namespace=_current_ranking_cache_namespace(),
@@ -725,7 +780,11 @@ def create_app() -> Flask:
         if not namespace:
             return
         with strategy_page_cache_lock:
-            keys = [key for key in strategy_page_cache.keys() if f'"namespace":"{namespace}"' in key]
+            keys = [
+                key
+                for key in strategy_page_cache.keys()
+                if f'"namespace":"{namespace}"' in key
+            ]
             for key in keys:
                 strategy_page_cache.pop(key, None)
         try:
@@ -734,7 +793,9 @@ def create_app() -> Flask:
             pass
 
     def _invalidate_strategy_page_cache_for_current_user() -> None:
-        _invalidate_strategy_page_cache_for_namespace(_current_ranking_cache_namespace())
+        _invalidate_strategy_page_cache_for_namespace(
+            _current_ranking_cache_namespace()
+        )
 
     def _csrf_token_value() -> str:
         token = session.get(CSRF_FIELD_NAME)
@@ -746,9 +807,7 @@ def create_app() -> Flask:
 
     def _csrf_input() -> Markup:
         token = _csrf_token_value()
-        return Markup(
-            f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">'
-        )
+        return Markup(f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">')
 
     def _client_ip() -> str:
         # Com ProxyFix ativo, remote_addr já reflete o IP do cliente quando o
@@ -993,7 +1052,9 @@ def create_app() -> Flask:
         should_record_failed_login = False
         if request.method == "GET" and request.args.get("reason") == "expired":
             error = "Sessão expirada por inatividade. Entre novamente."
-        elif request.method == "GET" and request.args.get("reason") == "schema-migration":
+        elif (
+            request.method == "GET" and request.args.get("reason") == "schema-migration"
+        ):
             error = (
                 "Seu acesso precisa de uma migração de schema para isolar os dados com segurança. "
                 "Peça ao administrador para executar `opcoes user migrate-schemas`."
@@ -1288,7 +1349,9 @@ def create_app() -> Flask:
                 return ""
             return f"{year:04d}-{month:02d}"
 
-        provisions = darf.get_monthly_darf_provisions(is_simulated=is_simulated, limit=36)
+        provisions = darf.get_monthly_darf_provisions(
+            is_simulated=is_simulated, limit=36
+        )
         records = darf.list_months(is_simulated=is_simulated, limit=36)
         record_by_period = {
             normalized: r
@@ -1303,10 +1366,7 @@ def create_app() -> Flask:
             if normalized
         }
         tax_periods = sorted(
-            {
-                f"{today.year:04d}-{today.month:02d}"
-                for today in [datetime.date.today()]
-            }
+            {f"{today.year:04d}-{today.month:02d}" for today in [datetime.date.today()]}
             | set(provision_by_period.keys())
             | set(record_by_period.keys()),
             reverse=True,
@@ -1397,7 +1457,9 @@ def create_app() -> Flask:
 
         provision_entries = []
         try:
-            provision_entries = darf.list_provision_entries(period=selected_period, is_simulated=is_simulated)
+            provision_entries = darf.list_provision_entries(
+                period=selected_period, is_simulated=is_simulated
+            )
         except Exception:
             provision_entries = []
 
@@ -1412,7 +1474,9 @@ def create_app() -> Flask:
             period=selected_period,
             is_simulated=is_simulated,
         )
-        selected_provisioned = float(provision_by_period.get(selected_period, 0.0) or 0.0)
+        selected_provisioned = float(
+            provision_by_period.get(selected_period, 0.0) or 0.0
+        )
 
         return render_template(
             "darf.html",
@@ -1860,8 +1924,12 @@ def create_app() -> Flask:
                     "scheduled_for_display": _format_panel_datetime(
                         last_run.get("scheduled_for_display_utc")
                     ),
-                    "started_at_display": _format_panel_datetime(last_run.get("started_at")),
-                    "finished_at_display": _format_panel_datetime(last_run.get("finished_at")),
+                    "started_at_display": _format_panel_datetime(
+                        last_run.get("started_at")
+                    ),
+                    "finished_at_display": _format_panel_datetime(
+                        last_run.get("finished_at")
+                    ),
                     "duration_display": _format_duration(
                         last_run.get("display_duration_seconds")
                     ),
@@ -1872,7 +1940,9 @@ def create_app() -> Flask:
             automation_services.append(
                 {
                     **service,
-                    "next_run_local_display": _format_panel_datetime(service.get("next_run_local")),
+                    "next_run_local_display": _format_panel_datetime(
+                        service.get("next_run_local")
+                    ),
                     "next_run_utc_display": _format_panel_datetime(
                         service.get("next_run_utc"),
                         tz=datetime.timezone.utc,
@@ -1895,7 +1965,9 @@ def create_app() -> Flask:
                         row.get("scheduled_for_display_utc")
                     ),
                     "started_at_display": _format_panel_datetime(row.get("started_at")),
-                    "finished_at_display": _format_panel_datetime(row.get("finished_at")),
+                    "finished_at_display": _format_panel_datetime(
+                        row.get("finished_at")
+                    ),
                     "duration_display": _format_duration(
                         row.get("display_duration_seconds")
                     ),
@@ -2140,7 +2212,8 @@ def create_app() -> Flask:
                                 and assignment_stock_price is not None
                             ):
                                 expected_assignment = -round(
-                                    float(assignment_stock_price) * assignment_stock_qty,
+                                    float(assignment_stock_price)
+                                    * assignment_stock_qty,
                                     2,
                                 )
 
@@ -2418,7 +2491,9 @@ def create_app() -> Flask:
                 strategy_tag=strategy_tag_raw,
             )
         except RankingValidationError as exc:
-            return redirect(url_for("positions", strategy_tag="ranking", position_error=str(exc)))
+            return redirect(
+                url_for("positions", strategy_tag="ranking", position_error=str(exc))
+            )
         if fees_input:
             fees = _parse_form_float(fees_input)
         else:
@@ -2489,7 +2564,11 @@ def create_app() -> Flask:
                                 is_simulated=is_simulated,
                                 conn=conn,
                             )
-            if strategy_norm == "ranking" and _is_option_ticker(ticker) and side_raw == "long":
+            if (
+                strategy_norm == "ranking"
+                and _is_option_ticker(ticker)
+                and side_raw == "long"
+            ):
                 finance.sync_long_option_entry_buy(
                     position_id=pos_id_inner,
                     ticker=ticker,
@@ -2833,7 +2912,10 @@ def create_app() -> Flask:
         avg_price = _parse_form_float(form.get("avg_price"))
         is_simulated = form.get("is_simulated") == "1"
         notes = (form.get("notes") or "").strip() or None
-        event_date = _parse_form_date(form.get("event_date")) or datetime.date.today().isoformat()
+        event_date = (
+            _parse_form_date(form.get("event_date"))
+            or datetime.date.today().isoformat()
+        )
         try:
             snapshot = upsert_holding(
                 ticker=ticker,
@@ -2852,7 +2934,11 @@ def create_app() -> Flask:
                 )
             )
         mode_label = "simulado" if is_simulated else "real"
-        avg_display = float(snapshot.get("avg_price") or 0.0) if int(snapshot.get("shares_total") or 0) > 0 else 0.0
+        avg_display = (
+            float(snapshot.get("avg_price") or 0.0)
+            if int(snapshot.get("shares_total") or 0) > 0
+            else 0.0
+        )
         return redirect(
             url_for(
                 "covered_call",

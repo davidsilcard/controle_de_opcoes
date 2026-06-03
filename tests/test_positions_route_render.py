@@ -10,6 +10,12 @@ def test_positions_route_always_injects_realized_summary(monkeypatch) -> None:
         lambda _position_ids: set(),
     )
     monkeypatch.setattr(
+        "opcoes.web.finance.get_ledger_sums_by_position",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr("opcoes.web.list_holding_snapshots", lambda **_kwargs: [])
+    monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
+    monkeypatch.setattr(
         "opcoes.web.summarize_realized_positions",
         lambda **_kwargs: {
             "available_years": [],
