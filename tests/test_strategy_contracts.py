@@ -785,7 +785,7 @@ def test_strategy_contract_audit_preserves_core_blocks(monkeypatch) -> None:
             }
         },
     )
-    monkeypatch.setattr("opcoes.web.build_position_tax_events", lambda _pos: [])
+    monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
 
     app = create_app()
     app.testing = True
@@ -797,4 +797,6 @@ def test_strategy_contract_audit_preserves_core_blocks(monkeypatch) -> None:
     assert "Auditoria Caixa x Posições" in html
     assert "Estoque consolidado por ativo" in html
     assert "Líquido fiscal (Prêmio + DARF)" in html
+    assert "Compra de opção (Ranking)" in html
+    assert "Venda por exercicio de CALL" in html
     assert "Resultado realizado (nao caixa)" in html

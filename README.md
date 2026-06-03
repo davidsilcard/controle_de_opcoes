@@ -293,6 +293,8 @@ Atualizacao parcial da interface:
 - a tela `Cash-Covered Put` agora ganhou um `Filtro rapido` com o mesmo padrao visual da `Covered Call`, listando apenas ativos com puts abertas e sinalizando cada um com selo `Aberta`.
 - a tela `Posicoes` agora tem auditoria propria no bloco dinamico: ela compoe os guards de `cash_put`, `covered_call` e `ranking`, e adiciona regras transversais para impedir posicao fechada sem data, motivo ou preco sem justificativa objetiva.
 - consolidacoes tecnicas de estoque em `Covered Call`, como lote legado baixado por exercicio de CALL em outra posicao, so deixam de gerar alerta quando a posicao estiver documentada como consolidada e existir SELL real associado a CALL exercida no mesmo ativo/data.
+- a tela `Auditoria` agora separa `BUY` de opcao comprada (`Ranking`) de `BUY` de recompra de opcao vendida, evitando classificar compra de CALL/PUT como recompra.
+- a tela `Auditoria` agora reconcilia `SELL` no exercicio de `Covered Call`; quando a CALL e exercida, a venda das acoes precisa aparecer no ledger e bater com o evento de estoque `CALL_EXERCISE`.
 - os paineis principais agora mostram explicitamente que os precos usados nessas abas sao `Snapshot`, preservando a leitura didatica e evitando prometer cotacao ao vivo que nao e confiavel para opcoes.
 - quando o gateway informar timestamps com sufixo UTC (`Z`), a UI converte a exibicao para `America/Sao_Paulo`; o valor bruto do provider continua visivel para auditoria.
 
@@ -1104,6 +1106,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - a aba `Ranking` passa a se denunciar quando uma opcao comprada nao tem compra registrada no ledger ou quando o cadastro deixa de parecer uma opcao comprada valida.
 - a aba `Posicoes` agora tem guarda transversal isolada em `opcoes/positions_guard.py`: denuncia data invalida, status incoerente, posicao aberta com campos de saida, posicao fechada sem data/motivo/preco e divergencias herdadas dos guards das estrategias.
 - a excecao para posicao de estoque fechada sem preco e restrita a consolidacao tecnica documentada de `Covered Call`, quando outra CALL exercida do mesmo ativo/data ja registrou o SELL economico no ledger. Sem essa prova, o sistema pede nota/preco e nao presume o resultado.
+- a aba `Auditoria` agora usa reconciliacao isolada em `opcoes/audit_reconciliation.py`: confere premio, DARF, recompra, compra de opcao comprada, ASSIGN de PUT, SELL de CALL exercida e resultado realizado sem misturar significados.
+- divergencias da `Auditoria` passam a aparecer como alertas de regra no topo da tela, em vez de ficarem apenas como numeros vermelhos na tabela larga.
 - higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.
 - README agora documenta `db optimize` para criar os indices recomendados apos bootstrap ou migracao.

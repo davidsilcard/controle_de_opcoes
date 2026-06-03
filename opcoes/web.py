@@ -88,6 +88,7 @@ from .covered_call_guard import (
 )
 from .ranking_guard import RankingValidationError, validate_ranking_option_input
 from .positions_guard import audit_positions_page
+from .audit_reconciliation import build_audit_reconciliation
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -117,7 +118,6 @@ from .perf import (
 )
 from . import finance, darf
 from .tax import (
-    build_position_tax_events,
     compute_tax,
     list_monthly_tax_summaries,
     list_tax_events_for_period,
@@ -2084,317 +2084,27 @@ def create_app() -> Flask:
                 finance.TransactionType.PREMIUM,
                 finance.TransactionType.DARF,
                 finance.TransactionType.BUY,
+                finance.TransactionType.SELL,
                 finance.TransactionType.ASSIGNMENT,
                 finance.TransactionType.REALIZED,
             ],
             is_simulated=is_simulated,
         )
-
-        def _money_diff(
-            actual: Optional[float], expected: Optional[float]
-        ) -> Optional[float]:
-            if actual is None and expected is None:
-                return None
-            return round(float(actual or 0.0) - float(expected or 0.0), 2)
-
-        rows = []
-        totals = {
-            "expected_premium": 0.0,
-            "expected_darf": 0.0,
-            "expected_buyback": 0.0,
-            "actual_premium": 0.0,
-            "actual_darf": 0.0,
-            "actual_buyback": 0.0,
-            "expected_net": 0.0,
-            "actual_net": 0.0,
-            "expected_cash_net": 0.0,
-            "actual_cash_net": 0.0,
-            "expected_assignment": 0.0,
-            "actual_assignment": 0.0,
-            "expected_total_cash": 0.0,
-            "actual_total_cash": 0.0,
-            "expected_realized": 0.0,
-            "actual_realized": 0.0,
-        }
-
-        for pos in positions_all:
-            if (
-                not include_closed
-                and (pos.get("status") or "").strip().lower() == "closed"
-            ):
-                continue
-
-            pid = int(pos.get("id") or 0)
-            ticker = (pos.get("ticker") or "").strip()
-            underlying = (pos.get("underlying") or "").strip()
-            is_option = _is_option_ticker(ticker)
-            side = (pos.get("side") or "").strip().lower()
-            trade_type = (pos.get("trade_type") or "swing").strip().lower()
-            entry_price = float(pos.get("entry_price") or 0.0)
-            qty = int(pos.get("qty") or 0)
-            fees = float(pos.get("fees") or 0.0)
-            partial_qty = int(pos.get("partial_qty") or 0)
-            close_qty = max(qty - partial_qty, 0)
-            status_norm = (pos.get("status") or "").strip().lower()
-            exit_price_raw = pos.get("exit_price")
-            exit_price = float(exit_price_raw) if exit_price_raw is not None else None
-            is_simulated_pos = bool(pos.get("is_simulated"))
-
-            expected_premium = None
-            expected_darf = None
-            expected_buyback = None
-            expected_assignment = None
-            expected_realized = None
-            assignment_stock_ticker = None
-            assignment_stock_qty = 0
-            assignment_stock_price = None
-            realized_events = build_position_tax_events(pos)
-            if realized_events:
-                expected_realized = round(
-                    sum(float(event.amount) for event in realized_events),
-                    2,
-                )
-            if is_option and side == "short":
-                expected_premium = finance.calculate_option_premium(
-                    entry_price=entry_price,
-                    qty=qty,
-                    fees=fees,
-                )
-                expected_darf = finance.calculate_darf_provision(
-                    premium_amount=expected_premium,
-                    trade_type=trade_type,
-                )
-                if status_norm == "closed" and exit_price is not None and close_qty > 0:
-                    expected_buyback = -round(float(exit_price) * int(close_qty), 2)
-                if (
-                    infer_option_type(ticker) == "PUT"
-                    and status_norm == "closed"
-                    and "exerc" in ((pos.get("exit_reason") or "").strip().lower())
-                ):
-                    holding_events = list_holding_events(
-                        ticker=underlying,
-                        event_type="PUT_ASSIGNMENT",
-                        is_simulated=is_simulated_pos,
-                        related_position_id=pid,
-                        limit=1,
-                    )
-                    if holding_events:
-                        event = holding_events[0]
-                        assignment_stock_qty = int(event.get("qty_delta") or 0)
-                        assignment_stock_ticker = event.get("ticker") or underlying
-                        assignment_stock_price = (
-                            event.get("price_reference")
-                            if event.get("price_reference") is not None
-                            else event.get("avg_price_after")
-                        )
-                        if (
-                            assignment_stock_qty > 0
-                            and assignment_stock_price is not None
-                        ):
-                            expected_assignment = -round(
-                                float(assignment_stock_price) * assignment_stock_qty,
-                                2,
-                            )
-                    else:
-                        matching_inventory = [
-                            item
-                            for item in inventory_summary
-                            if item.get("ticker") == (underlying or "").strip().upper()
-                            and bool(item.get("is_simulated")) == is_simulated_pos
-                        ]
-                        if matching_inventory:
-                            matched = matching_inventory[0]
-                            assignment_stock_qty = int(matched.get("shares_total") or 0)
-                            assignment_stock_ticker = matched.get("ticker")
-                            assignment_stock_price = matched.get("avg_price")
-                            if (
-                                assignment_stock_qty > 0
-                                and assignment_stock_price is not None
-                            ):
-                                expected_assignment = -round(
-                                    float(assignment_stock_price)
-                                    * assignment_stock_qty,
-                                    2,
-                                )
-
-            actual_premium = ledger_sums.get(pid, {}).get(
-                finance.TransactionType.PREMIUM.value
-            )
-            actual_darf = ledger_sums.get(pid, {}).get(
-                finance.TransactionType.DARF.value
-            )
-            actual_buyback = ledger_sums.get(pid, {}).get(
-                finance.TransactionType.BUY.value
-            )
-            actual_assignment = ledger_sums.get(pid, {}).get(
-                finance.TransactionType.ASSIGNMENT.value
-            )
-            actual_realized = ledger_sums.get(pid, {}).get(
-                finance.TransactionType.REALIZED.value
-            )
-
-            if (
-                expected_premium is None
-                and actual_premium is None
-                and actual_darf is None
-                and expected_buyback is None
-                and actual_buyback is None
-                and expected_assignment is None
-                and actual_assignment is None
-                and expected_realized is None
-                and actual_realized is None
-            ):
-                continue
-
-            expected_net = None
-            actual_net = None
-            expected_cash_net = None
-            actual_cash_net = None
-            expected_total_cash = None
-            actual_total_cash = None
-            if (
-                expected_premium is not None
-                or expected_darf is not None
-                or expected_buyback is not None
-                or expected_assignment is not None
-            ):
-                expected_net = float(expected_premium or 0.0) + float(
-                    expected_darf or 0.0
-                )
-                expected_cash_net = expected_net + float(expected_buyback or 0.0)
-                expected_total_cash = expected_cash_net + float(
-                    expected_assignment or 0.0
-                )
-            if (
-                actual_premium is not None
-                or actual_darf is not None
-                or actual_buyback is not None
-                or actual_assignment is not None
-            ):
-                actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
-                actual_cash_net = actual_net + float(actual_buyback or 0.0)
-                actual_total_cash = actual_cash_net + float(actual_assignment or 0.0)
-
-            rows.append(
-                {
-                    "id": pid,
-                    "ticker": ticker,
-                    "underlying": underlying,
-                    "side": side,
-                    "status": pos.get("status"),
-                    "qty": qty,
-                    "entry_price": entry_price,
-                    "fees": fees,
-                    "trade_type": trade_type,
-                    "expected_premium": expected_premium,
-                    "expected_darf": expected_darf,
-                    "expected_buyback": expected_buyback,
-                    "expected_assignment": expected_assignment,
-                    "expected_realized": expected_realized,
-                    "actual_premium": actual_premium,
-                    "actual_darf": actual_darf,
-                    "actual_buyback": actual_buyback,
-                    "actual_assignment": actual_assignment,
-                    "actual_realized": actual_realized,
-                    "diff_premium": _money_diff(actual_premium, expected_premium),
-                    "diff_darf": _money_diff(actual_darf, expected_darf),
-                    "diff_buyback": _money_diff(actual_buyback, expected_buyback),
-                    "diff_assignment": _money_diff(
-                        actual_assignment, expected_assignment
-                    ),
-                    "diff_realized": _money_diff(actual_realized, expected_realized),
-                    "expected_net": expected_net,
-                    "actual_net": actual_net,
-                    "diff_net": _money_diff(actual_net, expected_net),
-                    "expected_cash_net": expected_cash_net,
-                    "actual_cash_net": actual_cash_net,
-                    "diff_cash_net": _money_diff(actual_cash_net, expected_cash_net),
-                    "expected_total_cash": expected_total_cash,
-                    "actual_total_cash": actual_total_cash,
-                    "diff_total_cash": _money_diff(
-                        actual_total_cash, expected_total_cash
-                    ),
-                    "assignment_stock_ticker": assignment_stock_ticker,
-                    "assignment_stock_qty": assignment_stock_qty,
-                    "assignment_stock_price": assignment_stock_price,
-                }
-            )
-
-            if expected_premium is not None:
-                totals["expected_premium"] += float(expected_premium or 0.0)
-            if expected_darf is not None:
-                totals["expected_darf"] += float(expected_darf or 0.0)
-            if expected_buyback is not None:
-                totals["expected_buyback"] += float(expected_buyback or 0.0)
-            if actual_premium is not None:
-                totals["actual_premium"] += float(actual_premium or 0.0)
-            if actual_darf is not None:
-                totals["actual_darf"] += float(actual_darf or 0.0)
-            if actual_buyback is not None:
-                totals["actual_buyback"] += float(actual_buyback or 0.0)
-            if expected_assignment is not None:
-                totals["expected_assignment"] += float(expected_assignment or 0.0)
-            if actual_assignment is not None:
-                totals["actual_assignment"] += float(actual_assignment or 0.0)
-            if expected_realized is not None:
-                totals["expected_realized"] += float(expected_realized or 0.0)
-            if actual_realized is not None:
-                totals["actual_realized"] += float(actual_realized or 0.0)
-
-        totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
-        totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
-        totals["expected_cash_net"] = (
-            totals["expected_net"] + totals["expected_buyback"]
+        audit_context = build_audit_reconciliation(
+            positions_all,
+            ledger_sums=ledger_sums,
+            include_closed=include_closed,
+            holding_events=list_holding_events(limit=1000),
         )
-        totals["actual_cash_net"] = totals["actual_net"] + totals["actual_buyback"]
-        totals["expected_total_cash"] = (
-            totals["expected_cash_net"] + totals["expected_assignment"]
-        )
-        totals["actual_total_cash"] = (
-            totals["actual_cash_net"] + totals["actual_assignment"]
-        )
-
-        position_ids = {int(p.get("id") or 0) for p in positions_all}
-        orphan_rows = [
-            {
-                "id": pid,
-                "actual_premium": sums.get(finance.TransactionType.PREMIUM.value),
-                "actual_darf": sums.get(finance.TransactionType.DARF.value),
-                "actual_buyback": sums.get(finance.TransactionType.BUY.value),
-                "actual_assignment": sums.get(finance.TransactionType.ASSIGNMENT.value),
-                "actual_realized": sums.get(finance.TransactionType.REALIZED.value),
-                "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
-                + (sums.get(finance.TransactionType.DARF.value) or 0.0),
-                "actual_cash_net": (
-                    sums.get(finance.TransactionType.PREMIUM.value) or 0.0
-                )
-                + (sums.get(finance.TransactionType.DARF.value) or 0.0)
-                + (sums.get(finance.TransactionType.BUY.value) or 0.0),
-                "actual_total_cash": (
-                    (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
-                    + (sums.get(finance.TransactionType.DARF.value) or 0.0)
-                    + (sums.get(finance.TransactionType.BUY.value) or 0.0)
-                    + (sums.get(finance.TransactionType.ASSIGNMENT.value) or 0.0)
-                ),
-            }
-            for pid, sums in ledger_sums.items()
-            if pid not in position_ids
-            and (
-                sums.get(finance.TransactionType.PREMIUM.value) is not None
-                or sums.get(finance.TransactionType.DARF.value) is not None
-                or sums.get(finance.TransactionType.BUY.value) is not None
-                or sums.get(finance.TransactionType.ASSIGNMENT.value) is not None
-                or sums.get(finance.TransactionType.REALIZED.value) is not None
-            )
-        ]
 
         return render_template(
             "audit.html",
-            rows=rows,
-            totals=totals,
+            rows=audit_context["rows"],
+            totals=audit_context["totals"],
             mode=mode,
             include_closed=include_closed,
-            orphan_rows=orphan_rows,
+            orphan_rows=audit_context["orphan_rows"],
+            audit_issues=audit_context["audit_issues"],
             inventory_summary=inventory_summary,
         )
 
