@@ -1098,6 +1098,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - a aba `Covered Call` passa a se denunciar quando encontrar premio, recompra, exercicio, baixa de estoque, resultado realizado, duplicidade ou lote legado aberto divergente.
 - `Aposta / Ranking` agora registra automaticamente o `BUY` de entrada para opcao comprada e ressincroniza esse lançamento ao editar preço, quantidade ou taxa, sem duplicar caixa.
 - em opcao comprada ja encerrada, o `BUY` de entrada fica separado dos custos de fechamento; as taxas de venda continuam abatendo o resultado realizado, evitando falso alerta em operacoes como compra e venda posterior da mesma CALL.
+- a aba `Ranking` agora mostra um quadro de lucros e prejuizos para compras de CALL/PUT: resultado realizado, lucros, prejuizos, capital ainda em risco nas opcoes abertas e ultimas operacoes por tipo.
 - a aba `Ranking` passa a se denunciar quando uma opcao comprada nao tem compra registrada no ledger ou quando o cadastro deixa de parecer uma opcao comprada valida.
 - higiene de repositório reforçada para ignorar artefatos locais de `.agents/` e temporários de teste, evitando ruído no Git e no VS Code.
 - autenticacao web agora fica em schema dedicado de auth, com provisionamento via `user invite`/`user bootstrap`, `auth.web_users` incluido no `db migrate` e TTL configuravel para senha temporaria.

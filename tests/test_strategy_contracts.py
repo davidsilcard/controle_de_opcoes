@@ -269,6 +269,71 @@ def test_strategy_contract_ranking_preserves_core_blocks(monkeypatch) -> None:
                 "alavancagem": [{**opp, "ticker": "PETRA998", "Status_Moneyness": "ATM"}],
                 "aposta": [{**opp, "ticker": "PETRA997", "Status_Moneyness": "OTM"}],
             },
+            "ranking_options_pnl": {
+                "has_rows": True,
+                "closed_count": 1,
+                "open_count": 1,
+                "open_cost": 233.0,
+                "closed_entry_cost": 195.0,
+                "realized": 1003.4,
+                "profit": 1003.4,
+                "loss": 0.0,
+                "win_rate_pct": 100.0,
+                "by_type": {
+                    "CALL": {
+                        "closed_count": 1,
+                        "open_count": 1,
+                        "open_cost": 233.0,
+                        "realized": 1003.4,
+                        "profit": 1003.4,
+                        "loss": 0.0,
+                    },
+                    "PUT": {
+                        "closed_count": 0,
+                        "open_count": 0,
+                        "open_cost": 0.0,
+                        "realized": 0.0,
+                        "profit": 0.0,
+                        "loss": 0.0,
+                    },
+                },
+                "closed_rows": [
+                    {
+                        "id": 6,
+                        "ticker": "PETRA456",
+                        "underlying": "PETR4",
+                        "option_type": "CALL",
+                        "trade_date": "2025-11-19",
+                        "qty": 100,
+                        "entry_price": 1.95,
+                        "entry_cost": 195.0,
+                        "status": "closed",
+                        "exit_date": "2026-03-30",
+                        "exit_price": 12.0,
+                        "exit_reason": "venda_encerramento",
+                        "realized": 1003.4,
+                        "result_class": "profit",
+                    }
+                ],
+                "open_rows": [
+                    {
+                        "id": 5,
+                        "ticker": "ITUBE542",
+                        "underlying": "ITUB4",
+                        "option_type": "CALL",
+                        "trade_date": "2025-11-19",
+                        "qty": 100,
+                        "entry_price": 2.33,
+                        "entry_cost": 233.0,
+                        "status": "open",
+                        "exit_date": "",
+                        "exit_price": None,
+                        "exit_reason": "",
+                        "realized": 0.0,
+                        "result_class": "flat",
+                    }
+                ],
+            },
         },
     )
     app = create_app()
@@ -285,6 +350,8 @@ def test_strategy_contract_ranking_preserves_core_blocks(monkeypatch) -> None:
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Top oportunidades" in html
+    assert "Lucros e prejuízos - opções compradas" in html
+    assert "PETRA456" in html
     assert "Top Apostas Racionais" in html
     assert "Top Loterias" in html
     assert "Watchlist (sem book" in html

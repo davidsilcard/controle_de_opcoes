@@ -20,6 +20,143 @@
     {% endif %}
   </div>
 {% endif %}
+{% set pnl = ranking_options_pnl if ranking_options_pnl is defined else none %}
+{% if pnl and pnl.has_rows %}
+  <section class="mb-4" aria-labelledby="ranking-options-pnl-title">
+    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+      <div>
+        <h2 id="ranking-options-pnl-title" class="h5 mb-1">Lucros e prejuízos - opções compradas</h2>
+        <div class="text-muted small">Somente operações `Ranking` compradas em CALL/PUT. Resultado fechado vem do ledger `REALIZED`.</div>
+      </div>
+      {% if pnl.win_rate_pct is not none %}
+        <span class="badge text-bg-light border">Acerto: {{ "%.1f"|format(pnl.win_rate_pct) }}%</span>
+      {% endif %}
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+          <div class="card-body py-2">
+            <div class="text-muted small">Resultado realizado</div>
+            <div class="h5 mb-0 {% if pnl.realized > 0 %}text-success{% elif pnl.realized < 0 %}text-danger{% endif %}">
+              R$ {{ "%.2f"|format(pnl.realized) }}
+            </div>
+            <div class="small text-muted">{{ pnl.closed_count }} operação(ões) encerrada(s)</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+          <div class="card-body py-2">
+            <div class="text-muted small">Lucros realizados</div>
+            <div class="h5 mb-0 text-success">R$ {{ "%.2f"|format(pnl.profit) }}</div>
+            <div class="small text-muted">Soma dos encerramentos positivos</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+          <div class="card-body py-2">
+            <div class="text-muted small">Prejuízos realizados</div>
+            <div class="h5 mb-0 text-danger">R$ {{ "%.2f"|format(pnl.loss|abs) }}</div>
+            <div class="small text-muted">Soma dos encerramentos negativos</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+          <div class="card-body py-2">
+            <div class="text-muted small">Capital em risco aberto</div>
+            <div class="h5 mb-0">R$ {{ "%.2f"|format(pnl.open_cost) }}</div>
+            <div class="small text-muted">{{ pnl.open_count }} posição(ões) aberta(s)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row g-2 mb-3">
+      {% for opt_type, item in pnl.by_type.items() %}
+        <div class="col-md-6">
+          <div class="border rounded bg-white p-2 h-100">
+            <div class="d-flex align-items-center justify-content-between">
+              <div class="fw-semibold">{{ opt_type }}</div>
+              <div class="{% if item.realized > 0 %}text-success{% elif item.realized < 0 %}text-danger{% endif %} fw-semibold">
+                R$ {{ "%.2f"|format(item.realized) }}
+              </div>
+            </div>
+            <div class="small text-muted">
+              {{ item.closed_count }} fechada(s), {{ item.open_count }} aberta(s), R$ {{ "%.2f"|format(item.open_cost) }} em aberto.
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    {% if pnl.closed_rows %}
+      <h3 class="h6 mt-3">Encerradas</h3>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Ticker</th>
+              <th>Tipo</th>
+              <th>Ativo</th>
+              <th>Entrada</th>
+              <th>Saída</th>
+              <th class="text-end">Qtd</th>
+              <th class="text-end">Custo</th>
+              <th class="text-end">Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in pnl.closed_rows %}
+              <tr>
+                <td>{{ row.ticker }}</td>
+                <td>{{ row.option_type }}</td>
+                <td>{{ row.underlying }}</td>
+                <td>{{ row.trade_date or '-' }}</td>
+                <td>{{ row.exit_date or '-' }}</td>
+                <td class="text-end">{{ row.qty }}</td>
+                <td class="text-end">R$ {{ "%.2f"|format(row.entry_cost) }}</td>
+                <td class="text-end fw-semibold {% if row.realized > 0 %}text-success{% elif row.realized < 0 %}text-danger{% endif %}">
+                  R$ {{ "%.2f"|format(row.realized) }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+    {% if pnl.open_rows %}
+      <h3 class="h6 mt-3">Abertas</h3>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Ticker</th>
+              <th>Tipo</th>
+              <th>Ativo</th>
+              <th>Entrada</th>
+              <th class="text-end">Qtd</th>
+              <th class="text-end">Preço</th>
+              <th class="text-end">Custo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in pnl.open_rows %}
+              <tr>
+                <td>{{ row.ticker }}</td>
+                <td>{{ row.option_type }}</td>
+                <td>{{ row.underlying }}</td>
+                <td>{{ row.trade_date or '-' }}</td>
+                <td class="text-end">{{ row.qty }}</td>
+                <td class="text-end">R$ {{ "%.2f"|format(row.entry_price) }}</td>
+                <td class="text-end">R$ {{ "%.2f"|format(row.entry_cost) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
 <h2 class="h5 mt-4">Top oportunidades</h2>
       <p class="text-muted small">
         IV impl = última do book; IV Rank = faixa 180d; HV (21/63/126/252) = vol. hist. a partir dos snapshots diários.

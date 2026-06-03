@@ -164,6 +164,144 @@ def _build_book_availability(
     }
 
 
+def _empty_ranking_options_pnl() -> Dict[str, Any]:
+    by_type = {
+        "CALL": {
+            "closed_count": 0,
+            "open_count": 0,
+            "open_cost": 0.0,
+            "realized": 0.0,
+            "profit": 0.0,
+            "loss": 0.0,
+        },
+        "PUT": {
+            "closed_count": 0,
+            "open_count": 0,
+            "open_cost": 0.0,
+            "realized": 0.0,
+            "profit": 0.0,
+            "loss": 0.0,
+        },
+    }
+    return {
+        "has_rows": False,
+        "closed_count": 0,
+        "open_count": 0,
+        "open_cost": 0.0,
+        "closed_entry_cost": 0.0,
+        "realized": 0.0,
+        "profit": 0.0,
+        "loss": 0.0,
+        "win_rate_pct": None,
+        "by_type": by_type,
+        "closed_rows": [],
+        "open_rows": [],
+    }
+
+
+def build_ranking_options_pnl_summary(
+    positions: List[Mapping[str, Any]],
+    *,
+    ledger_sums: Mapping[int, Mapping[str, float]],
+    option_type_filter: str = "",
+    underlying_filter: str = "",
+    row_limit: int = 12,
+) -> Dict[str, Any]:
+    summary = _empty_ranking_options_pnl()
+    type_filter = (option_type_filter or "").strip().upper()
+    underlying_target = (underlying_filter or "").strip().upper()
+
+    for pos in positions:
+        if str(pos.get("strategy_tag") or "").strip().lower() != "ranking":
+            continue
+        if str(pos.get("side") or "").strip().lower() != "long":
+            continue
+
+        ticker = str(pos.get("ticker") or "").strip().upper()
+        option_type = infer_option_type(ticker)
+        if option_type not in {"CALL", "PUT"}:
+            continue
+        if type_filter and option_type != type_filter:
+            continue
+
+        underlying = str(pos.get("underlying") or "").strip().upper()
+        if underlying_target and underlying_target not in underlying and underlying_target not in ticker:
+            continue
+
+        pid = int(pos.get("id") or 0)
+        qty = int(pos.get("qty") or 0)
+        entry_price = float(pos.get("entry_price") or 0.0)
+        status = str(pos.get("status") or "").strip().lower()
+        sums = ledger_sums.get(pid, {})
+
+        expected_buy = round(
+            finance.calculate_option_purchase(
+                entry_price=entry_price,
+                qty=qty,
+                fees=finance.long_option_entry_buy_fees(pos),
+            ),
+            2,
+        )
+        buy_amount = float(sums.get(finance.TransactionType.BUY.value) or expected_buy)
+        entry_cost = abs(round(buy_amount, 2))
+        realized = round(float(sums.get(finance.TransactionType.REALIZED.value) or 0.0), 2)
+        row = {
+            "id": pid,
+            "ticker": ticker,
+            "underlying": underlying,
+            "option_type": option_type,
+            "trade_date": str(pos.get("trade_date") or ""),
+            "qty": qty,
+            "entry_price": entry_price,
+            "entry_cost": entry_cost,
+            "status": status,
+            "exit_date": str(pos.get("exit_date") or ""),
+            "exit_price": pos.get("exit_price"),
+            "exit_reason": str(pos.get("exit_reason") or ""),
+            "realized": realized,
+            "result_class": "profit" if realized > 0 else ("loss" if realized < 0 else "flat"),
+        }
+
+        summary["has_rows"] = True
+        bucket = summary["by_type"][option_type]
+        if status == "closed":
+            summary["closed_count"] += 1
+            summary["closed_entry_cost"] = round(float(summary["closed_entry_cost"]) + entry_cost, 2)
+            summary["realized"] = round(float(summary["realized"]) + realized, 2)
+            bucket["closed_count"] += 1
+            bucket["realized"] = round(float(bucket["realized"]) + realized, 2)
+            if realized > 0:
+                summary["profit"] = round(float(summary["profit"]) + realized, 2)
+                bucket["profit"] = round(float(bucket["profit"]) + realized, 2)
+            elif realized < 0:
+                summary["loss"] = round(float(summary["loss"]) + realized, 2)
+                bucket["loss"] = round(float(bucket["loss"]) + realized, 2)
+            summary["closed_rows"].append(row)
+        else:
+            summary["open_count"] += 1
+            summary["open_cost"] = round(float(summary["open_cost"]) + entry_cost, 2)
+            bucket["open_count"] += 1
+            bucket["open_cost"] = round(float(bucket["open_cost"]) + entry_cost, 2)
+            summary["open_rows"].append(row)
+
+    closed_count = int(summary["closed_count"] or 0)
+    if closed_count:
+        winning = sum(1 for row in summary["closed_rows"] if row["realized"] > 0)
+        summary["win_rate_pct"] = round(winning / closed_count * 100.0, 1)
+
+    summary["closed_rows"].sort(
+        key=lambda row: (row.get("exit_date") or "", int(row.get("id") or 0)),
+        reverse=True,
+    )
+    summary["open_rows"].sort(
+        key=lambda row: (row.get("trade_date") or "", int(row.get("id") or 0)),
+        reverse=True,
+    )
+    summary["closed_rows"] = summary["closed_rows"][: max(int(row_limit or 0), 0)]
+    summary["open_rows"] = summary["open_rows"][: max(int(row_limit or 0), 0)]
+    return summary
+
+
 def calculate_ranking_strategy(
     data: ReportData,
     min_score: int,
@@ -251,6 +389,7 @@ def calculate_ranking_strategy(
         "segments": segments,
         "book_availability": book_availability,
         "ranking_audit_issues": [],
+        "ranking_options_pnl": _empty_ranking_options_pnl(),
     }
 
 
@@ -378,14 +517,22 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             option_type_filter=option_type_filter,
         )
     with timed_stage("ranking.audit"):
+        audit_positions = list_positions(include_closed=True)
+        ledger_sums = finance.get_ledger_sums_by_position(
+            types=[
+                finance.TransactionType.BUY,
+                finance.TransactionType.REALIZED,
+            ]
+        )
         ctx["ranking_audit_issues"] = audit_ranking_positions(
-            list_positions(include_closed=True),
-            ledger_sums=finance.get_ledger_sums_by_position(
-                types=[
-                    finance.TransactionType.BUY,
-                    finance.TransactionType.REALIZED,
-                ]
-            ),
+            audit_positions,
+            ledger_sums=ledger_sums,
+        )
+        ctx["ranking_options_pnl"] = build_ranking_options_pnl_summary(
+            audit_positions,
+            ledger_sums=ledger_sums,
+            option_type_filter=option_type_filter,
+            underlying_filter=underlying_filter,
         )
     if empty_state_message:
         ctx["empty_state_message"] = empty_state_message
