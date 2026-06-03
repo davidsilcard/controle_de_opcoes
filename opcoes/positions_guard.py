@@ -129,6 +129,13 @@ def _is_documented_technical_consolidation(
     )
 
 
+def _is_zero_price_option_close(pos: Mapping[str, Any]) -> bool:
+    if infer_option_type(_norm_upper(pos.get("ticker"))) not in {"CALL", "PUT"}:
+        return False
+    reason = _norm_lower(pos.get("exit_reason"))
+    return "expira" in reason or "exerc" in reason
+
+
 def audit_positions_page(
     positions: Sequence[Mapping[str, Any]],
     *,
@@ -203,6 +210,8 @@ def audit_positions_page(
                 "Posicao fechada precisa informar o motivo da baixa.",
             )
         if _money_or_none(pos.get("exit_price")) is None:
+            if _is_zero_price_option_close(pos):
+                continue
             if not _is_documented_technical_consolidation(
                 pos,
                 positions=positions,

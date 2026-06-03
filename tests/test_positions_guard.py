@@ -92,6 +92,40 @@ def test_positions_guard_flags_closed_position_without_exit_price() -> None:
     ]
 
 
+def test_positions_guard_allows_option_expiration_without_exit_price() -> None:
+    positions = [
+        {
+            "id": 44,
+            "ticker": "BBASP226",
+            "underlying": "BBAS3",
+            "trade_date": "2026-03-23",
+            "qty": 400,
+            "entry_price": 0.20,
+            "fees": 0.19,
+            "trade_type": "swing",
+            "side": "short",
+            "status": "closed",
+            "exit_date": "2026-04-17",
+            "exit_price": None,
+            "exit_reason": "Expiracao",
+            "strategy_tag": "cash_put",
+            "is_simulated": 0,
+        }
+    ]
+
+    issues = audit_positions_page(
+        positions,
+        ledger_sums={
+            44: {
+                finance.TransactionType.PREMIUM.value: 79.81,
+                finance.TransactionType.REALIZED.value: 79.81,
+            }
+        },
+    )
+
+    assert not issues
+
+
 def test_positions_guard_flags_open_position_with_exit_fields() -> None:
     positions = [
         {
