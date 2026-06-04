@@ -111,6 +111,8 @@ def test_positions_route_renders_live_market_status(monkeypatch) -> None:
     assert 'data-live-scope="positions"' not in html
     assert "Tabela editável de posições" in html
     assert 'action="/positions/update/7"' in html
+    assert 'name="strategy_tag" value="covered_call"' in html
+    assert 'title="Campo protegido pela estrategia."' in html
 
 
 def test_positions_partial_live_renders_table(monkeypatch) -> None:

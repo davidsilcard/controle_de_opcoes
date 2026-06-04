@@ -88,6 +88,7 @@ from .covered_call_guard import (
 )
 from .ranking_guard import RankingValidationError, validate_ranking_option_input
 from .positions_guard import audit_positions_page
+from .strategy_contracts import StrategyContractError, validate_position_identity_update
 from .audit_reconciliation import build_audit_reconciliation
 from .holdings import (
     HoldingValidationError,
@@ -2432,6 +2433,9 @@ def create_app() -> Flask:
     @app.post("/positions/update/<int:position_id>")
     def update_position_view(position_id: int):
         form = request.form
+        persisted_pos = get_position(position_id)
+        if not persisted_pos:
+            return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
         status = (form.get("status") or "").strip() or None
         ticker = (form.get("ticker") or "").strip()
         side_raw = form.get("side") or None
@@ -2477,6 +2481,35 @@ def create_app() -> Flask:
             exit_date = None
             exit_price = None
             exit_reason = None
+        proposed_identity = {
+            "ticker": ticker,
+            "underlying": underlying,
+            "trade_date": trade_date or form.get("trade_date") or None,
+            "qty": int(form["qty"]) if form.get("qty") else None,
+            "entry_price": (
+                _parse_form_float(form.get("entry_price"))
+                if form.get("entry_price")
+                else None
+            ),
+            "trade_type": form.get("trade_type") or None,
+            "side": side_raw,
+            "strategy_tag": (strategy_tag_raw or "").strip() or None,
+            "is_simulated": is_simulated,
+            "parent_position_id": parent_id,
+        }
+        try:
+            validate_position_identity_update(
+                existing=persisted_pos,
+                proposed=proposed_identity,
+            )
+        except StrategyContractError as exc:
+            return redirect(
+                url_for(
+                    "positions",
+                    strategy_tag=(persisted_pos.get("strategy_tag") or "").strip(),
+                    position_error=str(exc),
+                )
+            )
         try:
             validate_cash_put_input(
                 ticker=ticker,
@@ -2526,7 +2559,6 @@ def create_app() -> Flask:
                 )
             )
         try:
-            persisted_pos = get_position(position_id)
             _validate_covered_call_stock(
                 ticker=ticker,
                 underlying=underlying,
