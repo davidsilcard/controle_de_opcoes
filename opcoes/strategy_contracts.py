@@ -42,6 +42,23 @@ def is_protected_strategy(value: Any) -> bool:
     return normalize_strategy(value) in PROTECTED_STRATEGIES
 
 
+def _norm_reason(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return (
+        text.replace("í", "i")
+        .replace("ç", "c")
+        .replace("ã", "a")
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("ê", "e")
+    )
+
+
+def _is_exercise_reason(value: Any) -> bool:
+    reason = _norm_reason(value)
+    return "exerc" in reason
+
+
 def _empty(value: Any) -> bool:
     return value is None or str(value).strip() == ""
 
@@ -128,4 +145,34 @@ def validate_position_identity_update(
         "A aba Posicoes bloqueou a alteracao de campos estruturais "
         f"({changed_display}) de uma operacao com estrategia. "
         "Use o fluxo da propria estrategia ou um ajuste manual supervisionado."
+    )
+
+
+def validate_position_closure_update(
+    *,
+    existing: dict[str, Any] | None,
+    proposed: dict[str, Any],
+) -> None:
+    """Bloqueia encerramentos que exigem fluxo transacional de estrategia."""
+
+    if not existing:
+        return
+
+    strategy = normalize_strategy(existing.get("strategy_tag"))
+    if strategy not in {"cash_put", "covered_call"}:
+        return
+
+    old_status = str(existing.get("status") or "").strip().lower()
+    new_status = str(proposed.get("status") or "").strip().lower()
+    if old_status != "open" or new_status != "closed":
+        return
+
+    if not _is_exercise_reason(proposed.get("exit_reason")):
+        return
+
+    strategy_label = "Cash-Covered Put" if strategy == "cash_put" else "Covered Call"
+    raise StrategyContractError(
+        f"Exercicio de {strategy_label} nao pode ser salvo pela tabela Posicoes. "
+        "Use o botao de exercicio da propria estrategia para registrar caixa, "
+        "ledger e estoque na mesma transacao."
     )

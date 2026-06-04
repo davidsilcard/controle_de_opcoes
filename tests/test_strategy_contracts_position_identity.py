@@ -4,6 +4,7 @@ import pytest
 
 from opcoes.strategy_contracts import (
     StrategyContractError,
+    validate_position_closure_update,
     validate_position_identity_update,
 )
 
@@ -68,3 +69,34 @@ def test_position_identity_contract_allows_unstrategized_stock_underlying_correc
     proposed = {**existing, "underlying": "HYPE4"}
 
     validate_position_identity_update(existing=existing, proposed=proposed)
+
+
+def test_position_closure_contract_blocks_cash_put_exercise_from_positions_table() -> None:
+    existing = {
+        "ticker": "BBASQ237",
+        "underlying": "BBAS3",
+        "status": "open",
+        "strategy_tag": "cash_put",
+    }
+    proposed = {
+        "status": "closed",
+        "exit_reason": "Exercício",
+    }
+
+    with pytest.raises(StrategyContractError, match="botao de exercicio"):
+        validate_position_closure_update(existing=existing, proposed=proposed)
+
+
+def test_position_closure_contract_allows_short_option_buyback() -> None:
+    existing = {
+        "ticker": "WIZCB103",
+        "underlying": "WIZC3",
+        "status": "open",
+        "strategy_tag": "covered_call",
+    }
+    proposed = {
+        "status": "closed",
+        "exit_reason": "recompra_encerramento",
+    }
+
+    validate_position_closure_update(existing=existing, proposed=proposed)

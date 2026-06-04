@@ -88,7 +88,11 @@ from .covered_call_guard import (
 )
 from .ranking_guard import RankingValidationError, validate_ranking_option_input
 from .positions_guard import audit_positions_page
-from .strategy_contracts import StrategyContractError, validate_position_identity_update
+from .strategy_contracts import (
+    StrategyContractError,
+    validate_position_closure_update,
+    validate_position_identity_update,
+)
 from .audit_reconciliation import build_audit_reconciliation
 from .holdings import (
     HoldingValidationError,
@@ -2501,6 +2505,13 @@ def create_app() -> Flask:
             validate_position_identity_update(
                 existing=persisted_pos,
                 proposed=proposed_identity,
+            )
+            validate_position_closure_update(
+                existing=persisted_pos,
+                proposed={
+                    "status": status,
+                    "exit_reason": exit_reason,
+                },
             )
         except StrategyContractError as exc:
             return redirect(
