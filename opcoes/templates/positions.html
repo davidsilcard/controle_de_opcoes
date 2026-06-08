@@ -55,6 +55,16 @@
           {{ position_error }}
         </div>
       {% endif %}
+      {% if holding_error %}
+        <div class="alert alert-danger py-2" role="alert">
+          {{ holding_error }}
+        </div>
+      {% endif %}
+      {% if holding_notice %}
+        <div class="alert alert-success py-2" role="alert">
+          {{ holding_notice }}
+        </div>
+      {% endif %}
 
       <form class="row g-2 align-items-end mb-3" method="get" action="/positions">
         <div class="col-sm-2">
@@ -253,6 +263,60 @@
         </div>
       </div>
 
+      <!-- Modal Holding Stock -->
+      <div class="modal fade" id="modalHoldingStock" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Estoque consolidado</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <form method="post" action="/holdings/upsert" class="row g-3">
+                {{ csrf_input() }}
+                <input type="hidden" name="next" value="{{ next_url }}">
+                <div class="col-12">
+                  <div class="alert alert-info py-2 small mb-0" role="alert">
+                    Informe somente o saldo final da corretora. Este cadastro serve como garantia para covered call e nao cria posicao nem movimentacao de caixa.
+                  </div>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small">Ativo</label>
+                  <input name="underlying" class="form-control form-control-sm" placeholder="SOJA3" required>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small">Modo</label>
+                  <select name="is_simulated" class="form-select form-select-sm">
+                    <option value="0">Real</option>
+                    <option value="1">Simulado</option>
+                  </select>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small">Quantidade total atual</label>
+                  <input name="quantity" type="number" min="0" class="form-control form-control-sm" placeholder="1000" required>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small">Preço médio informado</label>
+                  <input name="avg_price" type="number" min="0" step="0.01" class="form-control form-control-sm" placeholder="6.31" required>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small">Data de conferência</label>
+                  <input name="event_date" class="form-control form-control-sm" placeholder="YYYY-MM-DD">
+                </div>
+                <div class="col-12">
+                  <label class="form-label small">Observação</label>
+                  <input name="notes" class="form-control form-control-sm" placeholder="Ex.: saldo conforme corretora">
+                </div>
+                <div class="col-12 text-end">
+                  <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                  <button class="btn btn-primary btn-sm" type="submit">Salvar estoque</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
@@ -286,6 +350,28 @@
               if (recordPremiumInput.checked || shortStrategies.has(strategySelect.value)) {
                   sideSelect.value = "short";
               }
+          });
+      }
+      const holdingModal = document.getElementById('modalHoldingStock');
+      if (holdingModal) {
+          holdingModal.addEventListener('show.bs.modal', event => {
+              const button = event.relatedTarget;
+              const today = new Date().toISOString().split('T')[0];
+              const tickerInput = holdingModal.querySelector('input[name="underlying"]');
+              const modeSelect = holdingModal.querySelector('select[name="is_simulated"]');
+              const qtyInput = holdingModal.querySelector('input[name="quantity"]');
+              const avgInput = holdingModal.querySelector('input[name="avg_price"]');
+              const dateInput = holdingModal.querySelector('input[name="event_date"]');
+              const notesInput = holdingModal.querySelector('input[name="notes"]');
+
+              tickerInput.value = button?.dataset.holdingTicker || '';
+              modeSelect.value = button?.dataset.holdingMode || '0';
+              qtyInput.value = button?.dataset.holdingQuantity || '';
+              avgInput.value = button?.dataset.holdingAvgPrice || '';
+              dateInput.value = today;
+              notesInput.value = tickerInput.value
+                  ? 'Saldo consolidado conforme corretora.'
+                  : '';
           });
       }
     </script>

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from secrets import compare_digest, token_urlsafe
 from typing import Any, Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from flask import (
@@ -2032,6 +2032,8 @@ def create_app() -> Flask:
                 )
         ctx["next_url"] = next_url
         ctx["position_error"] = (request.args.get("position_error") or "").strip()
+        ctx["holding_notice"] = (request.args.get("holding_notice") or "").strip()
+        ctx["holding_error"] = (request.args.get("holding_error") or "").strip()
         with timed_stage("route.positions.render"):
             return render_template("positions.html", **ctx)
 
@@ -2661,7 +2663,11 @@ def create_app() -> Flask:
             ticker=form.get("ticker") or form.get("underlying") or "",
             underlying=form.get("underlying") or form.get("ticker") or "",
         )
-        quantity = int(form.get("quantity") or 0)
+        next_url = _safe_next_url(form.get("next"))
+        try:
+            quantity = int(form.get("quantity") or 0)
+        except (TypeError, ValueError):
+            quantity = -1
         avg_price = _parse_form_float(form.get("avg_price"))
         is_simulated = form.get("is_simulated") == "1"
         notes = (form.get("notes") or "").strip() or None
@@ -2679,6 +2685,13 @@ def create_app() -> Flask:
                 event_date=event_date,
             )
         except HoldingValidationError as exc:
+            if next_url:
+                return redirect(
+                    _url_with_query(
+                        next_url,
+                        holding_error=str(exc),
+                    )
+                )
             return redirect(
                 url_for(
                     "covered_call",
@@ -2692,14 +2705,22 @@ def create_app() -> Flask:
             if int(snapshot.get("shares_total") or 0) > 0
             else 0.0
         )
+        notice = (
+            f"Estoque consolidado {mode_label} de {ticker} salvo: "
+            f"{int(snapshot.get('shares_total') or 0)} acoes a PM R$ {avg_display:.2f}."
+        )
+        if next_url:
+            return redirect(
+                _url_with_query(
+                    next_url,
+                    holding_notice=notice,
+                )
+            )
         return redirect(
             url_for(
                 "covered_call",
                 underlying=ticker,
-                holding_notice=(
-                    f"Estoque consolidado {mode_label} de {ticker} salvo: "
-                    f"{int(snapshot.get('shares_total') or 0)} acoes a PM R$ {avg_display:.2f}."
-                ),
+                holding_notice=notice,
             )
         )
 
@@ -2754,6 +2775,22 @@ def create_app() -> Flask:
         if not candidate.startswith("/positions"):
             return None
         return candidate
+
+    def _url_with_query(base_url: str, **params: str) -> str:
+        parts = urlsplit(base_url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        for key, value in params.items():
+            if value:
+                query[key] = value
+        return urlunsplit(
+            (
+                "",
+                "",
+                parts.path or "/positions",
+                urlencode(query),
+                "",
+            )
+        )
 
     def _is_option_ticker(ticker: str | None) -> bool:
         return infer_option_type(ticker or "") in {"CALL", "PUT"}

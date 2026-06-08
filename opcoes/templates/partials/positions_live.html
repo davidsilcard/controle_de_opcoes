@@ -20,18 +20,31 @@
   </section>
 {% endif %}
 
-{% if inventory_summary %}
-  <section class="mb-4">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-          <div>
-            <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
-            <p class="text-muted small mb-0">
-              Resumo visual do estoque aberto usado para orientar a covered call. A reserva vem das calls abertas e a linha de estoque continua sendo mantida pelo cliente.
-            </p>
-          </div>
+<section class="mb-4">
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Estoque consolidado por ativo</h2>
+          <p class="text-muted small mb-0">
+            Informe o saldo final da corretora para orientar a covered call. Nao cadastre compras individuais aqui.
+          </p>
         </div>
+        <button
+          class="btn btn-primary btn-sm"
+          type="button"
+          data-bs-toggle="modal"
+          data-bs-target="#modalHoldingStock"
+          data-holding-action="new"
+          data-holding-ticker=""
+          data-holding-mode="0"
+          data-holding-quantity=""
+          data-holding-avg-price=""
+        >
+          + Novo estoque
+        </button>
+      </div>
+      {% if inventory_summary %}
         <div class="table-responsive">
           <table class="table table-sm align-middle mb-0">
             <thead>
@@ -43,6 +56,7 @@
                 <th class="text-end">Livre</th>
                 <th class="text-end">PM informado</th>
                 <th>Status</th>
+                <th class="text-end">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -69,15 +83,34 @@
                       <span class="badge text-bg-success">Ok</span>
                     {% endif %}
                   </td>
+                  <td class="text-end">
+                    <button
+                      class="btn btn-outline-primary btn-sm"
+                      type="button"
+                      data-bs-toggle="modal"
+                      data-bs-target="#modalHoldingStock"
+                      data-holding-action="edit"
+                      data-holding-ticker="{{ item.ticker }}"
+                      data-holding-mode="{% if item.is_simulated %}1{% else %}0{% endif %}"
+                      data-holding-quantity="{{ item.shares_total }}"
+                      data-holding-avg-price="{% if item.avg_price is not none %}{{ '%.2f'|format(item.avg_price) }}{% endif %}"
+                    >
+                      Editar
+                    </button>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-      </div>
+      {% else %}
+        <div class="alert alert-light border mb-0 small">
+          Nenhum estoque consolidado cadastrado. Use <strong>Novo estoque</strong> para informar somente o saldo final da corretora.
+        </div>
+      {% endif %}
     </div>
-  </section>
-{% endif %}
+  </div>
+</section>
 
 <section class="mb-4">
   <div class="card border-0 shadow-sm">
