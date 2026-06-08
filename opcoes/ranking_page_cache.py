@@ -72,7 +72,7 @@ def get_cached_context(*, cache_key: str, ttl_seconds: int) -> Optional[Dict[str
             """
             SELECT payload_json
             FROM ranking_page_cache
-            WHERE cache_key = ?
+            WHERE cache_key = %s
               AND expires_at > CURRENT_TIMESTAMP
             LIMIT 1
             """,
@@ -112,7 +112,7 @@ def set_cached_context(
                 payload_json,
                 expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (cache_key) DO UPDATE SET
                 namespace = EXCLUDED.namespace,
                 route_name = EXCLUDED.route_name,
@@ -141,7 +141,7 @@ def invalidate_namespace(namespace: str) -> None:
     with db_transaction() as conn:
         _ensure_tables(conn)
         conn.execute(
-            "DELETE FROM ranking_page_cache WHERE namespace = ?",
+            "DELETE FROM ranking_page_cache WHERE namespace = %s",
             (namespace,),
         )
 
