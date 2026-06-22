@@ -231,31 +231,35 @@
                   </td>
                   <td class="text-end">
                     {% if pos.id and pos.open_qty %}
-                      <form method="post" action="/finance/expire" class="d-inline">
-                        {{ csrf_input() }}
-                        <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                        <button
-                          type="submit"
-                          class="btn btn-outline-secondary btn-sm"
-                          onclick="return confirm('Confirmar expiração da call {{ pos.ticker }}? (fecha a 0 e libera ações)');"
-                        >
-                          Expirou
-                        </button>
-                      </form>
+                      <button
+                        type="button"
+                        class="btn btn-outline-secondary btn-sm"
+                        data-bs-toggle="modal"
+                        data-bs-target="#modalCoveredCallExpire"
+                        data-position-id="{{ pos.id }}"
+                        data-ticker="{{ pos.ticker }}"
+                        data-underlying="{{ pos.underlying }}"
+                        data-qty="{{ pos.open_qty }}"
+                        data-strike="{% if pos.strike is not none %}{{ '%.4f'|format(pos.strike) }}{% endif %}"
+                        data-date="{{ pos.vencimento or '' }}"
+                      >
+                        Expirou
+                      </button>
                       {% if pos.strike is not none and pos.id and pos.open_qty %}
-                        <form method="post" action="/finance/callaway" class="d-inline">
-                          {{ csrf_input() }}
-                          <input type="hidden" name="position_id" value="{{ pos.id }}">
-                          <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                          <button
-                            type="submit"
-                            class="btn btn-outline-primary btn-sm"
-                            onclick="return confirm('Confirmar exercício da call {{ pos.ticker }}?');"
-                          >
-                            Exercido
-                          </button>
-                        </form>
+                        <button
+                          type="button"
+                          class="btn btn-outline-primary btn-sm"
+                          data-bs-toggle="modal"
+                          data-bs-target="#modalCoveredCallExercise"
+                          data-position-id="{{ pos.id }}"
+                          data-ticker="{{ pos.ticker }}"
+                          data-underlying="{{ pos.underlying }}"
+                          data-qty="{{ pos.open_qty }}"
+                          data-strike="{{ '%.4f'|format(pos.strike) }}"
+                          data-date="{{ pos.vencimento or '' }}"
+                        >
+                          Exercido
+                        </button>
                       {% endif %}
                     {% else %}
                       -
@@ -359,31 +363,37 @@
                   </td>
                   <td class="text-end">
                     {% if pos.id and pos.open_qty %}
-                      <form method="post" action="/finance/expire" class="d-inline">
-                        {{ csrf_input() }}
-                        <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                        <button
-                          type="submit"
-                          class="btn btn-outline-secondary btn-sm"
-                          onclick="return confirm('Confirmar expiração da call {{ pos.ticker }} (simulado)? (fecha a 0 e libera ações)');"
-                        >
-                          Expirou
-                        </button>
-                      </form>
+                      <button
+                        type="button"
+                        class="btn btn-outline-secondary btn-sm"
+                        data-bs-toggle="modal"
+                        data-bs-target="#modalCoveredCallExpire"
+                        data-position-id="{{ pos.id }}"
+                        data-ticker="{{ pos.ticker }}"
+                        data-underlying="{{ pos.underlying }}"
+                        data-qty="{{ pos.open_qty }}"
+                        data-strike="{% if pos.strike is not none %}{{ '%.4f'|format(pos.strike) }}{% endif %}"
+                        data-date="{{ pos.vencimento or '' }}"
+                        data-mode="simulado"
+                      >
+                        Expirou
+                      </button>
                       {% if pos.strike is not none and pos.id and pos.open_qty %}
-                        <form method="post" action="/finance/callaway" class="d-inline">
-                          {{ csrf_input() }}
-                          <input type="hidden" name="position_id" value="{{ pos.id }}">
-                          <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
-                          <button
-                            type="submit"
-                            class="btn btn-outline-primary btn-sm"
-                            onclick="return confirm('Confirmar exercício da call {{ pos.ticker }} (simulado)?');"
-                          >
-                            Exercido
-                          </button>
-                        </form>
+                        <button
+                          type="button"
+                          class="btn btn-outline-primary btn-sm"
+                          data-bs-toggle="modal"
+                          data-bs-target="#modalCoveredCallExercise"
+                          data-position-id="{{ pos.id }}"
+                          data-ticker="{{ pos.ticker }}"
+                          data-underlying="{{ pos.underlying }}"
+                          data-qty="{{ pos.open_qty }}"
+                          data-strike="{{ '%.4f'|format(pos.strike) }}"
+                          data-date="{{ pos.vencimento or '' }}"
+                          data-mode="simulado"
+                        >
+                          Exercido
+                        </button>
                       {% endif %}
                     {% else %}
                       -

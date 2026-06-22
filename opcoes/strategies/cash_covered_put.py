@@ -520,7 +520,7 @@ def calculate_cash_covered_put_strategy(
     buyback_target_pct: float,
 ) -> Dict[str, Any]:
     """
-    Pure strategy logic for Cash Covered Put.
+    Pure strategy logic for Cash-Covered Put.
     Filters positions, derives metrics, and builds suggestions from provided data.
     """
     positions_open = _enrich_cash_put_positions(

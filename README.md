@@ -244,8 +244,9 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - a tela `Covered Call` agora tem um formulario proprio para salvar o `estoque consolidado` por ativo e por modo (`real` ou `simulado`).
 - o usuario informa manualmente `quantidade atual` e `preco medio`; a aplicacao usa esse saldo como fonte oficial da garantia.
 - novas calls cobertas sao bloqueadas quando a quantidade vendida ultrapassa o saldo livre, com mensagem explicando o motivo.
-- em `PUT` exercida, a aplicacao aumenta o estoque consolidado e sinaliza revisao do preco medio quando necessario.
+- em `PUT` exercida em `Cash-Covered Put`, a aplicacao aumenta o estoque consolidado e sinaliza revisao do preco medio quando necessario.
 - em `CALL` exercida, a aplicacao reduz o estoque consolidado automaticamente e gera um historico fechado para manter a trilha de auditoria/resultado.
+- em `Cash-Covered Put` e `Covered Call`, os botoes `Exercido` e `Expirou` abrem uma confirmacao com data obrigatoria; sem data de vencimento/exercicio confirmada, a baixa e bloqueada para evitar registro no dia errado.
 
 Baixa e conferencia visual do resultado realizado:
 

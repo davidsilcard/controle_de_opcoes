@@ -1604,20 +1604,41 @@ def create_app() -> Flask:
     def finance_assign():
         form = request.form
         position_id = int(form.get("position_id"))
-        strike = _parse_form_float(form.get("strike"))
-        qty = int(form.get("qty"))
-        date = form.get("date") or datetime.date.today().isoformat()
-        try:
-            assign_put(position_id=position_id, strike=strike, qty=qty, date=date)
-        except HoldingValidationError:
-            pos = get_position(position_id)
-            underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
+        pos = get_position(position_id)
+        underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
+        date = _parse_form_date(form.get("date"))
+        if not date:
             return redirect(
-                url_for("cash_covered_put", underlying=underlying)
+                url_for(
+                    "cash_covered_put",
+                    underlying=underlying,
+                    position_error=(
+                        "Nao foi possivel confirmar a data de vencimento/exercicio da PUT. "
+                        "A baixa foi bloqueada para evitar registro na data errada."
+                    ),
+                )
                 if underlying
                 else url_for("cash_covered_put")
             )
-        return redirect(url_for("cash_covered_put"))
+        strike = _parse_form_float(form.get("strike"))
+        try:
+            qty = int(form.get("qty")) if form.get("qty") else None
+        except (TypeError, ValueError):
+            qty = None
+        try:
+            assign_put(position_id=position_id, strike=strike, qty=qty, date=date)
+        except (HoldingValidationError, FlowError) as exc:
+            message = str(exc) or "Nao foi possivel registrar o exercicio da PUT."
+            return redirect(
+                url_for("cash_covered_put", underlying=underlying, position_error=message)
+                if underlying
+                else url_for("cash_covered_put")
+            )
+        return redirect(
+            url_for("cash_covered_put", underlying=underlying)
+            if underlying
+            else url_for("cash_covered_put")
+        )
 
     @app.post("/finance/callaway")
     def finance_callaway():

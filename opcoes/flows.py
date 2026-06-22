@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from typing import Optional
 
 from .db import db_transaction
@@ -19,31 +20,77 @@ class FlowError(RuntimeError):
         self.underlying = underlying
 
 
+def _require_iso_date(value: str, *, label: str) -> str:
+    text = str(value or "").strip()
+    try:
+        parsed = dt.date.fromisoformat(text)
+    except ValueError as exc:
+        raise FlowError(f"{label} precisa de data valida.") from exc
+    return parsed.isoformat()
+
+
+def _positive_int(value: object) -> int:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _positive_float(value: object) -> float:
+    try:
+        parsed = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return parsed if parsed > 0 else 0.0
+
+
 def assign_put(
     *,
     position_id: int,
-    strike: float,
-    qty: int,
+    strike: Optional[float] = None,
+    qty: Optional[int] = None,
     date: str,
 ) -> None:
+    confirmed_date = _require_iso_date(date, label="Exercicio da PUT")
     with db_transaction() as conn:
         pos = get_position(position_id, conn=conn)
+        if not pos:
+            raise FlowError("Posição não encontrada.")
         is_simulated = bool(pos["is_simulated"]) if pos else False
+
+        underlying = (pos.get("underlying") or "").strip().upper()
+        if (pos.get("status") or "").strip().lower() != "open":
+            raise FlowError("Posição não está aberta.", underlying=underlying)
+        if infer_option_type(pos.get("ticker")) != "PUT":
+            raise FlowError("Ticker não é PUT.", underlying=underlying)
+
+        resolved_qty = _positive_int(pos.get("open_qty") or pos.get("qty"))
+        if qty is not None and _positive_int(qty) != resolved_qty:
+            raise FlowError("Quantidade do exercicio diverge da posição.", underlying=underlying)
+        resolved_strike = _positive_float(pos.get("strike"))
+        submitted_strike = _positive_float(strike)
+        if resolved_strike <= 0:
+            resolved_strike = submitted_strike
+        elif submitted_strike > 0 and round(submitted_strike - resolved_strike, 4) != 0:
+            raise FlowError("Strike do exercicio diverge da posição.", underlying=underlying)
+        if resolved_qty <= 0 or resolved_strike <= 0:
+            raise FlowError("Quantidade ou strike inválido.", underlying=underlying)
 
         close_position(
             position_id=position_id,
-            exit_date=date,
+            exit_date=confirmed_date,
             exit_price=0.0,
             exit_reason="Exercício",
             conn=conn,
         )
 
-        cost = float(strike) * int(qty)
+        cost = float(resolved_strike) * int(resolved_qty)
         add_transaction(
-            date=date,
+            date=confirmed_date,
             type=TransactionType.ASSIGNMENT,
             amount=-cost,
-            description=f"Exercício PUT {position_id} @ {strike}",
+            description=f"Exercício PUT {position_id} @ {resolved_strike}",
             position_id=position_id,
             is_simulated=is_simulated,
             conn=conn,
@@ -52,10 +99,10 @@ def assign_put(
 
         if pos:
             apply_put_assignment_to_holding(
-                ticker=pos["underlying"],
-                qty=int(qty),
-                strike=float(strike),
-                date=date,
+                ticker=underlying,
+                qty=int(resolved_qty),
+                strike=float(resolved_strike),
+                date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
                 conn=conn,
@@ -67,6 +114,7 @@ def callaway(
     position_id: int,
     date: str,
 ) -> str:
+    confirmed_date = _require_iso_date(date, label="Exercicio da CALL")
     with db_transaction() as conn:
         call_pos = get_position(position_id, conn=conn)
         if not call_pos:
@@ -99,7 +147,7 @@ def callaway(
                 ticker=underlying,
                 qty=qty,
                 strike=strike_val,
-                date=date,
+                date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
                 conn=conn,
@@ -116,7 +164,7 @@ def callaway(
         stock_history_id = add_position(
             ticker=underlying,
             underlying=underlying,
-            trade_date=date,
+            trade_date=confirmed_date,
             qty=int(qty),
             entry_price=float(consumed_avg_price or 0.0),
             fees=0.0,
@@ -129,7 +177,7 @@ def callaway(
         )
         close_position(
             position_id=stock_history_id,
-            exit_date=date,
+            exit_date=confirmed_date,
             exit_price=strike_val,
             exit_reason="Exercício",
             conn=conn,
@@ -138,7 +186,7 @@ def callaway(
 
         close_position(
             position_id=position_id,
-            exit_date=date,
+            exit_date=confirmed_date,
             exit_price=0.0,
             exit_reason="Exercício",
             conn=conn,
@@ -146,7 +194,7 @@ def callaway(
 
         proceeds = strike_val * qty
         add_transaction(
-            date=date,
+            date=confirmed_date,
             type=TransactionType.SELL,
             amount=proceeds,
             description=f"Venda (CALL exercida) {call_pos.get('ticker')} @ {strike_val:.2f}",

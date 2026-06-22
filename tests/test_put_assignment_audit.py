@@ -91,3 +91,72 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
     assert "GGBRO215" in ccp_html
     assert "608.00" in ccp_html
     assert "Covered Call" in ccp_html
+
+
+def test_put_assignment_without_confirmed_date_is_blocked() -> None:
+    _ensure_snapshot_tables()
+
+    pos_id = portfolio.add_position(
+        ticker="BBASR210ON",
+        underlying="BBAS3",
+        trade_date="2026-05-18",
+        qty=800,
+        entry_price=0.71,
+        fees=0.75,
+        trade_type="swing",
+        side="short",
+        strategy_tag="cash_put",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post(
+        "/finance/assign",
+        data={
+            "position_id": str(pos_id),
+            "qty": "800",
+            "strike": "20.73",
+            "date": "",
+        },
+    )
+
+    assert response.status_code in (302, 303)
+    assert "position_error=" in (response.headers.get("Location") or "")
+    put_pos = portfolio.get_position(pos_id)
+    assert put_pos is not None
+    assert put_pos["status"] == "open"
+    assignment_txs = [
+        tx
+        for tx in finance.get_transactions(limit=20, strategy_tag="cash_put")
+        if tx.position_id == pos_id and tx.type == finance.TransactionType.ASSIGNMENT
+    ]
+    assert assignment_txs == []
+
+
+def test_cash_put_page_uses_confirmation_modals_for_expiration_and_assignment() -> None:
+    _ensure_snapshot_tables()
+    portfolio.add_position(
+        ticker="BBASR210ON",
+        underlying="BBAS3",
+        trade_date="2026-05-18",
+        qty=800,
+        entry_price=0.71,
+        fees=0.75,
+        trade_type="swing",
+        side="short",
+        strategy_tag="cash_put",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/cash-covered-put?underlying=BBAS3")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="modalCashPutExpire"' in html
+    assert 'id="modalCashPutAssign"' in html
+    assert "Confirmar exercício da PUT" in html

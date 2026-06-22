@@ -309,3 +309,43 @@ def test_covered_call_expiration_without_confirmed_date_is_blocked() -> None:
     assert res.status_code in (302, 303)
     assert "holding_error=" in (res.headers.get("Location") or "")
     assert portfolio.get_position(pos_id)["status"] == "open"
+
+
+@pytest.mark.requires_postgres
+def test_covered_call_page_uses_confirmation_modals_for_expiration_and_exercise() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="GGBR4",
+        quantity=800,
+        avg_price=20.73,
+        is_simulated=False,
+        notes="Estoque para teste de modal",
+    )
+    portfolio.add_position(
+        ticker="GGBRE228",
+        underlying="GGBR4",
+        trade_date="2026-04-22",
+        qty=800,
+        entry_price=0.36,
+        fees=0.37,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    page = client.get("/covered-call?underlying=GGBR4")
+    partial = client.get("/covered-call/partial/audit?underlying=GGBR4")
+
+    assert page.status_code == 200
+    page_html = page.get_data(as_text=True)
+    assert 'id="modalCoveredCallExpire"' in page_html
+    assert 'id="modalCoveredCallExercise"' in page_html
+    assert "Confirmar exercício da CALL" in page_html
+
+    assert partial.status_code == 200
+    partial_html = partial.get_data(as_text=True)
+    assert 'data-bs-target="#modalCoveredCallExpire"' in partial_html
