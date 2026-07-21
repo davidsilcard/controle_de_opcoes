@@ -805,6 +805,7 @@ O script:
 - rebuilda a stack Docker
 - espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
+- reinicia uma única vez quando o próprio script foi atualizado pelo `git pull`, para aplicar a nova regra antes do rebuild
 - reserva automaticamente `2GB` para cache Docker de build e remove o excedente nao utilizado; imagens, containers, volumes e dados em uso permanecem preservados. Ajuste somente se necessário com `DOCKER_BUILD_CACHE_RESERVED_SPACE`.
 
 Importante:

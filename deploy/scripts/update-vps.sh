@@ -12,6 +12,8 @@ SMOKE_SLEEP_SECONDS="${SMOKE_SLEEP_SECONDS:-2}"
 DOCKER_BUILD_CACHE_RESERVED_SPACE="${DOCKER_BUILD_CACHE_RESERVED_SPACE:-2GB}"
 
 cd "$APP_DIR"
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+SCRIPT_DIGEST_BEFORE="$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')"
 
 wait_for_url() {
   local label="$1"
@@ -56,6 +58,12 @@ fi
 echo "[1/6] Atualizando codigo do Git..."
 git fetch "$REMOTE"
 git pull --ff-only "$REMOTE" "$BRANCH"
+
+SCRIPT_DIGEST_AFTER="$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')"
+if [[ "$SCRIPT_DIGEST_BEFORE" != "$SCRIPT_DIGEST_AFTER" && "${OPCOES_DEPLOY_REEXECED:-0}" != "1" ]]; then
+  echo "Script de deploy atualizado; reiniciando antes do rebuild..."
+  OPCOES_DEPLOY_REEXECED=1 exec /bin/bash "$SCRIPT_PATH" "$@"
+fi
 
 echo "[2/6] Rebuild e restart da stack..."
 /bin/bash "$COMPOSE_HELPER" up -d --build
