@@ -787,6 +787,7 @@ O script:
 - rebuilda a stack Docker
 - espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
+- remove automaticamente apenas o cache Docker de build com mais de 24 horas; imagens, containers, volumes e dados em uso permanecem preservados
 
 Importante:
 

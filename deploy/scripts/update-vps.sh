@@ -52,20 +52,23 @@ if [[ -n "$dirty_files" ]]; then
   exit 1
 fi
 
-echo "[1/5] Atualizando codigo do Git..."
+echo "[1/6] Atualizando codigo do Git..."
 git fetch "$REMOTE"
 git pull --ff-only "$REMOTE" "$BRANCH"
 
-echo "[2/5] Rebuild e restart da stack..."
+echo "[2/6] Rebuild e restart da stack..."
 /bin/bash "$COMPOSE_HELPER" up -d --build
 
-echo "[3/5] Validando containers..."
+echo "[3/6] Validando containers..."
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-echo "[4/5] Smoke test web..."
+echo "[4/6] Smoke test web..."
 wait_for_url "web" "$WEB_CHECK_URL" "head"
 
-echo "[5/5] Smoke test edge..."
+echo "[5/6] Smoke test edge..."
 wait_for_url "edge" "$EDGE_CHECK_URL" "body"
 curl -fsS "$EDGE_CHECK_URL"
+
+echo "[6/6] Limpando cache Docker com mais de 24 horas..."
+docker builder prune -f --filter "until=24h"
 echo "Deploy concluido com sucesso."
