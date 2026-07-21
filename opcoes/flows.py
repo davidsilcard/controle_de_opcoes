@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from typing import Optional
 
 from .db import db_transaction
@@ -43,6 +44,19 @@ def _positive_float(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return parsed if parsed > 0 else 0.0
+
+
+def _nonnegative_currency(value: object, *, label: str) -> float:
+    text = str(value or "").strip().replace(",", ".")
+    if not text:
+        raise FlowError(f"{label} precisa ser informado, mesmo quando for R$ 0,00.")
+    try:
+        parsed = float(text)
+    except (TypeError, ValueError) as exc:
+        raise FlowError(f"{label} precisa ser um valor valido.") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise FlowError(f"{label} nao pode ser negativo.")
+    return round(parsed, 2)
 
 
 def assign_put(
@@ -113,8 +127,13 @@ def callaway(
     *,
     position_id: int,
     date: str,
+    sale_fees: object = "0",
 ) -> str:
     confirmed_date = _require_iso_date(date, label="Exercicio da CALL")
+    resolved_sale_fees = _nonnegative_currency(
+        sale_fees,
+        label="Despesas da venda no exercicio",
+    )
     with db_transaction() as conn:
         call_pos = get_position(position_id, conn=conn)
         if not call_pos:
@@ -167,10 +186,13 @@ def callaway(
             trade_date=confirmed_date,
             qty=int(qty),
             entry_price=float(consumed_avg_price or 0.0),
-            fees=0.0,
+            fees=resolved_sale_fees,
             trade_type="stock",
             side="long",
-            notes=f"Baixa automática do estoque consolidado no exercício da call {call_pos.get('ticker')}",
+            notes=(
+                "Baixa automática do estoque consolidado no exercício da call "
+                f"{call_pos.get('ticker')}; despesas da venda: R$ {resolved_sale_fees:.2f}"
+            ),
             is_simulated=is_simulated,
             strategy_tag="covered_call",
             conn=conn,

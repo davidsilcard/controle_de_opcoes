@@ -1647,6 +1647,7 @@ def create_app() -> Flask:
         pos = get_position(position_id)
         underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
         date = _parse_form_date(form.get("date"))
+        sale_fees = form.get("sale_fees")
         if not date:
             return redirect(
                 url_for(
@@ -1658,12 +1659,32 @@ def create_app() -> Flask:
                     ),
                 )
             )
+        if sale_fees is None or not sale_fees.strip():
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying,
+                    holding_error=(
+                        "Informe as despesas da venda da nota, inclusive R$ 0,00 quando nao houver despesas."
+                    ),
+                )
+            )
         try:
-            underlying = callaway(position_id=position_id, date=date)
+            underlying = callaway(
+                position_id=position_id,
+                date=date,
+                sale_fees=sale_fees,
+            )
         except FlowError as exc:
             if exc.underlying:
-                return redirect(url_for("covered_call", underlying=exc.underlying))
-            return redirect(url_for("covered_call"))
+                return redirect(
+                    url_for(
+                        "covered_call",
+                        underlying=exc.underlying,
+                        holding_error=str(exc),
+                    )
+                )
+            return redirect(url_for("covered_call", holding_error=str(exc)))
 
         if underlying:
             return redirect(url_for("covered_call", underlying=underlying))

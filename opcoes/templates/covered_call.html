@@ -432,6 +432,9 @@
             <label class="form-label">Data do exercício</label>
             <input type="date" name="date" class="form-control" required>
             <div class="form-text">Confira com a nota de corretagem antes de confirmar.</div>
+            <label class="form-label mt-3">Despesas atribuídas à venda (R$)</label>
+            <input type="number" name="sale_fees" class="form-control" min="0" step="0.01" required>
+            <div class="form-text">Informe corretagem, liquidação e emolumentos desta venda. Se a nota tiver várias vendas, distribua o total entre elas sem repetir. Use 0,00 somente se a nota não tiver despesas.</div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>

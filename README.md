@@ -247,6 +247,7 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - em `PUT` exercida em `Cash-Covered Put`, a aplicacao aumenta o estoque consolidado e sinaliza revisao do preco medio quando necessario.
 - em `CALL` exercida, a aplicacao reduz o estoque consolidado automaticamente e gera um historico fechado para manter a trilha de auditoria/resultado.
 - em `Cash-Covered Put` e `Covered Call`, os botoes `Exercido` e `Expirou` abrem uma confirmacao com data obrigatoria; sem data de vencimento/exercicio confirmada, a baixa e bloqueada para evitar registro no dia errado.
+- no exercício de `Covered Call`, informe obrigatoriamente as despesas da venda destacadas na nota (corretagem, liquidação e emolumentos); elas entram no resultado realizado e na DARF. Se a nota agrupar várias vendas, distribua o total entre elas sem repetir. Quando a nota não tiver despesas, informe `0,00`.
 
 Baixa e conferencia visual do resultado realizado:
 

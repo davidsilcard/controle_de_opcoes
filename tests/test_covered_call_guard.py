@@ -8,6 +8,7 @@ from opcoes.covered_call_guard import (
     audit_covered_call_positions,
     validate_covered_call_input,
 )
+from opcoes.flows import FlowError, callaway
 from opcoes.holdings import get_holding, upsert_holding
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
@@ -279,6 +280,64 @@ def test_covered_call_exercise_without_confirmed_date_is_blocked() -> None:
 
 
 @pytest.mark.requires_postgres
+def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="GGBR4",
+        quantity=800,
+        avg_price=20.73,
+        is_simulated=False,
+        notes="Estoque para teste de despesas no exercicio",
+    )
+    snapshots = SnapshotDB()
+    try:
+        snapshots.record_options(
+            "2026-05-14",
+            [
+                {
+                    "underlying": "GGBR4",
+                    "ticker": "GGBRE228",
+                    "option_type": "CALL",
+                    "vencimento": "15/05/2026",
+                    "strike": "22.57",
+                }
+            ],
+        )
+    finally:
+        snapshots.close()
+    call_id = portfolio.add_position(
+        ticker="GGBRE228",
+        underlying="GGBR4",
+        trade_date="2026-04-22",
+        qty=800,
+        entry_price=0.36,
+        fees=0.37,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+
+    callaway(position_id=call_id, date="2026-05-15", sale_fees="1.25")
+
+    stock_rows = [
+        pos
+        for pos in portfolio.list_positions(include_closed=True, ticker="GGBR4")
+        if pos.get("strategy_tag") == "covered_call" and pos.get("status") == "closed"
+    ]
+    assert len(stock_rows) == 1
+    stock = stock_rows[0]
+    assert stock["fees"] == 1.25
+    assert stock["realized_pl"] == pytest.approx(1470.75)
+    ledger = finance.get_ledger_sums_by_position()
+    assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
+
+
+def test_covered_call_exercise_rejects_missing_sale_fees() -> None:
+    with pytest.raises(FlowError, match="Despesas da venda"):
+        callaway(position_id=1, date="2026-05-15", sale_fees="")
+
+
+@pytest.mark.requires_postgres
 def test_covered_call_expiration_without_confirmed_date_is_blocked() -> None:
     _ensure_snapshot_tables()
     upsert_holding(
@@ -345,6 +404,7 @@ def test_covered_call_page_uses_confirmation_modals_for_expiration_and_exercise(
     assert 'id="modalCoveredCallExpire"' in page_html
     assert 'id="modalCoveredCallExercise"' in page_html
     assert "Confirmar exercício da CALL" in page_html
+    assert 'name="sale_fees"' in page_html
 
     assert partial.status_code == 200
     partial_html = partial.get_data(as_text=True)
