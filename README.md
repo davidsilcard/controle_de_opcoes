@@ -756,7 +756,7 @@ Para evitar repetir essas variaveis na VPS, use o helper versionado:
 ```bash
 git pull origin main
 deploy/scripts/opcoes-compose-vps.sh up -d --build
-docker builder prune -af --keep-storage 2GB
+docker builder prune -af --reserved-space 2GB
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
@@ -805,7 +805,7 @@ O script:
 - rebuilda a stack Docker
 - espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
-- limita automaticamente o cache Docker de build nao utilizado a `2GB`; imagens, containers, volumes e dados em uso permanecem preservados. Ajuste somente se necessário com `DOCKER_BUILD_CACHE_KEEP_STORAGE`.
+- reserva automaticamente `2GB` para cache Docker de build e remove o excedente nao utilizado; imagens, containers, volumes e dados em uso permanecem preservados. Ajuste somente se necessário com `DOCKER_BUILD_CACHE_RESERVED_SPACE`.
 
 Importante:
 
