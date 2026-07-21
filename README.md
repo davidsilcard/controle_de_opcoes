@@ -756,7 +756,7 @@ Para evitar repetir essas variaveis na VPS, use o helper versionado:
 ```bash
 git pull origin main
 deploy/scripts/opcoes-compose-vps.sh up -d --build
-docker builder prune -f --filter "until=24h"
+docker builder prune -af --keep-storage 2GB
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
@@ -805,7 +805,7 @@ O script:
 - rebuilda a stack Docker
 - espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
-- remove automaticamente apenas o cache Docker de build com mais de 24 horas; imagens, containers, volumes e dados em uso permanecem preservados
+- limita automaticamente o cache Docker de build nao utilizado a `2GB`; imagens, containers, volumes e dados em uso permanecem preservados. Ajuste somente se necessário com `DOCKER_BUILD_CACHE_KEEP_STORAGE`.
 
 Importante:
 
@@ -1139,7 +1139,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - README detalha melhor o rate limit de login por IP, incluindo a dependencia de `ProxyFix` e a persistencia no schema de autenticacao.
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
-- README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild, limpeza de cache Docker recente e `db check`.
+- README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild, teto para cache Docker nao utilizado e `db check`.
 - painel de `Configuracoes` agora sinaliza `Possivel travamento` quando um ciclo fica tempo demais sem finalizar, e o host passa a ter um watchdog para reconciliar status `running` orfao.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.

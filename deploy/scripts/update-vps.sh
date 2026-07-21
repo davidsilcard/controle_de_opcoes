@@ -9,6 +9,7 @@ WEB_CHECK_URL="${WEB_CHECK_URL:-http://127.0.0.1:8000/login}"
 EDGE_CHECK_URL="${EDGE_CHECK_URL:-http://127.0.0.1:8011/health}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-20}"
 SMOKE_SLEEP_SECONDS="${SMOKE_SLEEP_SECONDS:-2}"
+DOCKER_BUILD_CACHE_KEEP_STORAGE="${DOCKER_BUILD_CACHE_KEEP_STORAGE:-2GB}"
 
 cd "$APP_DIR"
 
@@ -69,6 +70,6 @@ echo "[5/6] Smoke test edge..."
 wait_for_url "edge" "$EDGE_CHECK_URL" "body"
 curl -fsS "$EDGE_CHECK_URL"
 
-echo "[6/6] Limpando cache Docker com mais de 24 horas..."
-docker builder prune -f --filter "until=24h"
+echo "[6/6] Limitando cache Docker nao utilizado a ${DOCKER_BUILD_CACHE_KEEP_STORAGE}..."
+docker builder prune -af --keep-storage "$DOCKER_BUILD_CACHE_KEEP_STORAGE"
 echo "Deploy concluido com sucesso."
