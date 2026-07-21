@@ -202,11 +202,27 @@ uv run python -m opcoes.cli fundamentus
 uv run python -m opcoes.cli fundamentus-filter
 ```
 
+O coletor valida o contrato dos cabeçalhos da tabela publicada pelo Fundamentus. As colunas são lidas pelo nome, não pela posição; se uma coluna obrigatória sumir, duplicar ou surgir sem mapeamento, o comando falha sem gravar o snapshot. Assim uma mudança da fonte não contamina o ranking, a lista de ações aprovadas ou as oportunidades de `PUT`.
+
+Snapshots já identificados como inválidos permanecem preservados para auditoria, mas deixam de participar da estratégia:
+
+```bash
+uv run python -m opcoes.cli fundamentus-integrity list
+uv run python -m opcoes.cli fundamentus-integrity quarantine \
+  --from-date 2026-05-04 \
+  --to-date 2026-07-20 \
+  --reason "Colunas deslocadas pela inclusão de Mrg Bruta na fonte"
+```
+
+Use a quarentena somente com uma causa comprovada. Uma nova coleta válida para a mesma data restaura automaticamente esse snapshot para uso na estratégia.
+
 Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo com carregamento progressivo:
 
 - tabela detalhada das acoes aprovadas e reprovadas com filtros por coluna e ordenacao;
 - quadro de oportunidades de `PUT` com score, perfil e execucao;
 - cards de entradas/saidas entre snapshots, ranking historico e divisao por setor.
+
+Quando não houver aprovadas, a tela informa o resultado dos filtros e direciona para a visão de reprovadas; ela não deve apresentar esse estado como funcionalidade "em construção". O indicador de dívida exibido é `Dívida/Patrimônio`, refletindo a métrica publicada pela fonte.
 
 ### Relatório / ranking
 

@@ -130,8 +130,12 @@ def test_ranking_partial_renders_data(monkeypatch) -> None:
                 "total_count": 2,
                 "watchlist_ratio_pct": 50.0,
             },
-            "positions_real": [_sample_ranking_position(position_id=1, ticker="PETRA999")],
-            "positions_simulated": [_sample_ranking_position(position_id=2, ticker="PETRS111")],
+            "positions_real": [
+                _sample_ranking_position(position_id=1, ticker="PETRA999")
+            ],
+            "positions_simulated": [
+                _sample_ranking_position(position_id=2, ticker="PETRS111")
+            ],
             "totals_real": {
                 "total_purchase": 100.0,
                 "total_current": 110.0,
@@ -147,7 +151,9 @@ def test_ranking_partial_renders_data(monkeypatch) -> None:
             "alerts_map": {1: ["Spread acima do limite"]},
             "segments": {
                 "carteira": [opp],
-                "alavancagem": [{**opp, "ticker": "PETRA998", "Status_Moneyness": "ATM"}],
+                "alavancagem": [
+                    {**opp, "ticker": "PETRA998", "Status_Moneyness": "ATM"}
+                ],
                 "aposta": [{**opp, "ticker": "PETRA997", "Status_Moneyness": "OTM"}],
             },
         },
@@ -192,7 +198,10 @@ def test_fundamentus_route_renders_progressive_placeholder(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert 'id="fundamentus-dashboard"' in html
     assert 'hx-get="/fundamentus/partial/dashboard?' in html
-    assert "Carregando filtros aplicados, ranking histórico e tabela Fundamentus..." in html
+    assert (
+        "Carregando filtros aplicados, ranking histórico e tabela Fundamentus..."
+        in html
+    )
 
 
 def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
@@ -234,7 +243,12 @@ def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
                     "signal": type(
                         "Signal",
                         (),
-                        {"status": "approved", "reason_label": "Aprovada em todos os filtros.", "reason": "approved", "failed_step": None},
+                        {
+                            "status": "approved",
+                            "reason_label": "Aprovada em todos os filtros.",
+                            "reason": "approved",
+                            "failed_step": None,
+                        },
                     )(),
                 }
             ],
@@ -277,7 +291,9 @@ def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
             "ranking_window_start": "2026-03-22",
             "ranking_window_end": "2026-04-21",
             "target_yield_pct": 8.0,
-            "sector_breakdown": [{"label": "Energia", "count": 1, "pct": 100.0, "color": "#4e79a7"}],
+            "sector_breakdown": [
+                {"label": "Energia", "count": 1, "pct": 100.0, "color": "#4e79a7"}
+            ],
         },
     )
     app = create_app()
@@ -295,3 +311,38 @@ def test_fundamentus_partial_renders_rows(monkeypatch) -> None:
     assert "Mudancas na lista de aprovadas" in html
     assert "Divisao por setor" in html
     assert 'data-default-sort-index="9"' in html
+
+
+def test_fundamentus_partial_explains_empty_approved_list(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "opcoes.web.get_fundamentus_context",
+        lambda _args: {
+            "message": "Snapshot e filtros carregados a partir do banco.",
+            "snapshot_date": "2026-07-21",
+            "rows": [],
+            "total_rows": 282,
+            "filtered_rows_count": 0,
+            "signals_available": True,
+            "approved_count": 0,
+            "rejected_count": 282,
+            "status_filter": "approved",
+            "status_label": "Aprovadas",
+            "limit": None,
+            "ranking_window_days": 30,
+            "changes_reference_date": None,
+            "entered_opportunities": [],
+            "exited_opportunities": [],
+            "ranking_total": [],
+            "ranking_window": [],
+        },
+    )
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/fundamentus/partial/dashboard")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Nenhuma ação foi aprovada pelos filtros deste snapshot." in html
+    assert "Em construcao. Esta aba vai concentrar" not in html

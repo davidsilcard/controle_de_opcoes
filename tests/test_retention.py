@@ -32,6 +32,7 @@ class _FakeConn:
             "fundamentus_runs",
             "fundamentus_signals",
             "fundamentus_filter_runs",
+            "fundamentus_snapshot_integrity",
         }
         self.counts = {
             "ranking_entries": 10,
@@ -46,6 +47,7 @@ class _FakeConn:
             "fundamentus_runs": 1,
             "fundamentus_signals": 9,
             "fundamentus_filter_runs": 1,
+            "fundamentus_snapshot_integrity": 2,
         }
 
     def execute(self, query: str, params=()):
@@ -76,7 +78,11 @@ class _FakeConn:
                 else "option_snapshots_age"
             )
         if '"iv_history"' in compact:
-            return "iv_history_expired" if "to_date(vencimento" in compact else "iv_history_age"
+            return (
+                "iv_history_expired"
+                if "to_date(vencimento" in compact
+                else "iv_history_age"
+            )
         for name in (
             "ranking_entries",
             "ranking_runs",
@@ -86,6 +92,7 @@ class _FakeConn:
             "fundamentus_runs",
             "fundamentus_signals",
             "fundamentus_filter_runs",
+            "fundamentus_snapshot_integrity",
         ):
             if f'"{name}"' in compact:
                 return name

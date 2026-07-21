@@ -30,8 +30,11 @@ from .db_optimize import optimize_postgres_schema
 from . import finance
 from .fundamentus import (
     FundamentusFilterConfig,
+    FundamentusSchemaError,
     apply_filters,
+    list_quarantined_snapshots,
     latest_snapshot_date,
+    quarantine_snapshots,
     scrape_and_store,
 )
 from .history import (
@@ -53,7 +56,10 @@ from .service_runs import (
 )
 from .runtime_env import load_dotenv_once
 from .config import reset_pg_schema_override, set_pg_schema_override
-from .ranking_page_cache import build_cache_key as build_ranking_page_cache_key, set_cached_context as set_ranking_page_cache
+from .ranking_page_cache import (
+    build_cache_key as build_ranking_page_cache_key,
+    set_cached_context as set_ranking_page_cache,
+)
 from .strategies import get_ranking_context
 
 
@@ -69,6 +75,7 @@ USER_BOOTSTRAP_MARKET_TABLES = [
     "fundamentus_snapshots",
     "fundamentus_filter_runs",
     "fundamentus_signals",
+    "fundamentus_snapshot_integrity",
     "ticker_metadata",
 ]
 
@@ -90,9 +97,7 @@ def _bootstrap_user_schema(
     if mode == "market":
         include_tables = USER_BOOTSTRAP_MARKET_TABLES
 
-    print(
-        f"Bootstrap do schema {target_schema} a partir de {source_schema}..."
-    )
+    print(f"Bootstrap do schema {target_schema} a partir de {source_schema}...")
     print(
         "Modo: "
         + (
@@ -643,7 +648,9 @@ def parse_args() -> argparse.Namespace:
         help="Não replica o schema legado para usuários que receberem schema novo.",
     )
 
-    src = sub.add_parser("service-run", help="Registra e consulta execucoes dos servicos agendados")
+    src = sub.add_parser(
+        "service-run", help="Registra e consulta execucoes dos servicos agendados"
+    )
     srcs = src.add_subparsers(dest="subcmd", required=True)
 
     sr_start = srcs.add_parser("start", help="Marca o inicio de uma execucao")
@@ -859,7 +866,7 @@ def parse_args() -> argparse.Namespace:
         "--div-bruta-patrim-max",
         type=float,
         default=default_cfg.div_bruta_patrim_max,
-        help="Dív. Bruta/Patrim máximo (default: 2).",
+        help="Dívida/Patrimônio máximo (default: 2).",
     )
     ff.add_argument(
         "--cresc-rec-5a-min",
@@ -889,6 +896,27 @@ def parse_args() -> argparse.Namespace:
         "--no-margem-liquida-zero",
         action="store_true",
         help="Desativa a exceção de margem líquida igual a 0%.",
+    )
+
+    integrity = sub.add_parser(
+        "fundamentus-integrity",
+        help="Lista ou coloca em quarentena snapshots Fundamentus inválidos.",
+    )
+    integrity_actions = integrity.add_subparsers(
+        dest="fundamentus_integrity_action",
+        required=True,
+    )
+    integrity_actions.add_parser("list", help="Lista snapshots em quarentena.")
+    quarantine = integrity_actions.add_parser(
+        "quarantine",
+        help="Preserva snapshots inválidos, excluindo-os da estratégia.",
+    )
+    quarantine.add_argument(
+        "--from-date", required=True, help="Data inicial YYYY-MM-DD."
+    )
+    quarantine.add_argument("--to-date", required=True, help="Data final YYYY-MM-DD.")
+    quarantine.add_argument(
+        "--reason", required=True, help="Motivo auditável da quarentena."
     )
 
     return parser.parse_args()
@@ -1108,7 +1136,9 @@ def main() -> None:
             today=dt.date.fromisoformat(ref_today) if ref_today else None,
             dry_run=bool(getattr(args, "dry_run", False)),
         )
-        action_label = "Previa de retencao" if report["dry_run"] else "Retencao aplicada"
+        action_label = (
+            "Previa de retencao" if report["dry_run"] else "Retencao aplicada"
+        )
         print(f"{action_label} em {report['today']}")
         print("Dados preservados para sempre:")
         for table in report["preserved_forever"]:
@@ -1129,7 +1159,9 @@ def main() -> None:
             f"{report['policy']['iv_expired_grace_days']} dias apos vencimento"
         )
         print(f"  - flow_history: {report['policy']['flow_history_days']} dias")
-        print(f"  - ranking_entries/ranking_runs: {report['policy']['ranking_days']} dias")
+        print(
+            f"  - ranking_entries/ranking_runs: {report['policy']['ranking_days']} dias"
+        )
         print(f"  - fundamentus_*: {report['policy']['fundamentus_days']} dias")
         removed = report["removed"]
         print("Resultado:")
@@ -1151,6 +1183,10 @@ def main() -> None:
         print(f"  - fundamentus_runs: {removed['fundamentus_runs']}")
         print(f"  - fundamentus_signals: {removed['fundamentus_signals']}")
         print(f"  - fundamentus_filter_runs: {removed['fundamentus_filter_runs']}")
+        print(
+            "  - fundamentus_snapshot_integrity: "
+            f"{removed['fundamentus_snapshot_integrity']}"
+        )
     elif args.cmd == "tax":
         mode = (args.mode or "real").strip().lower()
         is_simulated: Optional[bool]
@@ -1180,9 +1216,7 @@ def main() -> None:
         print(
             f"  Total IR devido: R$ {summary.total_ir:.2f} (IRRF a compensar: R$ {summary.total_irrf:.2f})"
         )
-        print(
-            f"  DARF lÃ­quida do mÃªs: R$ {summary.net_ir_due:.2f}"
-        )
+        print(f"  DARF lÃ­quida do mÃªs: R$ {summary.net_ir_due:.2f}")
     elif args.cmd == "user":
         if args.subcmd == "create":
             password = args.password
@@ -1198,7 +1232,9 @@ def main() -> None:
                 raise SystemExit(str(exc)) from exc
             if created:
                 user_schema = _resolve_user_target_schema(username=args.username)
-                print(f"Usuário '{args.username}' salvo com sucesso. Schema: {user_schema}")
+                print(
+                    f"Usuário '{args.username}' salvo com sucesso. Schema: {user_schema}"
+                )
             else:
                 raise SystemExit(
                     f"Usuário '{args.username}' já existe. Use --replace para atualizar a senha."
@@ -1235,10 +1271,14 @@ def main() -> None:
             try:
                 report = migrate_user_app_schemas(
                     dry_run=bool(getattr(args, "dry_run", False)),
-                    clone_legacy_schema=not bool(getattr(args, "no_clone_legacy", False)),
+                    clone_legacy_schema=not bool(
+                        getattr(args, "no_clone_legacy", False)
+                    ),
                 )
             except Exception as exc:
-                raise SystemExit(f"Falha na migração de schemas dos usuários: {exc}") from exc
+                raise SystemExit(
+                    f"Falha na migração de schemas dos usuários: {exc}"
+                ) from exc
             if report.get("dry_run"):
                 print("Dry-run da migração de schemas:")
             else:
@@ -1257,7 +1297,9 @@ def main() -> None:
                         f"  - {item.get('source_schema')} -> {item.get('target_schema')}"
                     )
         elif args.subcmd == "invite":
-            explicit_schema = sanitize_schema_name(args.target_schema) if args.target_schema else None
+            explicit_schema = (
+                sanitize_schema_name(args.target_schema) if args.target_schema else None
+            )
             try:
                 temp_password = issue_temporary_password(
                     username=args.username,
@@ -1290,7 +1332,9 @@ def main() -> None:
             password = args.password
             if not password:
                 password = getpass.getpass("Senha do usuário: ")
-            explicit_schema = sanitize_schema_name(args.target_schema) if args.target_schema else None
+            explicit_schema = (
+                sanitize_schema_name(args.target_schema) if args.target_schema else None
+            )
             try:
                 created = create_user(
                     username=args.username,
@@ -1447,7 +1491,11 @@ def main() -> None:
             if not source_dsn:
                 source_target, source_errors = resolve_postgres_target()
                 if source_target is None:
-                    details = "; ".join(source_errors) if source_errors else "configuração ausente"
+                    details = (
+                        "; ".join(source_errors)
+                        if source_errors
+                        else "configuração ausente"
+                    )
                     raise SystemExit(
                         f"Falha ao resolver origem no .env local: {details}"
                     )
@@ -1473,7 +1521,11 @@ def main() -> None:
             print(f"Destino: {report['target']}")
             print(
                 "Modo destino: "
-                + ("TRUNCATE + cópia integral" if report.get("truncate_target") else "cópia sem truncate")
+                + (
+                    "TRUNCATE + cópia integral"
+                    if report.get("truncate_target")
+                    else "cópia sem truncate"
+                )
             )
             print("Tabelas migradas:")
             for item in report.get("tables", []):
@@ -1487,12 +1539,18 @@ def main() -> None:
         snap = None
         if args.snapshot_date:
             snap = _parse_trade_date(args.snapshot_date)
-        count = scrape_and_store(
-            pl_min=args.pl_min,
-            patrim_min=args.patrim_min,
-            timeout=args.timeout,
-            snapshot_date=snap,
-        )
+        try:
+            count = scrape_and_store(
+                pl_min=args.pl_min,
+                patrim_min=args.patrim_min,
+                timeout=args.timeout,
+                snapshot_date=snap,
+            )
+        except FundamentusSchemaError as exc:
+            raise SystemExit(
+                "Fundamentus: estrutura de origem incompatível; nenhum dado foi gravado. "
+                f"Detalhe: {exc}"
+            ) from exc
         print(
             f"Fundamentus: {count} linhas gravadas no snapshot {snap or dt.date.today().isoformat()}."
         )
@@ -1519,6 +1577,29 @@ def main() -> None:
                 f"{results['approved']} aprovadas, {results['rejected']} reprovadas "
                 f"(total {results['total']}) no snapshot {used_snap}."
             )
+    elif args.cmd == "fundamentus-integrity":
+        if args.fundamentus_integrity_action == "list":
+            rows = list_quarantined_snapshots()
+            if not rows:
+                print("Fundamentus: nenhum snapshot em quarentena.")
+            else:
+                print("Fundamentus: snapshots em quarentena:")
+                for row in rows:
+                    print(
+                        f"  - {row['snapshot_date']}: {row.get('reason') or 'Sem motivo informado.'}"
+                    )
+        elif args.fundamentus_integrity_action == "quarantine":
+            try:
+                count = quarantine_snapshots(
+                    start_date=args.from_date,
+                    end_date=args.to_date,
+                    reason=args.reason,
+                )
+            except ValueError as exc:
+                raise SystemExit(
+                    f"Fundamentus: quarentena não aplicada. {exc}"
+                ) from exc
+            print(f"Fundamentus: {count} snapshots colocados em quarentena.")
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 

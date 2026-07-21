@@ -156,18 +156,24 @@ def apply_retention(
     policy = policy or RetentionPolicy()
     today = today or dt.date.today()
 
-    option_cutoff = (today - dt.timedelta(days=_safe_days(policy.option_snapshot_days))).isoformat()
+    option_cutoff = (
+        today - dt.timedelta(days=_safe_days(policy.option_snapshot_days))
+    ).isoformat()
     option_expired_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.option_expired_grace_days))
     ).isoformat()
     underlying_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.underlying_snapshot_days))
     ).isoformat()
-    iv_cutoff = (today - dt.timedelta(days=_safe_days(policy.iv_history_days))).isoformat()
+    iv_cutoff = (
+        today - dt.timedelta(days=_safe_days(policy.iv_history_days))
+    ).isoformat()
     iv_expired_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.iv_expired_grace_days))
     ).isoformat()
-    flow_cutoff = (today - dt.timedelta(days=_safe_days(policy.flow_history_days))).isoformat()
+    flow_cutoff = (
+        today - dt.timedelta(days=_safe_days(policy.flow_history_days))
+    ).isoformat()
     ranking_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.ranking_days))
     ).isoformat()
@@ -191,6 +197,7 @@ def apply_retention(
         "fundamentus_runs": 0,
         "fundamentus_signals": 0,
         "fundamentus_filter_runs": 0,
+        "fundamentus_snapshot_integrity": 0,
     }
 
     conn = _connect(db_path)
@@ -270,7 +277,9 @@ def apply_retention(
                 params=(iv_cutoff, today_iso, iv_expired_cutoff),
                 dry_run=dry_run,
             )
-            removed["iv_history"] = removed["iv_history_age"] + removed["iv_history_expired"]
+            removed["iv_history"] = (
+                removed["iv_history_age"] + removed["iv_history_expired"]
+            )
 
         if _table_exists(conn, "flow_history"):
             removed["flow_history"] = _count_or_delete(
@@ -286,6 +295,7 @@ def apply_retention(
             ("fundamentus_runs", "fundamentus_runs"),
             ("fundamentus_signals", "fundamentus_signals"),
             ("fundamentus_filter_runs", "fundamentus_filter_runs"),
+            ("fundamentus_snapshot_integrity", "fundamentus_snapshot_integrity"),
         ):
             if _table_exists(conn, table_name):
                 removed[key] = _count_or_delete(
@@ -304,7 +314,9 @@ def apply_retention(
             "today": today_iso,
             "policy": {
                 "option_snapshot_days": _safe_days(policy.option_snapshot_days),
-                "option_expired_grace_days": _safe_days(policy.option_expired_grace_days),
+                "option_expired_grace_days": _safe_days(
+                    policy.option_expired_grace_days
+                ),
                 "underlying_snapshot_days": _safe_days(policy.underlying_snapshot_days),
                 "iv_history_days": _safe_days(policy.iv_history_days),
                 "iv_expired_grace_days": _safe_days(policy.iv_expired_grace_days),

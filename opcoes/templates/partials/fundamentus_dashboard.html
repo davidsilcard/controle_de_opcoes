@@ -8,6 +8,12 @@
     {% endif %}
   </p>
 {% endif %}
+{% if snapshot_integrity and snapshot_integrity.status == 'quarantined' %}
+  <div class="alert alert-danger small" role="alert">
+    O snapshot {{ snapshot_date }} foi colocado em quarentena e não participa da estratégia.
+    {% if snapshot_integrity.reason %}Motivo: {{ snapshot_integrity.reason }}{% endif %}
+  </div>
+{% endif %}
 {% set lag_days = snapshot_lag_days | default(none) %}
 {% if lag_days is not none and lag_days > 0 %}
   <div class="alert alert-warning small" role="alert">
@@ -22,7 +28,7 @@
     <div class="card-body py-2">
       <div class="row small">
         <div class="col-md-4">Liq. 2m min: <strong>{{ '%.0f'|format(filter_run.liq_2m_min) }}</strong></div>
-        <div class="col-md-4">Div. Bruta/Patrim max: <strong>{{ '%.2f'|format(filter_run.div_bruta_patrim_max) }}</strong></div>
+        <div class="col-md-4">Dívida/Patrim. max: <strong>{{ '%.2f'|format(filter_run.div_bruta_patrim_max) }}</strong></div>
         <div class="col-md-4">Cresc. Rec. 5a min: <strong>{{ '%.2f'|format(filter_run.cresc_rec_5a_min) }}%</strong></div>
         <div class="col-md-4">DY min: <strong>{{ '%.2f'|format(filter_run.div_yield_min) }}%</strong></div>
         <div class="col-md-4">ROE min: <strong>{{ '%.2f'|format(filter_run.roe_min) }}%</strong></div>
@@ -72,17 +78,27 @@
   </form>
 {% endif %}
 
-{% if rows and not signals_available %}
-  <div class="alert alert-warning" role="alert">
-    Filtros ainda nao aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
-  </div>
-{% elif rows and signals_available %}
+{% if signals_available and rows %}
   <div class="alert alert-success" role="alert">
     Filtros aplicados no snapshot mais recente.
   </div>
+{% elif signals_available and status_filter == 'approved' %}
+  <div class="alert alert-secondary" role="alert">
+    Nenhuma ação foi aprovada pelos filtros deste snapshot. As {{ rejected_count }} ações avaliadas foram reprovadas;
+    consulte a visão <a href="?status=rejected{{ qs_date }}{{ qs_limit }}{{ qs_window }}" class="alert-link">Reprovadas</a>
+    para conferir os motivos.
+  </div>
+{% elif signals_available %}
+  <div class="alert alert-secondary" role="alert">
+    Nenhuma ação corresponde ao filtro selecionado neste snapshot.
+  </div>
+{% elif rows %}
+  <div class="alert alert-warning" role="alert">
+    Filtros ainda nao aplicados. Rode <code>uv run python -m opcoes.cli fundamentus-filter</code>.
+  </div>
 {% else %}
-  <div class="alert alert-info" role="alert">
-    Em construcao. Esta aba vai concentrar o filtro fundamentalista e avisos da estrategia.
+  <div class="alert alert-warning" role="alert">
+    Não há snapshot Fundamentus válido disponível.
   </div>
 {% endif %}
 
@@ -370,7 +386,7 @@
           <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="17" data-type="percent">ROE <span class="sort-indicator"></span></button></th>
           <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="18" data-type="number">Liq.2meses <span class="sort-indicator"></span></button></th>
           <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="19" data-type="number">Patrim. Liq <span class="sort-indicator"></span></button></th>
-          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="20" data-type="number">Div.Brut/ Patrim. <span class="sort-indicator"></span></button></th>
+          <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="20" data-type="number">Dívida/ Patrim. <span class="sort-indicator"></span></button></th>
           <th class="text-end" data-type="percent"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="21" data-type="percent">Cresc. Rec.5a <span class="sort-indicator"></span></button></th>
           <th class="text-end" data-type="number"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="22" data-type="number" title="PEG = P/L dividido pelo Cresc. Rec. 5a (%)">PEG <span class="sort-indicator"></span></button></th>
           <th class="text-end" data-type="text"><button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="23" data-type="text">Status <span class="sort-indicator"></span></button></th>

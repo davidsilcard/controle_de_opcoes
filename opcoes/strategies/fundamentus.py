@@ -17,6 +17,7 @@ from ..fundamentus import (
     fetch_signal_dates,
     fetch_signals,
     fetch_snapshot,
+    get_snapshot_integrity,
     latest_snapshot_date,
 )
 from ..settings import get_fundamentus_settings
@@ -88,8 +89,8 @@ _REASON_LABELS = {
     "approved": "Aprovada em todos os filtros.",
     "missing_liquidez_2m": "Sem dado de liquidez de 2 meses.",
     "liquidez_2m_below_min": "Liquidez de 2 meses abaixo do minimo.",
-    "missing_div_bruta_patrim": "Sem dado de divida bruta/patrimonio.",
-    "div_bruta_patrim_above_max": "Divida bruta/patrimonio acima do limite.",
+    "missing_div_bruta_patrim": "Sem dado de divida/patrimonio.",
+    "div_bruta_patrim_above_max": "Divida/patrimonio acima do limite.",
     "missing_cresc_rec_5a": "Sem dado de crescimento de receita em 5 anos.",
     "cresc_rec_5a_below_min": "Crescimento de receita em 5 anos abaixo do minimo.",
     "missing_div_yield": "Sem dado de dividend yield.",
@@ -102,7 +103,9 @@ _REASON_LABELS = {
 
 
 class _PgResult:
-    def __init__(self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0) -> None:
+    def __init__(
+        self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0
+    ) -> None:
         self._rows = list(rows or [])
         self.rowcount = int(rowcount or 0)
         self.lastrowid = None
@@ -207,6 +210,7 @@ def _translate_reason(reason: Optional[str]) -> str:
         return _REASON_LABELS[key]
     return key.replace("_", " ")
 
+
 def _parse_date(value: Optional[str]) -> Optional[dt.date]:
     if not value:
         return None
@@ -234,7 +238,9 @@ def _next_month_third_friday(base_date: dt.date) -> dt.date:
 def _latest_option_snapshot_date() -> Optional[str]:
     conn = _connect_db()
     try:
-        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
+        row = conn.execute(
+            "SELECT MAX(snapshot_date) AS d FROM option_snapshots"
+        ).fetchone()
         if not row:
             return None
         if isinstance(row, Mapping):
@@ -246,7 +252,9 @@ def _latest_option_snapshot_date() -> Optional[str]:
         conn.close()
 
 
-def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> Dict[str, float]:
+def _fetch_underlying_prices(
+    snapshot_date: str, underlyings: Sequence[str]
+) -> Dict[str, float]:
     if not snapshot_date or not underlyings:
         return {}
     conn = _connect_db()
@@ -258,7 +266,9 @@ def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> 
             FROM underlying_snapshots
             WHERE snapshot_date = ?
               AND UPPER(underlying) IN ({placeholders})
-        """.format(placeholders=placeholders)
+        """.format(
+            placeholders=placeholders
+        )
         rows = conn.execute(query, params).fetchall()
         prices: Dict[str, float] = {}
         for row in rows:
@@ -273,7 +283,9 @@ def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> 
         conn.close()
 
 
-def _fetch_put_rows(snapshot_date: str, underlyings: Sequence[str]) -> List[Dict[str, Any]]:
+def _fetch_put_rows(
+    snapshot_date: str, underlyings: Sequence[str]
+) -> List[Dict[str, Any]]:
     if not snapshot_date or not underlyings:
         return []
     conn = _connect_db()
@@ -286,7 +298,9 @@ def _fetch_put_rows(snapshot_date: str, underlyings: Sequence[str]) -> List[Dict
             WHERE snapshot_date = ?
               AND UPPER(underlying) IN ({placeholders})
               AND UPPER(option_type) LIKE 'PUT%'
-        """.format(placeholders=placeholders)
+        """.format(
+            placeholders=placeholders
+        )
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
     except Exception:
@@ -333,7 +347,9 @@ def _compute_fund_quality_score(fund: Mapping[str, Optional[float]]) -> float:
     return (sum(components) / len(components)) * 10.0
 
 
-def _classify_put_profile(distance_pct: float, monthly_yield_pct: Optional[float], has_bid: bool) -> str:
+def _classify_put_profile(
+    distance_pct: float, monthly_yield_pct: Optional[float], has_bid: bool
+) -> str:
     monthly = monthly_yield_pct or 0.0
     if distance_pct >= 8.0 and monthly <= 2.5 and has_bid:
         return "Conservadora"
@@ -428,9 +444,13 @@ def _build_put_opportunities(
             monthly_yield_pct = premium_pct * (30.0 / float(days_to_exp))
 
         safety_score = _clamp(distance_pct / distance_target_pct) * 10.0
-        income_base = monthly_yield_pct if monthly_yield_pct is not None else premium_pct
+        income_base = (
+            monthly_yield_pct if monthly_yield_pct is not None else premium_pct
+        )
         income_score = _clamp(income_base / monthly_target_pct) * 10.0
-        quality_score = _compute_fund_quality_score(fundamentals_idx.get(underlying, {}))
+        quality_score = _compute_fund_quality_score(
+            fundamentals_idx.get(underlying, {})
+        )
         execution_score = 10.0 if premium_source == "best_bid" else 3.5
 
         put_score = (
@@ -501,7 +521,9 @@ def _liquidez_key(row: Dict[str, Any]) -> float:
 def _fetch_option_underlyings() -> set[str]:
     conn = _connect_db()
     try:
-        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
+        row = conn.execute(
+            "SELECT MAX(snapshot_date) AS d FROM option_snapshots"
+        ).fetchone()
         snapshot_date = row["d"] if row else None
         if not snapshot_date:
             return set()
@@ -591,7 +613,9 @@ def _ensure_ticker_metadata_table(conn: _DbConn) -> None:
     conn.commit()
 
 
-def _load_cached_metadata(tickers: Sequence[str]) -> tuple[Dict[str, Dict[str, Optional[str]]], List[str]]:
+def _load_cached_metadata(
+    tickers: Sequence[str],
+) -> tuple[Dict[str, Dict[str, Optional[str]]], List[str]]:
     cached: Dict[str, Dict[str, Optional[str]]] = {}
     missing: List[str] = []
     for ticker in tickers:
@@ -801,7 +825,9 @@ def _signal_with_labels(signal: Mapping[str, Any]) -> Dict[str, Any]:
     return data
 
 
-def _build_put_profile_breakdown(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+def _build_put_profile_breakdown(
+    rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
     order = ["Conservadora", "Equilibrada", "Agressiva"]
     counts = Counter(str(row.get("put_profile") or "").strip() for row in rows)
     out: List[Dict[str, Any]] = []
@@ -821,18 +847,19 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     rows = fetch_snapshot(snapshot_date=snap or None, limit=limit)
     signals = fetch_signals(snapshot_date=snap or None)
     filter_run = fetch_filter_run(snapshot_date=snap or None)
+    snapshot_integrity = get_snapshot_integrity(snapshot_date=snap) if snap else None
     signals_map = {
-        s["papel"]: _signal_with_labels(s)
-        for s in signals
-        if s.get("papel")
+        s["papel"]: _signal_with_labels(s) for s in signals if s.get("papel")
     }
     for row in rows:
         signal = signals_map.get(row.get("papel"))
         if signal:
             row["signal"] = signal
 
-    if not rows:
-        message = "Em construcao: aguardando definicao de filtros e coleta no Fundamentus."
+    if snapshot_integrity and snapshot_integrity.get("status") == "quarantined":
+        message = "Snapshot em quarentena por falha de integridade da fonte."
+    elif not rows:
+        message = "Nenhum snapshot Fundamentus valido esta disponivel."
     elif signals:
         message = "Snapshot e filtros carregados a partir do banco."
     else:
@@ -842,18 +869,26 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     rejected_count = sum(1 for s in signals if s.get("status") == "rejected")
     status_filter = _get_status_filter(args, has_signals=bool(signals))
     if status_filter == "approved":
-        filtered_rows = [row for row in rows if row.get("signal", {}).get("status") == "approved"]
+        filtered_rows = [
+            row for row in rows if row.get("signal", {}).get("status") == "approved"
+        ]
     elif status_filter == "rejected":
-        filtered_rows = [row for row in rows if row.get("signal", {}).get("status") == "rejected"]
+        filtered_rows = [
+            row for row in rows if row.get("signal", {}).get("status") == "rejected"
+        ]
     else:
         filtered_rows = rows
-    status_label = {"approved": "Aprovadas", "rejected": "Reprovadas", "all": "Todas"}.get(
-        status_filter, "Todas"
-    )
+    status_label = {
+        "approved": "Aprovadas",
+        "rejected": "Reprovadas",
+        "all": "Todas",
+    }.get(status_filter, "Todas")
 
     fund_cfg = get_fundamentus_settings()
     target_yield_pct = fund_cfg.target_yield_pct or _TARGET_YIELD_PCT
-    put_distance_limit_pct = max(1.0, fund_cfg.put_distance_limit_pct or _PUT_DISTANCE_LIMIT_PCT)
+    put_distance_limit_pct = max(
+        1.0, fund_cfg.put_distance_limit_pct or _PUT_DISTANCE_LIMIT_PCT
+    )
     put_min_premium_pct = max(0.0, fund_cfg.put_min_premium_pct or _PUT_MIN_PREMIUM_PCT)
     put_target_monthly_yield_pct = max(
         0.1,
@@ -885,7 +920,9 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
                 row for row in rows if row.get("signal", {}).get("status") == "approved"
             ]
             prev_approved_rows = [
-                row for row in prev_rows if row.get("signal", {}).get("status") == "approved"
+                row
+                for row in prev_rows
+                if row.get("signal", {}).get("status") == "approved"
             ]
             current_approved_rows = _dedupe_by_option_listing(
                 current_approved_rows,
@@ -931,7 +968,9 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         snapshot_lag_days = (fund_snapshot_dt - option_snapshot_dt).days
     put_opportunities: List[Dict[str, Any]] = []
     if option_snapshot_date:
-        put_base_date = _parse_date(option_snapshot_date) or _parse_date(snap) or dt.date.today()
+        put_base_date = (
+            _parse_date(option_snapshot_date) or _parse_date(snap) or dt.date.today()
+        )
         target_vencimento = _next_month_third_friday(put_base_date)
     if filtered_rows and option_snapshot_date and target_vencimento:
         underlyings = [
@@ -952,7 +991,9 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             asof_date=put_base_date,
             price_map=price_map,
         )
-        put_watchlist_count = sum(1 for row in put_opportunities if row.get("premium_source") != "best_bid")
+        put_watchlist_count = sum(
+            1 for row in put_opportunities if row.get("premium_source") != "best_bid"
+        )
         put_profile_breakdown = _build_put_profile_breakdown(put_opportunities)
     put_target_vencimento = (
         target_vencimento.strftime("%d/%m/%Y") if target_vencimento else None
@@ -966,7 +1007,7 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         limit=20,
     )
     return {
-        "status": "em_construcao" if not rows else "ok",
+        "status": "empty" if not rows else "ok",
         "message": message,
         "snapshot_date": snap or None,
         "rows": filtered_rows,
@@ -979,6 +1020,7 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "status_filter": status_filter,
         "status_label": status_label,
         "filter_run": filter_run,
+        "snapshot_integrity": snapshot_integrity,
         "target_yield_pct": target_yield_pct,
         "sector_breakdown": sector_breakdown,
         "changes_reference_date": changes_reference_date,

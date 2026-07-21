@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import http.cookiejar
+import re
+import unicodedata
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib import parse, request
-import http.cookiejar
 
 from .config import (
     get_postgres_shared_schema,
@@ -42,6 +44,78 @@ RESULT_FIELDS = [
 ]
 
 NUMERIC_FIELDS = [f for f in RESULT_FIELDS if f != "papel"]
+
+
+class FundamentusSchemaError(RuntimeError):
+    """Indica que a estrutura publicada pelo Fundamentus mudou."""
+
+
+# O Fundamentus pode inserir indicadores no meio da tabela. O contrato da
+# aplicação é o nome da coluna, nunca sua posição no HTML.
+_HEADER_FIELDS = {
+    "papel": "papel",
+    "cotacao": "cotacao",
+    "pl": "pl",
+    "pvp": "pvp",
+    "psr": "psr",
+    "divyield": "div_yield",
+    "pativo": "p_ativo",
+    "pcapgiro": "p_cap_giro",
+    "pebit": "p_ebit",
+    "pativcircliq": "p_ativo_circ_liq",
+    "evebit": "ev_ebit",
+    "evebitda": "ev_ebitda",
+    "mrgbruta": "margem_bruta",
+    "mrgebit": "margem_ebit",
+    "mrgliq": "margem_liquida",
+    "liqcorr": "liquidez_corrente",
+    "roic": "roic",
+    "roe": "roe",
+    "liq2meses": "liquidez_2m",
+    "patrimliq": "patrimonio_liq",
+    "divbrutpatrim": "div_bruta_patrim",
+    "divliqpatrim": "div_bruta_patrim",
+    "crescrec5a": "cresc_rec_5a",
+}
+
+SNAPSHOT_STATUS_VALID = "valid"
+SNAPSHOT_STATUS_QUARANTINED = "quarantined"
+
+
+def _normalize_header(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _resolve_result_headers(headers: Sequence[str]) -> Dict[str, int]:
+    if not headers:
+        raise FundamentusSchemaError("A tabela de resultado nao trouxe cabecalhos.")
+
+    positions: Dict[str, int] = {}
+    unknown_headers: List[str] = []
+    duplicate_fields: List[str] = []
+    for index, header in enumerate(headers):
+        field = _HEADER_FIELDS.get(_normalize_header(header))
+        if field is None:
+            unknown_headers.append(header)
+            continue
+        if field in positions:
+            duplicate_fields.append(header)
+            continue
+        positions[field] = index
+
+    missing_fields = [field for field in RESULT_FIELDS if field not in positions]
+    if unknown_headers or duplicate_fields or missing_fields:
+        details: List[str] = []
+        if unknown_headers:
+            details.append("cabecalho desconhecido: " + ", ".join(unknown_headers))
+        if duplicate_fields:
+            details.append("cabecalho duplicado: " + ", ".join(duplicate_fields))
+        if missing_fields:
+            details.append("campos obrigatorios ausentes: " + ", ".join(missing_fields))
+        raise FundamentusSchemaError("; ".join(details))
+    return positions
 
 
 @dataclass(frozen=True)
@@ -116,11 +190,15 @@ class _FundamentusTableParser(HTMLParser):
 def parse_result_table(html: str) -> List[Dict[str, str]]:
     parser = _FundamentusTableParser()
     parser.feed(html)
+    positions = _resolve_result_headers(parser.headers)
     results: List[Dict[str, str]] = []
-    for row in parser.rows:
-        if len(row) < len(RESULT_FIELDS):
-            continue
-        payload = dict(zip(RESULT_FIELDS, row[: len(RESULT_FIELDS)]))
+    for row_number, row in enumerate(parser.rows, start=1):
+        if len(row) != len(parser.headers):
+            raise FundamentusSchemaError(
+                "Linha "
+                f"{row_number} trouxe {len(row)} colunas; esperado {len(parser.headers)}."
+            )
+        payload = {field: row[positions[field]] for field in RESULT_FIELDS}
         results.append(payload)
     return results
 
@@ -138,10 +216,14 @@ def normalize_rows(rows: Sequence[Dict[str, str]]) -> List[Dict[str, object]]:
     return normalized
 
 
-def evaluate_row(row: Dict[str, object], cfg: FundamentusFilterConfig) -> Dict[str, object]:
+def evaluate_row(
+    row: Dict[str, object], cfg: FundamentusFilterConfig
+) -> Dict[str, object]:
     papel = (row.get("papel") or "").strip().upper()
 
-    def reject(step: int, rule: str, value: Optional[float], reason: str) -> Dict[str, object]:
+    def reject(
+        step: int, rule: str, value: Optional[float], reason: str
+    ) -> Dict[str, object]:
         return {
             "papel": papel,
             "status": "rejected",
@@ -161,7 +243,9 @@ def evaluate_row(row: Dict[str, object], cfg: FundamentusFilterConfig) -> Dict[s
     if div_bruta is None:
         return reject(2, "div_bruta_patrim_max", None, "missing_div_bruta_patrim")
     if div_bruta > cfg.div_bruta_patrim_max:
-        return reject(2, "div_bruta_patrim_max", float(div_bruta), "div_bruta_patrim_above_max")
+        return reject(
+            2, "div_bruta_patrim_max", float(div_bruta), "div_bruta_patrim_above_max"
+        )
 
     cresc_rec = row.get("cresc_rec_5a")
     if cresc_rec is None:
@@ -184,8 +268,13 @@ def evaluate_row(row: Dict[str, object], cfg: FundamentusFilterConfig) -> Dict[s
     margem = row.get("margem_liquida")
     if margem is None:
         return reject(6, "margem_liquida_rule", None, "missing_margem_liquida")
-    if not (margem >= cfg.margem_liquida_min or (cfg.margem_liquida_allow_zero and margem == 0)):
-        return reject(6, "margem_liquida_rule", float(margem), "margem_liquida_out_of_rule")
+    if not (
+        margem >= cfg.margem_liquida_min
+        or (cfg.margem_liquida_allow_zero and margem == 0)
+    ):
+        return reject(
+            6, "margem_liquida_rule", float(margem), "margem_liquida_out_of_rule"
+        )
 
     return {
         "papel": papel,
@@ -197,7 +286,9 @@ def evaluate_row(row: Dict[str, object], cfg: FundamentusFilterConfig) -> Dict[s
     }
 
 
-def evaluate_rows(rows: Sequence[Dict[str, object]], cfg: Optional[FundamentusFilterConfig] = None) -> List[Dict[str, object]]:
+def evaluate_rows(
+    rows: Sequence[Dict[str, object]], cfg: Optional[FundamentusFilterConfig] = None
+) -> List[Dict[str, object]]:
     cfg = cfg or FundamentusFilterConfig()
     results: List[Dict[str, object]] = []
     for row in rows:
@@ -225,7 +316,10 @@ def fetch_fundamentus_results(
     jar = http.cookiejar.CookieJar()
     opener = request.build_opener(request.HTTPCookieProcessor(jar))
     opener.addheaders = [
-        ("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"),
+        (
+            "User-Agent",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        ),
         ("Referer", SEARCH_URL),
     ]
 
@@ -242,7 +336,9 @@ def fetch_fundamentus_results(
 
 
 class _PgResult:
-    def __init__(self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0) -> None:
+    def __init__(
+        self, rows: Optional[list[Mapping[str, Any]]] = None, *, rowcount: int = 0
+    ) -> None:
         self._rows = list(rows or [])
         self.rowcount = int(rowcount or 0)
         self.lastrowid = None
@@ -399,6 +495,16 @@ def _ensure_tables(conn: _DbConn) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_snapshot_integrity (
+                snapshot_date TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                reason TEXT,
+                assessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     else:
         conn.execute(
             """
@@ -471,7 +577,59 @@ def _ensure_tables(conn: _DbConn) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fundamentus_snapshot_integrity (
+                snapshot_date TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                reason TEXT,
+                assessed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     conn.commit()
+
+
+def _snapshot_is_visible_sql(table_alias: str) -> str:
+    return (
+        "NOT EXISTS ("
+        "SELECT 1 FROM fundamentus_snapshot_integrity integrity "
+        f"WHERE integrity.snapshot_date = {table_alias}.snapshot_date "
+        f"AND integrity.status = '{SNAPSHOT_STATUS_QUARANTINED}'"
+        ")"
+    )
+
+
+def _set_snapshot_integrity(
+    conn: _DbConn,
+    *,
+    snapshot_date: str,
+    status: str,
+    reason: Optional[str],
+) -> None:
+    if status not in {SNAPSHOT_STATUS_VALID, SNAPSHOT_STATUS_QUARANTINED}:
+        raise ValueError(f"Status de integridade invalido: {status}")
+    if conn.backend == "postgres":
+        conn.execute(
+            """
+            INSERT INTO fundamentus_snapshot_integrity (snapshot_date, status, reason)
+            VALUES (?, ?, ?)
+            ON CONFLICT (snapshot_date) DO UPDATE SET
+                status = EXCLUDED.status,
+                reason = EXCLUDED.reason,
+                assessed_at = CURRENT_TIMESTAMP
+            """,
+            (snapshot_date, status, reason),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO fundamentus_snapshot_integrity
+            (snapshot_date, status, reason)
+            VALUES (?, ?, ?)
+            """,
+            (snapshot_date, status, reason),
+        )
 
 
 def save_snapshot(
@@ -528,7 +686,13 @@ def save_snapshot(
                     source_url = EXCLUDED.source_url,
                     created_at = CURRENT_TIMESTAMP
                 """,
-                (snapshot_date, float(pl_min), float(patrim_min), 1 if negociada else 0, RESULT_URL),
+                (
+                    snapshot_date,
+                    float(pl_min),
+                    float(patrim_min),
+                    1 if negociada else 0,
+                    RESULT_URL,
+                ),
             )
         else:
             conn.execute(
@@ -537,7 +701,13 @@ def save_snapshot(
                 (snapshot_date, pl_min, patrim_min, negociada, source_url)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (snapshot_date, float(pl_min), float(patrim_min), 1 if negociada else 0, RESULT_URL),
+                (
+                    snapshot_date,
+                    float(pl_min),
+                    float(patrim_min),
+                    1 if negociada else 0,
+                    RESULT_URL,
+                ),
             )
         if payload:
             if conn.backend == "postgres":
@@ -585,6 +755,13 @@ def save_snapshot(
                     """,
                     payload,
                 )
+        if payload:
+            _set_snapshot_integrity(
+                conn,
+                snapshot_date=snapshot_date,
+                status=SNAPSHOT_STATUS_VALID,
+                reason=None,
+            )
         conn.commit()
     finally:
         conn.close()
@@ -693,6 +870,87 @@ def save_signals(
     return len(payload)
 
 
+def quarantine_snapshots(
+    *,
+    start_date: str,
+    end_date: str,
+    reason: str,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Preserva snapshots inválidos para auditoria, sem deixá-los alimentar a estratégia."""
+
+    start = dt.date.fromisoformat(start_date).isoformat()
+    end = dt.date.fromisoformat(end_date).isoformat()
+    if start > end:
+        raise ValueError("A data inicial deve ser menor ou igual à data final.")
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Informe o motivo da quarentena.")
+
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT snapshot_date
+            FROM fundamentus_snapshots
+            WHERE snapshot_date BETWEEN ? AND ?
+            ORDER BY snapshot_date
+            """,
+            (start, end),
+        ).fetchall()
+        for row in rows:
+            _set_snapshot_integrity(
+                conn,
+                snapshot_date=str(row["snapshot_date"]),
+                status=SNAPSHOT_STATUS_QUARANTINED,
+                reason=normalized_reason,
+            )
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def list_quarantined_snapshots(
+    *,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, object]]:
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT snapshot_date, status, reason, assessed_at
+            FROM fundamentus_snapshot_integrity
+            WHERE status = ?
+            ORDER BY snapshot_date
+            """,
+            (SNAPSHOT_STATUS_QUARANTINED,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_snapshot_integrity(
+    *,
+    snapshot_date: str,
+    db_path: Optional[Path] = None,
+) -> Optional[Dict[str, object]]:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT snapshot_date, status, reason, assessed_at
+            FROM fundamentus_snapshot_integrity
+            WHERE snapshot_date = ?
+            """,
+            (snapshot_date,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def scrape_and_store(
     *,
     pl_min: float = 0.0,
@@ -701,7 +959,11 @@ def scrape_and_store(
     snapshot_date: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> int:
-    rows = fetch_fundamentus_results(pl_min=pl_min, patrim_min=patrim_min, timeout=timeout)
+    rows = fetch_fundamentus_results(
+        pl_min=pl_min, patrim_min=patrim_min, timeout=timeout
+    )
+    if not rows:
+        raise FundamentusSchemaError("A fonte retornou uma tabela vazia.")
     return save_snapshot(
         rows,
         snapshot_date=snapshot_date,
@@ -723,6 +985,8 @@ def apply_filters(
     if not snap:
         return {"total": 0, "approved": 0, "rejected": 0}
     rows = fetch_snapshot(snapshot_date=snap, db_path=db_path)
+    if not rows:
+        return {"total": 0, "approved": 0, "rejected": 0}
     signals = evaluate_rows(rows, cfg)
     save_signals(signals, snapshot_date=snap, cfg=cfg, db_path=db_path)
     approved = sum(1 for s in signals if s.get("status") == "approved")
@@ -733,7 +997,13 @@ def apply_filters(
 def latest_snapshot_date(db_path: Optional[Path] = None) -> Optional[str]:
     conn = _connect(db_path)
     try:
-        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM fundamentus_snapshots").fetchone()
+        row = conn.execute(
+            f"""
+            SELECT MAX(snapshot_date) AS d
+            FROM fundamentus_snapshots snapshot
+            WHERE {_snapshot_is_visible_sql('snapshot')}
+            """
+        ).fetchone()
         return row["d"] if row else None
     finally:
         conn.close()
@@ -750,7 +1020,10 @@ def fetch_snapshot(
         snap = snapshot_date or latest_snapshot_date(db_path=db_path)
         if not snap:
             return []
-        query = "SELECT * FROM fundamentus_snapshots WHERE snapshot_date = ?"
+        query = (
+            "SELECT * FROM fundamentus_snapshots snapshot "
+            f"WHERE snapshot.snapshot_date = ? AND {_snapshot_is_visible_sql('snapshot')}"
+        )
         params: list[object] = [snap]
         if limit:
             query += " LIMIT ?"
@@ -772,7 +1045,10 @@ def fetch_signals(
         snap = snapshot_date or latest_snapshot_date(db_path=db_path)
         if not snap:
             return []
-        query = "SELECT * FROM fundamentus_signals WHERE snapshot_date = ?"
+        query = (
+            "SELECT * FROM fundamentus_signals signal "
+            f"WHERE signal.snapshot_date = ? AND {_snapshot_is_visible_sql('signal')}"
+        )
         params: list[object] = [snap]
         if status:
             query += " AND status = ?"
@@ -796,11 +1072,14 @@ def fetch_filter_run(
         row = conn.execute(
             """
             SELECT *
-            FROM fundamentus_filter_runs
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC
+            FROM fundamentus_filter_runs filter_run
+            WHERE filter_run.snapshot_date <= ?
+              AND {visible_sql}
+            ORDER BY filter_run.snapshot_date DESC
             LIMIT 1
-            """,
+            """.format(
+                visible_sql=_snapshot_is_visible_sql("filter_run")
+            ),
             (snap,),
         ).fetchone()
         return dict(row) if row else None
@@ -816,10 +1095,13 @@ def fetch_signal_dates(
 ) -> List[str]:
     conn = _connect(db_path)
     try:
-        query = "SELECT DISTINCT snapshot_date FROM fundamentus_signals"
+        query = (
+            "SELECT DISTINCT signal.snapshot_date FROM fundamentus_signals signal "
+            f"WHERE {_snapshot_is_visible_sql('signal')}"
+        )
         params: list[object] = []
         if end_date:
-            query += " WHERE snapshot_date <= ?"
+            query += " AND signal.snapshot_date <= ?"
             params.append(end_date)
         query += " ORDER BY snapshot_date DESC"
         if limit and limit > 0:
@@ -842,7 +1124,12 @@ def fetch_approved_ranking(
     try:
         end_date = snapshot_date or latest_snapshot_date(db_path=db_path)
         if not end_date:
-            return {"rows": [], "start_date": None, "end_date": None, "window_days": window_days}
+            return {
+                "rows": [],
+                "start_date": None,
+                "end_date": None,
+                "window_days": window_days,
+            }
         start_date: Optional[str] = None
         if window_days and window_days > 0:
             try:
@@ -852,15 +1139,18 @@ def fetch_approved_ranking(
             except ValueError:
                 start_date = None
 
-        query = "SELECT papel, COUNT(*) AS approvals FROM fundamentus_signals WHERE status = 'approved'"
+        query = (
+            "SELECT signal.papel, COUNT(*) AS approvals FROM fundamentus_signals signal "
+            f"WHERE signal.status = 'approved' AND {_snapshot_is_visible_sql('signal')}"
+        )
         params: list[object] = []
         if start_date:
-            query += " AND snapshot_date BETWEEN ? AND ?"
+            query += " AND signal.snapshot_date BETWEEN ? AND ?"
             params.extend([start_date, end_date])
         elif snapshot_date:
-            query += " AND snapshot_date <= ?"
+            query += " AND signal.snapshot_date <= ?"
             params.append(end_date)
-        query += " GROUP BY papel ORDER BY approvals DESC, papel ASC"
+        query += " GROUP BY signal.papel ORDER BY approvals DESC, signal.papel ASC"
         if limit:
             query += " LIMIT ?"
             params.append(int(limit))
@@ -877,6 +1167,7 @@ def fetch_approved_ranking(
 
 __all__ = [
     "FundamentusFilterConfig",
+    "FundamentusSchemaError",
     "fetch_fundamentus_results",
     "parse_result_table",
     "normalize_rows",
@@ -884,6 +1175,9 @@ __all__ = [
     "evaluate_rows",
     "save_snapshot",
     "save_signals",
+    "quarantine_snapshots",
+    "list_quarantined_snapshots",
+    "get_snapshot_integrity",
     "scrape_and_store",
     "apply_filters",
     "latest_snapshot_date",
