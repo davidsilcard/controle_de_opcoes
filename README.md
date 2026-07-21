@@ -216,6 +216,8 @@ uv run python -m opcoes.cli fundamentus-integrity quarantine \
 
 Use a quarentena somente com uma causa comprovada. Uma nova coleta válida para a mesma data restaura automaticamente esse snapshot para uso na estratégia.
 
+Em uma correção de dados na VPS, gere antes uma exportação lógica do intervalo afetado e guarde-a fora do worktree, em `/home/david/backups/controle_de_opcoes/`, com permissões restritas. O repositório `/home/david/apps/controle_de_opcoes` deve permanecer limpo para que deploys e auditorias Git não confundam backup com código.
+
 Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo com carregamento progressivo:
 
 - tabela detalhada das acoes aprovadas e reprovadas com filtros por coluna e ordenacao;
