@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
 from typing import Any, Mapping, Optional, Sequence
 
@@ -100,12 +101,17 @@ def _ensure_tables(conn: Any) -> None:
                 avg_price_before DOUBLE PRECISION,
                 avg_price_after DOUBLE PRECISION,
                 price_reference DOUBLE PRECISION,
+                fees DOUBLE PRECISION NOT NULL DEFAULT 0,
                 notes TEXT,
                 related_position_id BIGINT,
                 is_simulated INTEGER DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             """
+        )
+        cur.execute(
+            "ALTER TABLE equity_holding_events "
+            "ADD COLUMN IF NOT EXISTS fees DOUBLE PRECISION NOT NULL DEFAULT 0"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_equity_holdings_ticker_mode ON equity_holdings (ticker, is_simulated)"
@@ -252,7 +258,7 @@ def list_holding_events(
                 f"""
                 SELECT id, ticker, event_date, event_type, qty_delta,
                        quantity_before, quantity_after, avg_price_before, avg_price_after,
-                       price_reference, notes, related_position_id, is_simulated, created_at
+                       price_reference, fees, notes, related_position_id, is_simulated, created_at
                 FROM equity_holding_events
                 {where}
                 ORDER BY event_date DESC, id DESC
@@ -281,6 +287,7 @@ def list_holding_events(
                     if payload.get("price_reference") is not None
                     else None
                 )
+                payload["fees"] = float(payload.get("fees") or 0.0)
                 payload["is_simulated"] = bool(payload.get("is_simulated") or 0)
                 rows.append(payload)
             return rows
@@ -584,6 +591,7 @@ def _append_event(
     notes: str | None,
     related_position_id: int | None,
     is_simulated: bool,
+    fees: float = 0.0,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -598,11 +606,12 @@ def _append_event(
                 avg_price_before,
                 avg_price_after,
                 price_reference,
+                fees,
                 notes,
                 related_position_id,
                 is_simulated
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 _normalize_ticker(ticker),
@@ -614,6 +623,7 @@ def _append_event(
                 float(avg_price_before) if avg_price_before is not None else None,
                 float(avg_price_after) if avg_price_after is not None else None,
                 float(price_reference) if price_reference is not None else None,
+                float(fees or 0.0),
                 notes,
                 int(related_position_id) if related_position_id is not None else None,
                 1 if is_simulated else 0,
@@ -738,6 +748,7 @@ def apply_put_assignment_to_holding(
     ticker: str,
     qty: int,
     strike: float,
+    purchase_fees: float,
     date: str,
     is_simulated: bool,
     related_position_id: int | None = None,
@@ -746,7 +757,8 @@ def apply_put_assignment_to_holding(
     normalized = _normalize_ticker(ticker)
     qty_val = int(qty or 0)
     strike_val = float(strike or 0.0)
-    if qty_val <= 0 or strike_val <= 0:
+    fees_val = float(purchase_fees or 0.0)
+    if qty_val <= 0 or strike_val <= 0 or not math.isfinite(fees_val) or fees_val < 0:
         raise HoldingValidationError(
             f"Exercicio de put invalido para {normalized}.",
             ticker=normalized,
@@ -763,17 +775,24 @@ def apply_put_assignment_to_holding(
             else snapshot.get("avg_price")
         )
         after_qty = before_qty + qty_val
+        acquisition_cost = (strike_val * qty_val) + fees_val
         if before_qty <= 0:
-            after_avg = strike_val
+            after_avg = acquisition_cost / qty_val
             needs_review = False
         else:
             after_avg = float(before_avg or 0.0)
             needs_review = True
 
         notes = (
-            f"Exercicio da put: revise o PM consolidado de {normalized} apos a atribuicao."
+            (
+                f"Exercicio da put: revise o PM consolidado de {normalized} apos a atribuicao; "
+                f"despesas da compra: R$ {fees_val:.2f}."
+            )
             if needs_review
-            else f"Exercicio da put {related_position_id or ''}".strip()
+            else (
+                f"Exercicio da put {related_position_id or ''}; "
+                f"despesas da compra: R$ {fees_val:.2f}"
+            ).strip()
         )
 
         with db.cursor() as cur:
@@ -819,6 +838,7 @@ def apply_put_assignment_to_holding(
             notes=notes,
             related_position_id=related_position_id,
             is_simulated=is_simulated,
+            fees=fees_val,
         )
         if owns_conn:
             db.commit()
@@ -836,6 +856,7 @@ def apply_call_exercise_to_holding(
     ticker: str,
     qty: int,
     strike: float,
+    sale_fees: float,
     date: str,
     is_simulated: bool,
     related_position_id: int | None = None,
@@ -844,7 +865,8 @@ def apply_call_exercise_to_holding(
     normalized = _normalize_ticker(ticker)
     qty_val = int(qty or 0)
     strike_val = float(strike or 0.0)
-    if qty_val <= 0 or strike_val <= 0:
+    fees_val = float(sale_fees or 0.0)
+    if qty_val <= 0 or strike_val <= 0 or not math.isfinite(fees_val) or fees_val < 0:
         raise HoldingValidationError(
             f"Exercicio de call invalido para {normalized}.",
             ticker=normalized,
@@ -906,6 +928,7 @@ def apply_call_exercise_to_holding(
             notes=notes,
             related_position_id=related_position_id,
             is_simulated=is_simulated,
+            fees=fees_val,
         )
         if owns_conn:
             db.commit()

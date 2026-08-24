@@ -1607,6 +1607,7 @@ def create_app() -> Flask:
         pos = get_position(position_id)
         underlying = (pos.get("underlying") or "").strip().upper() if pos else ""
         date = _parse_form_date(form.get("date"))
+        purchase_fees = form.get("purchase_fees")
         if not date:
             return redirect(
                 url_for(
@@ -1620,13 +1621,31 @@ def create_app() -> Flask:
                 if underlying
                 else url_for("cash_covered_put")
             )
+        if purchase_fees is None or not purchase_fees.strip():
+            return redirect(
+                url_for(
+                    "cash_covered_put",
+                    underlying=underlying,
+                    position_error=(
+                        "Informe as despesas da compra da nota, inclusive R$ 0,00 quando nao houver despesas."
+                    ),
+                )
+                if underlying
+                else url_for("cash_covered_put")
+            )
         strike = _parse_form_float(form.get("strike"))
         try:
             qty = int(form.get("qty")) if form.get("qty") else None
         except (TypeError, ValueError):
             qty = None
         try:
-            assign_put(position_id=position_id, strike=strike, qty=qty, date=date)
+            assign_put(
+                position_id=position_id,
+                strike=strike,
+                qty=qty,
+                date=date,
+                purchase_fees=purchase_fees,
+            )
         except (HoldingValidationError, FlowError) as exc:
             message = str(exc) or "Nao foi possivel registrar o exercicio da PUT."
             return redirect(

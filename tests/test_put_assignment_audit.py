@@ -54,6 +54,7 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
             "qty": "800",
             "strike": "21.46",
             "date": "2026-03-20",
+            "purchase_fees": "3.20",
         },
     )
     assert response.status_code in (302, 303)
@@ -65,7 +66,7 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
 
     holding = get_holding_snapshot(ticker="GGBR4", is_simulated=False)
     assert int(holding.get("shares_total") or 0) == 800
-    assert float(holding.get("avg_price") or 0.0) == pytest.approx(21.46)
+    assert float(holding.get("avg_price") or 0.0) == pytest.approx((17168.0 + 3.20) / 800)
     assert int(holding.get("shares_reserved") or 0) == 0
 
     assignment_txs = [
@@ -75,14 +76,15 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
     ]
     assert len(assignment_txs) == 1
     assert assignment_txs[0].date == "2026-03-20"
-    assert assignment_txs[0].amount == pytest.approx(-17168.0)
+    assert assignment_txs[0].amount == pytest.approx(-17171.20)
+    assert "despesas da compra: R$ 3.20" in assignment_txs[0].description
 
     audit_response = client.get("/audit?mode=real&include_closed=1")
     assert audit_response.status_code == 200
     audit_html = audit_response.get_data(as_text=True)
     assert "Exercicio (caixa)" in audit_html
     assert "GGBR4 800" in audit_html
-    assert "-17168.00" in audit_html
+    assert "-17171.20" in audit_html
 
     ccp_response = client.get("/cash-covered-put?underlying=GGBR4")
     assert ccp_response.status_code == 200
@@ -160,3 +162,4 @@ def test_cash_put_page_uses_confirmation_modals_for_expiration_and_assignment() 
     assert 'id="modalCashPutExpire"' in html
     assert 'id="modalCashPutAssign"' in html
     assert "Confirmar exercício da PUT" in html
+    assert 'name="purchase_fees"' in html

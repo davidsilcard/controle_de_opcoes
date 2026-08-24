@@ -451,10 +451,16 @@
                       {% if r.assignment_stock_price is not none %}
                         <div class="text-muted small">@ {{ "%.2f"|format(r.assignment_stock_price) }}</div>
                       {% endif %}
+                      {% if r.assignment_stock_fees %}
+                        <div class="text-muted small">Despesas: R$ {{ "%.2f"|format(r.assignment_stock_fees) }}</div>
+                      {% endif %}
                     {% elif r.sell_stock_ticker and r.sell_stock_qty %}
                       {{ r.sell_stock_ticker }} {{ r.sell_stock_qty }}
                       {% if r.sell_stock_price is not none %}
                         <div class="text-muted small">@ {{ "%.2f"|format(r.sell_stock_price) }}</div>
+                      {% endif %}
+                      {% if r.sell_stock_fees %}
+                        <div class="text-muted small">Despesas: R$ {{ "%.2f"|format(r.sell_stock_fees) }}</div>
                       {% endif %}
                     {% else %}
                       -

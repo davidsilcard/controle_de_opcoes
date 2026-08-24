@@ -78,7 +78,7 @@ def test_audit_reconciliation_accepts_call_exercise_sell_when_ledger_matches() -
             54: {
                 finance.TransactionType.PREMIUM.value: 287.63,
                 finance.TransactionType.DARF.value: -43.14,
-                finance.TransactionType.SELL.value: 18056.0,
+                finance.TransactionType.SELL.value: 18054.75,
                 finance.TransactionType.REALIZED.value: 287.63,
             }
         },
@@ -90,12 +90,64 @@ def test_audit_reconciliation_accepts_call_exercise_sell_when_ledger_matches() -
                 "event_type": "CALL_EXERCISE",
                 "qty_delta": -800,
                 "price_reference": 22.57,
+                "fees": 1.25,
             }
         ],
     )
 
     row = ctx["rows"][0]
     assert row["diff_sell"] == 0.0
+    assert row["sell_stock_fees"] == 1.25
+    assert not ctx["audit_issues"]
+
+
+def test_audit_reconciliation_includes_purchase_fees_in_put_assignment() -> None:
+    positions = [
+        {
+            "id": 37,
+            "ticker": "GGBRO215",
+            "underlying": "GGBR4",
+            "trade_date": "2026-02-19",
+            "qty": 800,
+            "entry_price": 0.76,
+            "fees": 0.80,
+            "trade_type": "swing",
+            "side": "short",
+            "status": "closed",
+            "exit_date": "2026-03-20",
+            "exit_price": 0.0,
+            "exit_reason": "Exercicio",
+            "strategy_tag": "cash_put",
+        }
+    ]
+
+    ctx = build_audit_reconciliation(
+        positions,
+        ledger_sums={
+            37: {
+                finance.TransactionType.PREMIUM.value: 607.20,
+                finance.TransactionType.DARF.value: -91.08,
+                finance.TransactionType.ASSIGNMENT.value: -17171.20,
+                finance.TransactionType.REALIZED.value: 607.20,
+            }
+        },
+        include_closed=True,
+        holding_events=[
+            {
+                "related_position_id": 37,
+                "ticker": "GGBR4",
+                "event_type": "PUT_ASSIGNMENT",
+                "qty_delta": 800,
+                "price_reference": 21.46,
+                "fees": 3.20,
+            }
+        ],
+    )
+
+    row = ctx["rows"][0]
+    assert row["expected_assignment"] == -17171.20
+    assert row["diff_assignment"] == 0.0
+    assert row["assignment_stock_fees"] == 3.20
     assert not ctx["audit_issues"]
 
 

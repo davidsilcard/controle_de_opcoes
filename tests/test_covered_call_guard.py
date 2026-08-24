@@ -8,7 +8,7 @@ from opcoes.covered_call_guard import (
     audit_covered_call_positions,
     validate_covered_call_input,
 )
-from opcoes.flows import FlowError, callaway
+from opcoes.flows import FlowError, assign_put, callaway
 from opcoes.holdings import get_holding, upsert_holding
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
@@ -330,11 +330,17 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
     assert stock["realized_pl"] == pytest.approx(1470.75)
     ledger = finance.get_ledger_sums_by_position()
     assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
+    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
 
 
 def test_covered_call_exercise_rejects_missing_sale_fees() -> None:
     with pytest.raises(FlowError, match="Despesas da venda"):
         callaway(position_id=1, date="2026-05-15", sale_fees="")
+
+
+def test_put_assignment_rejects_missing_purchase_fees() -> None:
+    with pytest.raises(FlowError, match="Despesas da compra"):
+        assign_put(position_id=1, date="2026-05-15", purchase_fees="")
 
 
 @pytest.mark.requires_postgres

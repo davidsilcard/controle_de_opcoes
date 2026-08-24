@@ -77,7 +77,8 @@ def _exercise_cash_from_event(
         price = _float_or_none(event.get("avg_price_after"))
     if qty <= 0 or price is None:
         return None
-    return round(sign * qty * float(price), 2)
+    fees = max(float(event.get("fees") or 0.0), 0.0)
+    return round((sign * qty * float(price)) - fees, 2)
 
 
 def _stock_assignment_from_legacy_position(
@@ -173,9 +174,11 @@ def build_audit_reconciliation(
         assignment_stock_ticker = None
         assignment_stock_qty = 0
         assignment_stock_price = None
+        assignment_stock_fees = 0.0
         sell_stock_ticker = None
         sell_stock_qty = 0
         sell_stock_price = None
+        sell_stock_fees = 0.0
 
         realized_events = build_position_tax_events(pos)
         if realized_events:
@@ -212,6 +215,7 @@ def build_audit_reconciliation(
                         assignment_stock_price = _float_or_none(
                             event.get("price_reference")
                         )
+                        assignment_stock_fees = max(float(event.get("fees") or 0.0), 0.0)
                 if opt_type == "CALL" and event_type == "CALL_EXERCISE":
                     value = _exercise_cash_from_event(event, sign=1)
                     if value is not None:
@@ -219,6 +223,7 @@ def build_audit_reconciliation(
                         sell_stock_qty = abs(_int_value(event.get("qty_delta")))
                         sell_stock_ticker = event.get("ticker") or underlying
                         sell_stock_price = _float_or_none(event.get("price_reference"))
+                        sell_stock_fees = max(float(event.get("fees") or 0.0), 0.0)
 
             if opt_type == "PUT" and status_norm == "closed" and "exerc" in exit_reason:
                 if expected_assignment is None:
@@ -370,9 +375,11 @@ def build_audit_reconciliation(
             "assignment_stock_ticker": assignment_stock_ticker,
             "assignment_stock_qty": assignment_stock_qty,
             "assignment_stock_price": assignment_stock_price,
+            "assignment_stock_fees": assignment_stock_fees,
             "sell_stock_ticker": sell_stock_ticker,
             "sell_stock_qty": sell_stock_qty,
             "sell_stock_price": sell_stock_price,
+            "sell_stock_fees": sell_stock_fees,
         }
 
         relevant_fields = [

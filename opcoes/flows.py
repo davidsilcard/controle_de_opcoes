@@ -65,8 +65,13 @@ def assign_put(
     strike: Optional[float] = None,
     qty: Optional[int] = None,
     date: str,
+    purchase_fees: object,
 ) -> None:
     confirmed_date = _require_iso_date(date, label="Exercicio da PUT")
+    resolved_purchase_fees = _nonnegative_currency(
+        purchase_fees,
+        label="Despesas da compra no exercicio",
+    )
     with db_transaction() as conn:
         pos = get_position(position_id, conn=conn)
         if not pos:
@@ -100,11 +105,19 @@ def assign_put(
         )
 
         cost = float(resolved_strike) * int(resolved_qty)
+        if resolved_purchase_fees > cost:
+            raise FlowError(
+                "Despesas da compra nao podem ultrapassar o valor bruto do exercicio.",
+                underlying=underlying,
+            )
         add_transaction(
             date=confirmed_date,
             type=TransactionType.ASSIGNMENT,
-            amount=-cost,
-            description=f"Exercício PUT {position_id} @ {resolved_strike}",
+            amount=-(cost + resolved_purchase_fees),
+            description=(
+                f"Exercício PUT {position_id} @ {resolved_strike:.2f}; "
+                f"despesas da compra: R$ {resolved_purchase_fees:.2f}"
+            ),
             position_id=position_id,
             is_simulated=is_simulated,
             conn=conn,
@@ -116,6 +129,7 @@ def assign_put(
                 ticker=underlying,
                 qty=int(resolved_qty),
                 strike=float(resolved_strike),
+                purchase_fees=resolved_purchase_fees,
                 date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
@@ -161,11 +175,18 @@ def callaway(
             strike_val = float(strike)
         except (TypeError, ValueError):
             raise FlowError("Strike inválido.", underlying=underlying)
+        proceeds = strike_val * qty
+        if resolved_sale_fees > proceeds:
+            raise FlowError(
+                "Despesas da venda nao podem ultrapassar o valor bruto do exercicio.",
+                underlying=underlying,
+            )
         try:
             holding_result = apply_call_exercise_to_holding(
                 ticker=underlying,
                 qty=qty,
                 strike=strike_val,
+                sale_fees=resolved_sale_fees,
                 date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
@@ -214,12 +235,14 @@ def callaway(
             conn=conn,
         )
 
-        proceeds = strike_val * qty
         add_transaction(
             date=confirmed_date,
             type=TransactionType.SELL,
-            amount=proceeds,
-            description=f"Venda (CALL exercida) {call_pos.get('ticker')} @ {strike_val:.2f}",
+            amount=proceeds - resolved_sale_fees,
+            description=(
+                f"Venda (CALL exercida) {call_pos.get('ticker')} @ {strike_val:.2f}; "
+                f"despesas da venda: R$ {resolved_sale_fees:.2f}"
+            ),
             position_id=position_id,
             is_simulated=is_simulated,
             conn=conn,

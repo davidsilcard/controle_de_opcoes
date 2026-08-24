@@ -262,10 +262,11 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - a tela `Covered Call` agora tem um formulario proprio para salvar o `estoque consolidado` por ativo e por modo (`real` ou `simulado`).
 - o usuario informa manualmente `quantidade atual` e `preco medio`; a aplicacao usa esse saldo como fonte oficial da garantia.
 - novas calls cobertas sao bloqueadas quando a quantidade vendida ultrapassa o saldo livre, com mensagem explicando o motivo.
-- em `PUT` exercida em `Cash-Covered Put`, a aplicacao aumenta o estoque consolidado e sinaliza revisao do preco medio quando necessario.
+- em `PUT` exercida em `Cash-Covered Put`, a aplicacao exige as despesas atribuidas a compra da nota, registra o debito total no caixa, inclui essas despesas no custo do estoque novo e sinaliza revisao do preco medio quando necessario.
 - em `CALL` exercida, a aplicacao reduz o estoque consolidado automaticamente e gera um historico fechado para manter a trilha de auditoria/resultado.
 - em `Cash-Covered Put` e `Covered Call`, os botoes `Exercido` e `Expirou` abrem uma confirmacao com data obrigatoria; sem data de vencimento/exercicio confirmada, a baixa e bloqueada para evitar registro no dia errado.
 - no exercício de `Covered Call`, informe obrigatoriamente as despesas da venda destacadas na nota (corretagem, liquidação e emolumentos); elas entram no resultado realizado e na DARF. Se a nota agrupar várias vendas, distribua o total entre elas sem repetir. Quando a nota não tiver despesas, informe `0,00`.
+- no exercício de `Cash-Covered Put`, informe obrigatoriamente as despesas atribuídas a compra destacadas na nota. Elas aumentam o custo de aquisição das ações e o débito de caixa. Quando uma mesma nota tiver compras e vendas, rateie as despesas pelo financeiro de cada operação e informe cada parcela no respectivo exercício, sem duplicar o total.
 
 Baixa e conferencia visual do resultado realizado:
 
