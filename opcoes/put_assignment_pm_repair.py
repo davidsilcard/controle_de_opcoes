@@ -111,9 +111,11 @@ def build_put_assignment_pm_repair_plan(
     fees = _money(event.get("fees"), label="Despesas da compra")
     if before_avg <= 0 or strike <= 0 or fees < 0:
         raise PutAssignmentPmRepairError("PM, strike ou despesas do evento sao invalidos.")
+    # O PM consolidado e informado e exibido em centavos; o reparo precisa
+    # respeitar a mesma precisao para aceitar uma correcao manual confirmada.
     corrected_avg = round(
         ((before_avg * qty_before) + (strike * qty_delta) + fees) / qty_after,
-        6,
+        2,
     )
     if _upper(holding.get("ticker")) != underlying:
         raise PutAssignmentPmRepairError("O estoque consolidado pertence a outro ativo.")

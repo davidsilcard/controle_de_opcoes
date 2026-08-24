@@ -54,13 +54,13 @@ def test_put_assignment_pm_repair_plan_calculates_weighted_average() -> None:
         put_position=_put(), holding=_holding(), holding_events=[_event()]
     )
 
-    expected = ((300 * 11.61) + (2100 * 10.96) + 32.36) / 2400
+    expected = round(((300 * 11.61) + (2100 * 10.96) + 32.36) / 2400, 2)
     assert plan.corrected_avg_price == pytest.approx(expected)
     assert plan.update_required is True
 
 
 def test_put_assignment_pm_repair_plan_is_idempotent_after_correction() -> None:
-    expected = ((300 * 11.61) + (2100 * 10.96) + 32.36) / 2400
+    expected = round(((300 * 11.61) + (2100 * 10.96) + 32.36) / 2400, 2)
     plan = build_put_assignment_pm_repair_plan(
         put_position=_put(),
         holding=_holding(avg_price=expected),
