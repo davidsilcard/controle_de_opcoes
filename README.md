@@ -1173,6 +1173,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - deploy base para VPS com `Dockerfile`, `compose.yaml` e `.dockerignore`.
 - README agora documenta fluxo de deploy Docker usando PostgreSQL no host do VPS.
 - README agora consolida um bloco unico de atualizacao rapida da VPS com `git pull origin main`, rebuild, teto para cache Docker nao utilizado e `db check`.
+- o deploy versionado da VPS agora executa o build antes de parar a stack e recria os containers somente com imagens prontas. Isso evita queda em falha de build e o conflito de nomes fixos do Docker Compose durante a troca.
 - painel de `Configuracoes` agora sinaliza `Possivel travamento` quando um ciclo fica tempo demais sem finalizar, e o host passa a ter um watchdog para reconciliar status `running` orfao.
 - web app endurecida com exigencia de `OPCOES_SECRET_KEY` segura em producao, CSRF em formularios, headers HTTP de seguranca e rate limit no login.
 - CLI `db migrate` agora faz migracao integral entre PostgreSQLs com bootstrap do destino, `COPY` streaming e validacao de contagem.

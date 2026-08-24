@@ -55,7 +55,7 @@ if [[ -n "$dirty_files" ]]; then
   exit 1
 fi
 
-echo "[1/6] Atualizando codigo do Git..."
+echo "[1/7] Atualizando codigo do Git..."
 git fetch "$REMOTE"
 git pull --ff-only "$REMOTE" "$BRANCH"
 
@@ -65,19 +65,26 @@ if [[ "$SCRIPT_DIGEST_BEFORE" != "$SCRIPT_DIGEST_AFTER" && "${OPCOES_DEPLOY_REEX
   OPCOES_DEPLOY_REEXECED=1 exec /bin/bash "$SCRIPT_PATH" "$@"
 fi
 
-echo "[2/6] Rebuild e restart da stack..."
-/bin/bash "$COMPOSE_HELPER" up -d --build
+echo "[2/7] Rebuild das imagens..."
+/bin/bash "$COMPOSE_HELPER" build
 
-echo "[3/6] Validando containers..."
+echo "[3/7] Trocando containers da stack..."
+# O Compose da VPS recria containers em modo start-first. Como os nomes sao
+# fixos por servico, remover a stack somente apos o build evita conflito de nome
+# sem derrubar a versao em execucao caso o build falhe.
+/bin/bash "$COMPOSE_HELPER" down --remove-orphans
+/bin/bash "$COMPOSE_HELPER" up -d --no-build --remove-orphans
+
+echo "[4/7] Validando containers..."
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-echo "[4/6] Smoke test web..."
+echo "[5/7] Smoke test web..."
 wait_for_url "web" "$WEB_CHECK_URL" "head"
 
-echo "[5/6] Smoke test edge..."
+echo "[6/7] Smoke test edge..."
 wait_for_url "edge" "$EDGE_CHECK_URL" "body"
 curl -fsS "$EDGE_CHECK_URL"
 
-echo "[6/6] Reservando ${DOCKER_BUILD_CACHE_RESERVED_SPACE} para cache Docker..."
+echo "[7/7] Reservando ${DOCKER_BUILD_CACHE_RESERVED_SPACE} para cache Docker..."
 docker builder prune -af --reserved-space "$DOCKER_BUILD_CACHE_RESERVED_SPACE"
 echo "Deploy concluido com sucesso."
