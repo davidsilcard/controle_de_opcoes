@@ -268,6 +268,17 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - no exercício de `Covered Call`, informe obrigatoriamente as despesas da venda destacadas na nota (corretagem, liquidação e emolumentos); elas entram no resultado realizado e na DARF. Se a nota agrupar várias vendas, distribua o total entre elas sem repetir. Quando a nota não tiver despesas, informe `0,00`.
 - no exercício de `Cash-Covered Put`, informe obrigatoriamente as despesas atribuídas a compra destacadas na nota. Elas aumentam o custo de aquisição das ações e o débito de caixa. Quando uma mesma nota tiver compras e vendas, rateie as despesas pelo financeiro de cada operação e informe cada parcela no respectivo exercício, sem duplicar o total.
 
+Reparo histórico excepcional de taxa em `Covered Call`:
+
+```bash
+uv run python -m opcoes.cli repair covered-call-exercise-fee \
+  --call-position-id <id-call> \
+  --stock-position-id <id-acao> \
+  --sale-fees <valor>
+```
+
+O comando acima é apenas simulação. Ele só aceita uma CALL exercida e confere o histórico fechado da ação, o evento `CALL_EXERCISE` e o único `SELL` correspondente. Depois de revisar os valores, repita a mesma linha com `--apply`. O reparo altera exclusivamente o caixa líquido do `SELL` e a taxa do evento de estoque; não altera quantidade, prêmio, DARF ou resultado fiscal da ação.
+
 Baixa e conferencia visual do resultado realizado:
 
 - na tela `/positions`, preencha `Data saida`, `Preco saida` e `Motivo`, depois clique em `Salvar`.
@@ -1171,6 +1182,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - exercicio de CALL agora baixa o estoque consolidado automaticamente e preserva historico fechado para auditoria fiscal.
 - inferencia de ticker agora nao confunde acoes como `BBAS3` com opcoes, evitando que lotes em estoque aparecam indevidamente na lista de `Cash-Covered Put`.
 - auditoria agora inclui o impacto de `ASSIGN` no caixa, reconcilia o lote criado no exercicio da PUT e mostra o liquido total da operacao incluindo exercicio.
+- reparos historicos de exercicio de CALL agora usam um comando versionado, com simulacao obrigatoria por padrao e validacao de CALL, historico de acao, evento de estoque e SELL antes de qualquer escrita. Para um caso confirmado pela nota, rode primeiro `uv run python -m opcoes.cli repair covered-call-exercise-fee --call-position-id <id-call> --stock-position-id <id-acao> --sale-fees <valor>`; somente depois de conferir o resultado use a mesma linha com `--apply`. O comando so atualiza o valor do SELL e a taxa do evento `CALL_EXERCISE`; nao altera quantidade, preco, premio, DARF ou resultado fiscal da acao.
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.
 - README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
 - tela de `positions` agora traz um painel didatico de resultados realizados por ano e por mes, com lista das baixas do periodo e isolamento por usuario autenticado.

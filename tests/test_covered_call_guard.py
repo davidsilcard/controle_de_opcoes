@@ -8,8 +8,10 @@ from opcoes.covered_call_guard import (
     audit_covered_call_positions,
     validate_covered_call_input,
 )
+from opcoes.db import db_transaction
+from opcoes.exercise_fee_repair import repair_covered_call_exercise_sale_fee
 from opcoes.flows import FlowError, assign_put, callaway
-from opcoes.holdings import get_holding, upsert_holding
+from opcoes.holdings import get_holding, list_holding_events, upsert_holding
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
 
@@ -331,6 +333,82 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
     ledger = finance.get_ledger_sums_by_position()
     assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
     assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
+
+
+@pytest.mark.requires_postgres
+def test_covered_call_fee_repair_updates_legacy_cash_and_event_without_changing_tax_result() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="GGBR4",
+        quantity=800,
+        avg_price=20.73,
+        is_simulated=False,
+        notes="Estoque para reparo historico de despesas",
+    )
+    snapshots = SnapshotDB()
+    try:
+        snapshots.record_options(
+            "2026-05-14",
+            [
+                {
+                    "underlying": "GGBR4",
+                    "ticker": "GGBRE228",
+                    "option_type": "CALL",
+                    "vencimento": "15/05/2026",
+                    "strike": "22.57",
+                }
+            ],
+        )
+    finally:
+        snapshots.close()
+    call_id = portfolio.add_position(
+        ticker="GGBRE228",
+        underlying="GGBR4",
+        trade_date="2026-04-22",
+        qty=800,
+        entry_price=0.36,
+        fees=0.37,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+    callaway(position_id=call_id, date="2026-05-15", sale_fees="1.25")
+    stock = next(
+        pos
+        for pos in portfolio.list_positions(include_closed=True, ticker="GGBR4")
+        if pos.get("strategy_tag") == "covered_call" and pos.get("status") == "closed"
+    )
+
+    # Recria apenas as duas omissoes da versao antiga, como no caso historico auditado.
+    with db_transaction() as conn:
+        conn.execute(
+            "UPDATE equity_holding_events SET fees = %s WHERE related_position_id = %s",
+            (0.0, call_id),
+        )
+        conn.execute(
+            "UPDATE ledger SET amount = %s WHERE position_id = %s AND type = %s",
+            (18056.0, call_id, finance.TransactionType.SELL.value),
+        )
+
+    dry_run = repair_covered_call_exercise_sale_fee(
+        call_position_id=call_id,
+        stock_position_id=stock["id"],
+        sale_fees=1.25,
+    )
+    assert dry_run["applied"] is False
+    assert dry_run["changes_required"] is True
+
+    report = repair_covered_call_exercise_sale_fee(
+        call_position_id=call_id,
+        stock_position_id=stock["id"],
+        sale_fees=1.25,
+        apply=True,
+    )
+    assert report["applied"] is True
+    assert list_holding_events(related_position_id=call_id)[0]["fees"] == 1.25
+    ledger = finance.get_ledger_sums_by_position()
+    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
+    assert portfolio.get_position(stock["id"])["realized_pl"] == pytest.approx(1470.75)
 
 
 def test_covered_call_exercise_rejects_missing_sale_fees() -> None:

@@ -55,6 +55,10 @@ from .service_runs import (
     start_service_run,
 )
 from .runtime_env import load_dotenv_once
+from .exercise_fee_repair import (
+    ExerciseFeeRepairError,
+    repair_covered_call_exercise_sale_fee,
+)
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
     build_cache_key as build_ranking_page_cache_key,
@@ -919,6 +923,33 @@ def parse_args() -> argparse.Namespace:
         "--reason", required=True, help="Motivo auditável da quarentena."
     )
 
+    repair = sub.add_parser(
+        "repair",
+        help="Corrige apenas inconsistencias historicas validadas pela auditoria.",
+    )
+    repairs = repair.add_subparsers(dest="subcmd", required=True)
+    call_fee_repair = repairs.add_parser(
+        "covered-call-exercise-fee",
+        help="Simula ou corrige taxa de venda ausente em CALL exercida.",
+    )
+    call_fee_repair.add_argument(
+        "--call-position-id", type=int, required=True, help="ID da CALL exercida."
+    )
+    call_fee_repair.add_argument(
+        "--stock-position-id",
+        type=int,
+        required=True,
+        help="ID do historico de acao fechado pelo exercicio.",
+    )
+    call_fee_repair.add_argument(
+        "--sale-fees", type=float, required=True, help="Despesas da venda na nota."
+    )
+    call_fee_repair.add_argument(
+        "--apply",
+        action="store_true",
+        help="Aplica a correcao depois de validar todos os vinculos. Sem esta flag, apenas simula.",
+    )
+
     return parser.parse_args()
 
 
@@ -1600,6 +1631,32 @@ def main() -> None:
                     f"Fundamentus: quarentena não aplicada. {exc}"
                 ) from exc
             print(f"Fundamentus: {count} snapshots colocados em quarentena.")
+    elif args.cmd == "repair":
+        if args.subcmd == "covered-call-exercise-fee":
+            try:
+                report = repair_covered_call_exercise_sale_fee(
+                    call_position_id=args.call_position_id,
+                    stock_position_id=args.stock_position_id,
+                    sale_fees=args.sale_fees,
+                    apply=bool(args.apply),
+                )
+            except ExerciseFeeRepairError as exc:
+                raise SystemExit(f"Correcao nao aplicada: {exc}") from exc
+            mode = "APLICADA" if report["applied"] else "SIMULACAO"
+            print(f"Correcao de taxa de CALL exercida: {mode}")
+            print(
+                f"  CALL #{report['call_position_id']} | historico #{report['stock_position_id']} | "
+                f"evento #{report['holding_event_id']} | SELL #{report['sell_ledger_id']}"
+            )
+            print(
+                f"  Bruto: R$ {report['gross_sale']:.2f} | despesas: R$ {report['sale_fees']:.2f} | "
+                f"liquido: R$ {report['net_sale']:.2f}"
+            )
+            print(
+                "  Ajustes necessarios: "
+                f"evento={'sim' if report['update_holding_event'] else 'nao'}, "
+                f"SELL={'sim' if report['update_sell_ledger'] else 'nao'}"
+            )
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 
