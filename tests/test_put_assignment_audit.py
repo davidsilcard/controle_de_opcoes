@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from opcoes import finance, portfolio
-from opcoes.holdings import get_holding_snapshot
+from opcoes.holdings import (
+    apply_put_assignment_to_holding,
+    get_holding_snapshot,
+    upsert_holding,
+)
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
 
@@ -93,6 +97,33 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
     assert "GGBRO215" in ccp_html
     assert "608.00" in ccp_html
     assert "Covered Call" in ccp_html
+
+
+def test_put_assignment_recalculates_average_when_the_stock_already_exists() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="CMIG4",
+        quantity=300,
+        avg_price=11.61,
+        is_simulated=False,
+        notes="Estoque anterior confirmado",
+        event_date="2026-08-01",
+    )
+
+    holding = apply_put_assignment_to_holding(
+        ticker="CMIG4",
+        qty=2100,
+        strike=10.96,
+        purchase_fees=32.36,
+        date="2026-08-21",
+        is_simulated=False,
+        related_position_id=66,
+    )
+
+    expected = ((300 * 11.61) + (2100 * 10.96) + 32.36) / 2400
+    assert int(holding["shares_total"]) == 2400
+    assert float(holding["avg_price"]) == pytest.approx(expected)
+    assert holding["price_status"] == "ok"
 
 
 def test_put_assignment_without_confirmed_date_is_blocked() -> None:

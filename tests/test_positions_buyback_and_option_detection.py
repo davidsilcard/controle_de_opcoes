@@ -270,6 +270,9 @@ def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
             "trade_type": "swing",
             "side": "long",
             "strategy_tag": "covered_call",
+            "contract_strike": "12.34",
+            "contract_expiry": "2026-04-17",
+            "performance_source_ref": "nota teste",
             "parent_position_id": "",
             "record_premium": "1",
             "reserve_darf": "1",
@@ -284,6 +287,9 @@ def test_add_covered_call_normalizes_short_side_and_registers_cash() -> None:
     assert pos["side"] == "short"
     assert pos["strategy_tag"] == "covered_call"
     assert pos["parent_position_id"] is None
+    assert pos["contract_strike"] == pytest.approx(12.34)
+    assert pos["contract_expiry"] == "2026-04-17"
+    assert pos["capital_committed"] == pytest.approx(3000.0)
 
     txs = [t for t in finance.get_transactions(limit=50) if t.position_id == pos["id"]]
     assert len(txs) == 2

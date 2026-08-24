@@ -216,6 +216,7 @@ def callaway(
             ),
             is_simulated=is_simulated,
             strategy_tag="covered_call",
+            parent_position_id=position_id,
             conn=conn,
         )
         close_position(

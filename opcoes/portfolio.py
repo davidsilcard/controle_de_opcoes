@@ -202,6 +202,11 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "is_simulated": "INTEGER DEFAULT 0",
         "parent_position_id": "BIGINT",
         "strategy_tag": "TEXT",
+        "contract_strike": "DOUBLE PRECISION",
+        "contract_expiry": "TEXT",
+        "capital_committed": "DOUBLE PRECISION",
+        "capital_source": "TEXT",
+        "performance_source_ref": "TEXT",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -320,6 +325,11 @@ def add_position(
     is_simulated: bool = False,
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
+    contract_strike: Optional[float] = None,
+    contract_expiry: Optional[str] = None,
+    capital_committed: Optional[float] = None,
+    capital_source: Optional[str] = None,
+    performance_source_ref: Optional[str] = None,
     conn: Optional[Any] = None,
 ) -> int:
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
@@ -345,6 +355,11 @@ def add_position(
         1 if is_simulated else 0,
         int(parent_position_id) if parent_position_id is not None else None,
         strategy_tag or None,
+        float(contract_strike) if contract_strike is not None else None,
+        contract_expiry or None,
+        float(capital_committed) if capital_committed is not None else None,
+        capital_source or None,
+        performance_source_ref or None,
     )
     try:
         if db.backend == "postgres":
@@ -367,9 +382,14 @@ def add_position(
                     exit_reason,
                     is_simulated,
                     parent_position_id,
-                    strategy_tag
+                    strategy_tag,
+                    contract_strike,
+                    contract_expiry,
+                    capital_committed,
+                    capital_source,
+                    performance_source_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -395,9 +415,14 @@ def add_position(
                     exit_reason,
                     is_simulated,
                     parent_position_id,
-                    strategy_tag
+                    strategy_tag,
+                    contract_strike,
+                    contract_expiry,
+                    capital_committed,
+                    capital_source,
+                    performance_source_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -464,6 +489,11 @@ def update_position(
     is_simulated: Any = _UNSET,
     parent_position_id: Any = _UNSET,
     strategy_tag: Any = _UNSET,
+    contract_strike: Any = _UNSET,
+    contract_expiry: Any = _UNSET,
+    capital_committed: Any = _UNSET,
+    capital_source: Any = _UNSET,
+    performance_source_ref: Any = _UNSET,
     conn: Optional[Any] = None,
 ) -> None:
     fields = []
@@ -528,6 +558,21 @@ def update_position(
     if strategy_tag is not _UNSET:
         fields.append("strategy_tag = ?")
         params.append(strategy_tag)
+    if contract_strike is not _UNSET:
+        fields.append("contract_strike = ?")
+        params.append(float(contract_strike) if contract_strike is not None else None)
+    if contract_expiry is not _UNSET:
+        fields.append("contract_expiry = ?")
+        params.append(contract_expiry)
+    if capital_committed is not _UNSET:
+        fields.append("capital_committed = ?")
+        params.append(float(capital_committed) if capital_committed is not None else None)
+    if capital_source is not _UNSET:
+        fields.append("capital_source = ?")
+        params.append(capital_source)
+    if performance_source_ref is not _UNSET:
+        fields.append("performance_source_ref = ?")
+        params.append(performance_source_ref)
     if not fields:
         return
 
@@ -857,6 +902,7 @@ def _row_to_dict(row: Any) -> dict:
     extrinsic_pct_spot = None
     pct_2x = None
     last_strike = None
+    contract_strike = parse_decimal(row["contract_strike"]) if "contract_strike" in row.keys() else None
     if "last_underlying_price" in row.keys():
         underlying_price = parse_decimal(row["last_underlying_price"])
     if "last_extrinsic_pct_spot" in row.keys():
@@ -887,7 +933,11 @@ def _row_to_dict(row: Any) -> dict:
         "pl_pct": pl_pct,
         "score_total": parse_decimal(row["last_score_total"]),
         "trend_flag": row["last_trend_flag"],
-        "vencimento": row["last_vencimento"],
+        "vencimento": (
+            row["contract_expiry"]
+            if "contract_expiry" in row.keys() and row["contract_expiry"]
+            else row["last_vencimento"]
+        ),
         "dias_uteis": parse_int(row["last_dias_uteis"]),
         "partial_qty": partial_qty,
         "partial_price": partial_price,
@@ -902,8 +952,19 @@ def _row_to_dict(row: Any) -> dict:
         "underlying_price": underlying_price,
         "extrinsic_pct_spot": extrinsic_pct_spot,
         "pct_2x": pct_2x,
-        "strike": last_strike,
+        "strike": contract_strike if contract_strike is not None else last_strike,
         "strategy_tag": row["strategy_tag"] if "strategy_tag" in row.keys() else None,
+        "contract_strike": contract_strike,
+        "contract_expiry": row["contract_expiry"] if "contract_expiry" in row.keys() else None,
+        "capital_committed": (
+            parse_decimal(row["capital_committed"])
+            if "capital_committed" in row.keys()
+            else None
+        ),
+        "capital_source": row["capital_source"] if "capital_source" in row.keys() else None,
+        "performance_source_ref": (
+            row["performance_source_ref"] if "performance_source_ref" in row.keys() else None
+        ),
     }
 
 

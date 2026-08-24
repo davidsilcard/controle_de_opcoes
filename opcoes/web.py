@@ -93,6 +93,7 @@ from .strategy_contracts import (
     validate_position_closure_update,
     validate_position_identity_update,
 )
+from .strategy_performance import STRATEGIES, build_strategy_performance
 from .audit_reconciliation import build_audit_reconciliation
 from .holdings import (
     HoldingValidationError,
@@ -2176,6 +2177,149 @@ def create_app() -> Flask:
             inventory_summary=inventory_summary,
         )
 
+    @app.route("/performance")
+    def performance_view() -> str:
+        mode = (request.args.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        is_simulated = mode == "simulated"
+        positions_all = list_positions(include_closed=True)
+        ledger_sums = finance.get_ledger_sums_by_position(
+            types=[
+                finance.TransactionType.PREMIUM,
+                finance.TransactionType.DARF,
+                finance.TransactionType.REALIZED,
+            ],
+            is_simulated=is_simulated,
+        )
+        context = build_strategy_performance(
+            positions_all,
+            ledger_sums=ledger_sums,
+            is_simulated=is_simulated,
+        )
+        return render_template(
+            "performance.html",
+            mode=mode,
+            performance=context,
+            performance_error=(request.args.get("performance_error") or "").strip(),
+            performance_notice=(request.args.get("performance_notice") or "").strip(),
+        )
+
+    @app.post("/performance/contract/<int:position_id>")
+    def update_performance_contract(position_id: int):
+        position = get_position(position_id)
+        mode = (request.form.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        if not _is_short_strategy_performance_position(position):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Somente vendas de PUT/Call das estrategias podem receber dados de desempenho.",
+                )
+            )
+        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="A posicao informada pertence a outro modo.",
+                )
+            )
+
+        try:
+            strike = _parse_required_positive_currency(
+                request.form.get("contract_strike"), label="Strike"
+            )
+            capital = _parse_required_positive_currency(
+                request.form.get("capital_committed"), label="Capital comprometido"
+            )
+        except ValueError as exc:
+            return redirect(
+                url_for("performance_view", mode=mode, performance_error=str(exc))
+            )
+        expiry = _parse_form_date(request.form.get("contract_expiry"))
+        source_ref = (request.form.get("performance_source_ref") or "").strip()
+        if not expiry or not source_ref:
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Informe vencimento valido e a referencia da nota ou outra fonte verificavel.",
+                )
+            )
+
+        parent_position_id = _parse_optional_positive_int(
+            request.form.get("stock_position_id")
+        )
+        if _is_call_exercise_position(position):
+            if parent_position_id is None:
+                return redirect(
+                    url_for(
+                        "performance_view",
+                        mode=mode,
+                        performance_error="CALL exercida exige o ID do historico de venda da acao para calcular o resultado completo.",
+                    )
+                )
+            stock_position = get_position(parent_position_id)
+            if not _is_matching_exercised_call_stock(position, stock_position):
+                return redirect(
+                    url_for(
+                        "performance_view",
+                        mode=mode,
+                        performance_error="O ID informado nao e a venda de acao correspondente a esta CALL exercida.",
+                    )
+                )
+            linked_parent_id = _parse_optional_positive_int(
+                str(stock_position.get("parent_position_id") or "")
+            )
+            if linked_parent_id not in {None, position_id}:
+                return redirect(
+                    url_for(
+                        "performance_view",
+                        mode=mode,
+                        performance_error="O historico de acao ja esta vinculado a outra CALL.",
+                    )
+                )
+        elif parent_position_id is not None:
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="O vinculo de acao so pode ser informado para CALL exercida.",
+                )
+            )
+
+        try:
+            with db_transaction() as conn:
+                update_position(
+                    position_id=position_id,
+                    contract_strike=strike,
+                    contract_expiry=expiry,
+                    capital_committed=capital,
+                    capital_source="historico_manual_confirmado",
+                    performance_source_ref=source_ref,
+                    conn=conn,
+                )
+                if parent_position_id is not None:
+                    update_position(
+                        position_id=parent_position_id,
+                        parent_position_id=position_id,
+                        conn=conn,
+                    )
+        except ValueError as exc:
+            return redirect(
+                url_for("performance_view", mode=mode, performance_error=str(exc))
+            )
+        return redirect(
+            url_for(
+                "performance_view",
+                mode=mode,
+                performance_notice=f"Contrato da posicao #{position_id} atualizado para a apuracao.",
+            )
+        )
+
     @app.post("/positions/add")
     def add_position_view():
         form = request.form
@@ -2282,6 +2426,27 @@ def create_app() -> Flask:
                 entry_price=entry_price,
             )
 
+        try:
+            performance_contract = _build_new_position_performance_contract(
+                form=form,
+                ticker=ticker,
+                underlying=underlying,
+                qty=qty,
+                side=side_raw,
+                strategy_tag=strategy_tag_raw,
+                is_simulated=is_simulated,
+            )
+        except ValueError as exc:
+            if strategy_norm == "covered_call":
+                return redirect(
+                    url_for(
+                        "covered_call",
+                        underlying=underlying or ticker,
+                        holding_error=str(exc),
+                    )
+                )
+            return redirect(url_for("positions", position_error=str(exc)))
+
         def _insert_position_and_optional_premium(conn: Any = None) -> int:
             pos_id_inner = add_position(
                 ticker=ticker,
@@ -2297,6 +2462,7 @@ def create_app() -> Flask:
                 is_simulated=is_simulated,
                 parent_position_id=parent_id,
                 strategy_tag=strategy_tag_raw,
+                **performance_contract,
                 conn=conn,
             )
 
@@ -2361,7 +2527,7 @@ def create_app() -> Flask:
                 )
             return pos_id_inner
 
-        if strategy_norm in {"cash_put", "ranking"}:
+        if strategy_norm in {"cash_put", "covered_call", "ranking"}:
             with db_transaction() as conn:
                 _insert_position_and_optional_premium(conn)
         else:
@@ -2820,6 +2986,58 @@ def create_app() -> Flask:
         except ValueError:
             return None
 
+    def _parse_required_positive_currency(value: str | None, *, label: str) -> float:
+        parsed = _parse_form_float(value)
+        if parsed <= 0 or not math.isfinite(parsed):
+            raise ValueError(f"{label} deve ser maior que zero.")
+        return parsed
+
+    def _parse_optional_positive_int(value: str | None) -> int | None:
+        text = (value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = int(text)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+
+    def _is_short_strategy_performance_position(position: dict[str, Any] | None) -> bool:
+        if not position:
+            return False
+        return (
+            (position.get("strategy_tag") or "").strip().lower() in STRATEGIES
+            and (position.get("side") or "").strip().lower() == "short"
+            and _is_option_ticker(position.get("ticker"))
+        )
+
+    def _is_call_exercise_position(position: dict[str, Any]) -> bool:
+        return (
+            (position.get("strategy_tag") or "").strip().lower() == "covered_call"
+            and infer_option_type(position.get("ticker") or "") == "CALL"
+            and (position.get("status") or "").strip().lower() == "closed"
+            and "exerc" in (position.get("exit_reason") or "").strip().lower()
+        )
+
+    def _is_matching_exercised_call_stock(
+        call_position: dict[str, Any], stock_position: dict[str, Any] | None
+    ) -> bool:
+        if not stock_position:
+            return False
+        return (
+            not _is_option_ticker(stock_position.get("ticker"))
+            and (stock_position.get("strategy_tag") or "").strip().lower()
+            == "covered_call"
+            and (stock_position.get("underlying") or "").strip().upper()
+            == (call_position.get("underlying") or "").strip().upper()
+            and bool(stock_position.get("is_simulated") or 0)
+            == bool(call_position.get("is_simulated") or 0)
+            and int(stock_position.get("qty") or 0)
+            == int(call_position.get("qty") or 0)
+            and (stock_position.get("status") or "").strip().lower() == "closed"
+            and "exerc" in (stock_position.get("exit_reason") or "").strip().lower()
+        )
+
     def _lookup_underlying_from_snapshot(ticker: str) -> str | None:
         if not ticker:
             return None
@@ -2918,6 +3136,83 @@ def create_app() -> Flask:
         if not row:
             return None
         return float(parse_ptbr_number(row.get("last_strike")) or 0.0)
+
+    def _build_new_position_performance_contract(
+        *,
+        form: Any,
+        ticker: str,
+        underlying: str,
+        qty: int,
+        side: str,
+        strategy_tag: str | None,
+        is_simulated: bool,
+    ) -> dict[str, Any]:
+        """Preserva o contrato e o capital no instante da venda da estrategia."""
+
+        strategy = (strategy_tag or "").strip().lower()
+        if (
+            strategy not in STRATEGIES
+            or side.strip().lower() != "short"
+            or not _is_option_ticker(ticker)
+        ):
+            return {}
+
+        if strategy == "covered_call" and form.get("record_premium") != "1":
+            raise ValueError(
+                "Covered Call exige registrar o premio no caixa; uma venda sem premio impede a apuracao auditavel."
+            )
+
+        manual_strike = _parse_form_float(form.get("contract_strike"))
+        manual_expiry = _parse_form_date(form.get("contract_expiry"))
+        source_ref = (form.get("performance_source_ref") or "").strip()
+        snapshot = fetch_latest_option_snapshot(ticker)
+        snapshot_strike = (
+            float(parse_ptbr_number(snapshot.get("last_strike")) or 0.0)
+            if snapshot
+            else 0.0
+        )
+        snapshot_expiry = (
+            _parse_form_date(str(snapshot.get("last_vencimento") or ""))
+            if snapshot
+            else None
+        )
+        strike = manual_strike if manual_strike > 0 else snapshot_strike
+        expiry = manual_expiry or snapshot_expiry
+        if strike <= 0 or not expiry:
+            raise ValueError(
+                "Informe strike e vencimento da nota. Sem esses dados o sistema nao cadastra a estrategia."
+            )
+
+        if strategy == "cash_put":
+            capital = strike * int(qty or 0)
+            capital_source = "strike_x_quantidade"
+        else:
+            holding = get_holding_snapshot(
+                ticker=underlying,
+                is_simulated=is_simulated,
+            )
+            avg_price = float(holding.get("avg_price") or 0.0)
+            if holding.get("price_status") != "ok" or avg_price <= 0:
+                raise ValueError(
+                    "O preco medio do estoque consolidado precisa estar confirmado antes de vender Covered Call."
+                )
+            capital = avg_price * int(qty or 0)
+            capital_source = "preco_medio_estoque_no_cadastro"
+
+        if not source_ref:
+            if snapshot and snapshot.get("snapshot_date"):
+                source_ref = f"snapshot:{snapshot['snapshot_date']}"
+            else:
+                raise ValueError(
+                    "Sem snapshot, informe a referencia da nota de corretagem do contrato."
+                )
+        return {
+            "contract_strike": strike,
+            "contract_expiry": expiry,
+            "capital_committed": capital,
+            "capital_source": capital_source,
+            "performance_source_ref": source_ref,
+        }
 
     def _is_inventory_reserved_call(pos: dict[str, Any]) -> bool:
         ticker = (pos.get("ticker") or "").strip().upper()

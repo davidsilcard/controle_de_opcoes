@@ -268,6 +268,26 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - no exercício de `Covered Call`, informe obrigatoriamente as despesas da venda destacadas na nota (corretagem, liquidação e emolumentos); elas entram no resultado realizado e na DARF. Se a nota agrupar várias vendas, distribua o total entre elas sem repetir. Quando a nota não tiver despesas, informe `0,00`.
 - no exercício de `Cash-Covered Put`, informe obrigatoriamente as despesas atribuídas a compra destacadas na nota. Elas aumentam o custo de aquisição das ações e o débito de caixa. Quando uma mesma nota tiver compras e vendas, rateie as despesas pelo financeiro de cada operação e informe cada parcela no respectivo exercício, sem duplicar o total.
 
+Apuração de desempenho das estratégias:
+
+- a aba `/performance` separa `Cash-Covered Put` e `Covered Call`; a métrica principal é o resultado completo dos ciclos encerrados antes da DARF oficial.
+- o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
+- o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.
+- novos cadastros de `Cash-Covered Put` e `Covered Call` preservam strike, vencimento, capital e referência do snapshot ou nota. Sem contrato confirmável, o cadastro é bloqueado. Covered Call também exige prêmio no caixa e PM consolidado confirmado.
+- operações antigas sem esses campos entram em uma fila ordenada por impacto financeiro. Complete-as na própria tela com dados verificáveis da nota; a aplicação não infere contrato ou capital a partir de cotações posteriores.
+
+Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
+
+```bash
+uv run python -m opcoes.cli repair cash-put-assignment-pm --put-position-id <id-put>
+```
+
+Após conferir PUT, evento `PUT_ASSIGNMENT`, quantidade final e PM proposto, repita com `--apply`. O comando recusa estoques que tiveram movimentos posteriores e altera somente o PM consolidado e o PM após o evento de estoque:
+
+```bash
+uv run python -m opcoes.cli repair cash-put-assignment-pm --put-position-id <id-put> --apply
+```
+
 Reparo histórico excepcional de taxa em `Covered Call`:
 
 ```bash

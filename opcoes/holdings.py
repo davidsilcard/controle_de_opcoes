@@ -779,18 +779,21 @@ def apply_put_assignment_to_holding(
         if before_qty <= 0:
             after_avg = acquisition_cost / qty_val
             needs_review = False
+        elif before_avg is not None and float(before_avg) > 0:
+            after_avg = ((float(before_avg) * before_qty) + acquisition_cost) / after_qty
+            needs_review = False
         else:
             after_avg = float(before_avg or 0.0)
             needs_review = True
 
         notes = (
             (
-                f"Exercicio da put: revise o PM consolidado de {normalized} apos a atribuicao; "
+                f"Exercicio da put: revise o PM consolidado de {normalized}; "
                 f"despesas da compra: R$ {fees_val:.2f}."
             )
             if needs_review
             else (
-                f"Exercicio da put {related_position_id or ''}; "
+                f"Exercicio da put {related_position_id or ''}; PM recalculado; "
                 f"despesas da compra: R$ {fees_val:.2f}"
             ).strip()
         )

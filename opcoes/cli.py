@@ -59,6 +59,10 @@ from .exercise_fee_repair import (
     ExerciseFeeRepairError,
     repair_covered_call_exercise_sale_fee,
 )
+from .put_assignment_pm_repair import (
+    PutAssignmentPmRepairError,
+    repair_put_assignment_average_price,
+)
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
     build_cache_key as build_ranking_page_cache_key,
@@ -949,6 +953,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Aplica a correcao depois de validar todos os vinculos. Sem esta flag, apenas simula.",
     )
+    put_pm_repair = repairs.add_parser(
+        "cash-put-assignment-pm",
+        help="Simula ou corrige PM legado de PUT exercida com estoque preexistente.",
+    )
+    put_pm_repair.add_argument(
+        "--put-position-id", type=int, required=True, help="ID da PUT exercida."
+    )
+    put_pm_repair.add_argument(
+        "--apply",
+        action="store_true",
+        help="Aplica a correcao depois de validar PUT, evento e estoque. Sem esta flag, apenas simula.",
+    )
 
     return parser.parse_args()
 
@@ -1656,6 +1672,25 @@ def main() -> None:
                 "  Ajustes necessarios: "
                 f"evento={'sim' if report['update_holding_event'] else 'nao'}, "
                 f"SELL={'sim' if report['update_sell_ledger'] else 'nao'}"
+            )
+        elif args.subcmd == "cash-put-assignment-pm":
+            try:
+                report = repair_put_assignment_average_price(
+                    put_position_id=args.put_position_id,
+                    apply=bool(args.apply),
+                )
+            except PutAssignmentPmRepairError as exc:
+                raise SystemExit(f"Correcao nao aplicada: {exc}") from exc
+            mode = "APLICADA" if report["applied"] else "SIMULACAO"
+            print(f"Correcao de PM de PUT exercida: {mode}")
+            print(
+                f"  PUT #{report['put_position_id']} | estoque #{report['holding_id']} | "
+                f"evento #{report['holding_event_id']} | quantidade final: {report['quantity_after']}"
+            )
+            print(
+                f"  PM atual: R$ {report['previous_avg_price']:.6f} | "
+                f"PM corrigido: R$ {report['corrected_avg_price']:.6f} | "
+                f"ajuste necessario: {'sim' if report['update_required'] else 'nao'}"
             )
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
