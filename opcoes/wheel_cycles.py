@@ -583,6 +583,7 @@ def build_wheel_backfill_plan(positions: Sequence[Mapping[str, Any]]) -> list[di
             if _text(item.get("strategy_tag")).lower() == "covered_call" and infer_option_type(item.get("ticker")) == "CALL"
             and bool(item.get("is_simulated") or 0) == bool(put.get("is_simulated") or 0)
         ]
+        calls.sort(key=lambda item: (_text(item.get("trade_date")), int(item.get("id") or 0)))
         if not calls:
             plan.append({"put_position_id": put_id, "status": "requires_review", "reason": "Aquisicao sem CALL vinculada; ciclo permanece sem confirmacao."})
             continue
@@ -608,6 +609,7 @@ def build_wheel_backfill_plan(positions: Sequence[Mapping[str, Any]]) -> list[di
         if sum(int(item.get("qty") or 0) for item in exits) > stock_qty:
             plan.append({"put_position_id": put_id, "status": "requires_review", "reason": "As saidas vinculadas ultrapassam o lote adquirido."})
             continue
+        exits.sort(key=lambda item: (_text(item.get("exit_date")), int(item.get("id") or 0)))
         plan.append(
             {
                 "put_position_id": put_id,
