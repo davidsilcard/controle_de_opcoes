@@ -271,6 +271,16 @@ Fluxo operacional novo para garantia de `Covered Call`:
 Apuração de desempenho das estratégias:
 
 - a aba `/performance` separa `Cash-Covered Put` e `Covered Call`; a métrica principal é o resultado completo dos ciclos encerrados antes da DARF oficial.
+- a seção adicional `Ciclo Wheel` não soma os totais dessas duas estratégias. Ela registra explicitamente a PUT de origem, a aquisição das ações, as CALLs, a saída das ações e despesas documentadas para evitar duplicidade quando o PM do estoque já foi ajustado por prêmios anteriores.
+- o resultado Wheel é `prêmios líquidos + venda líquida das ações - aquisição - recompras - despesas`. DARF permanece separada; a tela também mostra capital máximo, capital consumido, retorno, duração e cobertura documental.
+- cada vínculo guarda posição, quantidade, modo e fonte. A aplicação bloqueia mistura Real/Simulado, posição acima da quantidade disponível em ciclos, saída acima da aquisição e CALL exercida acima do estoque do ciclo. Em ambiguidade, o ciclo fica em conferência: não há associação por cotação ou suposição.
+- para históricos, primeiro execute o dry-run abaixo e guarde o relatório. Ele só considera cadeias legadas com ativo, modo, quantidade e cronologia inequívocos; a repetição com `--apply` é idempotente e não altera posições, estoque, ledger ou DARF.
+
+```bash
+uv run python -m opcoes.cli repair wheel-cycle-backfill
+uv run python -m opcoes.cli repair wheel-cycle-backfill --apply
+```
+
 - o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
 - o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.
 - novos cadastros de `Cash-Covered Put` e `Covered Call` preservam strike, vencimento, capital e referência do snapshot ou nota. Sem contrato confirmável, o cadastro é bloqueado. Covered Call também exige prêmio no caixa e PM consolidado confirmado.

@@ -100,6 +100,66 @@
       </section>
 
       <section class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h5 mb-0">Ciclo Wheel</h2>
+          <span class="small text-muted">Visão independente: não soma os resultados das abas PUT e CALL.</span>
+        </div>
+        <div class="alert alert-info py-2 small">
+          Resultado do ciclo = prêmios líquidos + venda líquida das ações − aquisição − recompras − despesas. A DARF oficial fica separada porque é mensal. Associe somente posições e notas já conferidas; vínculos ambíguos devem permanecer em conferência.
+        </div>
+        {% if wheel_error %}<div class="alert alert-danger py-2">{{ wheel_error }}</div>{% endif %}
+        {% if wheel_notice %}<div class="alert alert-success py-2">{{ wheel_notice }}</div>{% endif %}
+
+        <form method="post" action="/performance/wheel/cycles" class="border bg-white p-3 mb-3 row g-2 align-items-end">
+          {{ csrf_input() }}
+          <input type="hidden" name="mode" value="{{ mode }}">
+          <div class="col-md-2"><label class="form-label small mb-1">Ativo-base</label><input name="underlying" class="form-control form-control-sm" placeholder="GGBR4" required></div>
+          <div class="col-md-2"><label class="form-label small mb-1">Abertura</label><input name="opened_at" type="date" class="form-control form-control-sm" required></div>
+          <div class="col-md-5"><label class="form-label small mb-1">Nota ou justificativa verificável</label><input name="source_ref" class="form-control form-control-sm" required></div>
+          <div class="col-md-2"><label class="form-label small mb-1">Observações</label><input name="notes" class="form-control form-control-sm"></div>
+          <div class="col-md-1 d-grid"><button class="btn btn-outline-primary btn-sm" type="submit">Criar</button></div>
+        </form>
+
+        {% if wheel_cycles %}
+          {% for cycle in wheel_cycles %}
+            <article class="border bg-white p-3 mb-3">
+              <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                <div><strong>#{{ cycle.id }} {{ cycle.underlying }}</strong> <span class="badge text-bg-{% if cycle.status == 'closed' %}success{% elif cycle.status == 'requires_review' %}warning{% else %}secondary{% endif %}">{% if cycle.status == 'closed' %}Encerrado{% elif cycle.status == 'requires_review' %}Requer conferência{% else %}Aberto{% endif %}</span></div>
+                <div class="small text-muted">{{ cycle.opened_at }}{% if cycle.closed_at %} → {{ cycle.closed_at }}{% endif %} · cobertura documental {{ '%.0f'|format(cycle.coverage_pct or 0) }}%</div>
+              </div>
+              {% if cycle.error %}
+                <div class="alert alert-warning py-2 mb-2">{{ cycle.error }}</div>
+              {% else %}
+                <div class="row g-2 small mb-2">
+                  <div class="col-md-2"><span class="text-muted d-block">Resultado antes DARF</span><strong class="{% if cycle.result_before_darf >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(cycle.result_before_darf) }}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">DARF no ledger</span><strong class="text-danger">R$ {{ '%.2f'|format(cycle.official_darf) }}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">Capital máximo</span><strong>R$ {{ '%.2f'|format(cycle.capital_max) }}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">Capital consumido</span><strong>R$ {{ '%.2f'|format(cycle.capital_consumed) }}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">Retorno</span><strong>{% if cycle.return_pct is not none %}{{ '%.4f'|format(cycle.return_pct) }}%{% else %}-{% endif %}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">Duração</span><strong>{{ cycle.duration_days or '-' }} dias</strong></div>
+                </div>
+                <div class="table-responsive mb-2"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Perna</th><th>Posição</th><th class="text-end">Quantidade</th><th class="text-end">Impacto</th><th>Fonte</th></tr></thead><tbody>
+                  {% for leg in cycle.legs %}<tr><td>{{ leg.label }}</td><td>{% if leg.position_id %}#{{ leg.position_id }} {{ leg.ticker }}{% else %}Manual{% endif %}</td><td class="text-end">{{ leg.quantity or '-' }}</td><td class="text-end {% if leg.amount >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(leg.amount) }}</td><td class="small">{{ leg.source_ref or 'Sem referência: requer conferência' }}</td></tr>{% endfor %}
+                </tbody></table></div>
+              {% endif %}
+              <form method="post" action="/performance/wheel/cycles/{{ cycle.id }}/legs" class="row g-2 align-items-end">
+                {{ csrf_input() }}
+                <input type="hidden" name="mode" value="{{ mode }}">
+                <div class="col-md-2"><label class="form-label small mb-1">Tipo</label><select name="leg_type" class="form-select form-select-sm">{% for leg_type in wheel_leg_types %}<option value="{{ leg_type }}">{{ {'put_origin':'PUT de origem','stock_acquisition':'Aquisição ações','covered_call':'CALL coberta','stock_exit':'Saída ações','expense':'Despesa manual'}[leg_type] }}</option>{% endfor %}</select></div>
+                <div class="col-md-2"><label class="form-label small mb-1">ID posição</label><input name="position_id" type="number" min="1" class="form-control form-control-sm" placeholder="Obrigatório exceto despesa"></div>
+                <div class="col-md-2"><label class="form-label small mb-1">Quantidade</label><input name="quantity" type="number" min="1" class="form-control form-control-sm" placeholder="Obrigatória exceto despesa"></div>
+                <div class="col-md-2"><label class="form-label small mb-1">Despesa manual</label><input name="amount_override" type="number" step="0.01" min="0.01" class="form-control form-control-sm" placeholder="Apenas despesa"></div>
+                <div class="col-md-3"><label class="form-label small mb-1">Fonte da perna</label><input name="source_ref" class="form-control form-control-sm" placeholder="Obrigatória para despesa"></div>
+                <div class="col-md-1 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Vincular</button></div>
+              </form>
+            </article>
+          {% endfor %}
+        {% else %}
+          <div class="border bg-white p-3 text-muted small">Nenhum ciclo Wheel registrado neste modo. Criar um ciclo não altera posições, estoque, ledger ou DARF.</div>
+        {% endif %}
+      </section>
+
+      <section class="mb-4">
         <h2 class="h5">Histórico que precisa de confirmação</h2>
         {% if performance.incomplete_cycles %}
           <p class="small text-muted">A lista está ordenada pelo maior impacto financeiro. Informe somente dados que possam ser conferidos na nota de corretagem.</p>

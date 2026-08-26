@@ -63,6 +63,7 @@ from .put_assignment_pm_repair import (
     PutAssignmentPmRepairError,
     repair_put_assignment_average_price,
 )
+from .wheel_cycles import WheelCycleError, backfill_wheel_cycles
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
     build_cache_key as build_ranking_page_cache_key,
@@ -965,6 +966,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Aplica a correcao depois de validar PUT, evento e estoque. Sem esta flag, apenas simula.",
     )
+    wheel_backfill = repairs.add_parser(
+        "wheel-cycle-backfill",
+        help="Simula ou cria ciclos Wheel somente para cadeias historicas inequivocas.",
+    )
+    wheel_backfill.add_argument(
+        "--apply",
+        action="store_true",
+        help="Cria os ciclos prontos apos revisar o dry-run. Sem esta flag, apenas gera relatorio.",
+    )
 
     return parser.parse_args()
 
@@ -1692,6 +1702,21 @@ def main() -> None:
                 f"PM corrigido: R$ {report['corrected_avg_price']:.6f} | "
                 f"ajuste necessario: {'sim' if report['update_required'] else 'nao'}"
             )
+        elif args.subcmd == "wheel-cycle-backfill":
+            try:
+                report = backfill_wheel_cycles(apply=bool(args.apply))
+            except WheelCycleError as exc:
+                raise SystemExit(f"Backfill Wheel nao aplicado: {exc}") from exc
+            mode = "APLICADO" if report["applied"] else "SIMULACAO"
+            print(f"Backfill de ciclos Wheel: {mode}")
+            for item in report["ready"]:
+                legs = item.get("position_legs") or []
+                ids = ", ".join(f"#{position['id']} ({leg_type})" for position, leg_type in legs)
+                print(f"  PUT #{item['put_position_id']}: {item['status']} | {ids}")
+            for item in report["requires_review"]:
+                print(f"  PUT #{item['put_position_id']}: requer conferencia | {item['reason']}")
+            if report["created_cycle_ids"]:
+                print("  Ciclos criados: " + ", ".join(f"#{cycle_id}" for cycle_id in report["created_cycle_ids"]))
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 

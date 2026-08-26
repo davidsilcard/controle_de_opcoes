@@ -94,6 +94,13 @@ from .strategy_contracts import (
     validate_position_identity_update,
 )
 from .strategy_performance import STRATEGIES, build_strategy_performance
+from .wheel_cycles import (
+    LEG_TYPES as WHEEL_LEG_TYPES,
+    WheelCycleError,
+    add_wheel_cycle_leg,
+    create_wheel_cycle,
+    list_wheel_cycles,
+)
 from .audit_reconciliation import build_audit_reconciliation
 from .holdings import (
     HoldingValidationError,
@@ -2197,10 +2204,21 @@ def create_app() -> Flask:
             ledger_sums=ledger_sums,
             is_simulated=is_simulated,
         )
+        try:
+            wheel_cycles = list_wheel_cycles(is_simulated=is_simulated)
+        except (RuntimeError, WheelCycleError) as exc:
+            wheel_cycles = []
+            wheel_error = f"Nao foi possivel carregar os ciclos Wheel: {exc}"
+        else:
+            wheel_error = (request.args.get("wheel_error") or "").strip()
         return render_template(
             "performance.html",
             mode=mode,
             performance=context,
+            wheel_cycles=wheel_cycles,
+            wheel_leg_types=WHEEL_LEG_TYPES,
+            wheel_error=wheel_error,
+            wheel_notice=(request.args.get("wheel_notice") or "").strip(),
             performance_error=(request.args.get("performance_error") or "").strip(),
             performance_notice=(request.args.get("performance_notice") or "").strip(),
         )
@@ -2317,6 +2335,59 @@ def create_app() -> Flask:
                 "performance_view",
                 mode=mode,
                 performance_notice=f"Contrato da posicao #{position_id} atualizado para a apuracao.",
+            )
+        )
+
+    @app.post("/performance/wheel/cycles")
+    def create_wheel_cycle_view():
+        mode = (request.form.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        try:
+            cycle_id = create_wheel_cycle(
+                underlying=(request.form.get("underlying") or ""),
+                is_simulated=mode == "simulated",
+                opened_at=(request.form.get("opened_at") or ""),
+                source_ref=(request.form.get("source_ref") or ""),
+                notes=(request.form.get("notes") or ""),
+            )
+        except WheelCycleError as exc:
+            return redirect(url_for("performance_view", mode=mode, wheel_error=str(exc)))
+        return redirect(
+            url_for(
+                "performance_view",
+                mode=mode,
+                wheel_notice=f"Ciclo Wheel #{cycle_id} criado. Vincule as pernas confirmadas abaixo.",
+            )
+        )
+
+    @app.post("/performance/wheel/cycles/<int:cycle_id>/legs")
+    def add_wheel_cycle_leg_view(cycle_id: int):
+        mode = (request.form.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        leg_type = (request.form.get("leg_type") or "").strip().lower()
+        raw_position_id = (request.form.get("position_id") or "").strip()
+        raw_quantity = (request.form.get("quantity") or "").strip()
+        raw_amount = (request.form.get("amount_override") or "").strip()
+        try:
+            amount_override = _parse_form_float(raw_amount) if raw_amount else None
+            add_wheel_cycle_leg(
+                cycle_id=cycle_id,
+                leg_type=leg_type,
+                position_id=int(raw_position_id) if raw_position_id else None,
+                quantity=int(raw_quantity) if raw_quantity else None,
+                amount_override=amount_override,
+                source_ref=(request.form.get("source_ref") or ""),
+                notes=(request.form.get("notes") or ""),
+            )
+        except (ValueError, WheelCycleError) as exc:
+            return redirect(url_for("performance_view", mode=mode, wheel_error=str(exc)))
+        return redirect(
+            url_for(
+                "performance_view",
+                mode=mode,
+                wheel_notice=f"Perna adicionada ao ciclo Wheel #{cycle_id}.",
             )
         )
 
