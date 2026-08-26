@@ -2368,6 +2368,7 @@ def create_app() -> Flask:
             mode = "real"
         leg_type = (request.form.get("leg_type") or "").strip().lower()
         raw_position_id = (request.form.get("position_id") or "").strip()
+        raw_holding_event_id = (request.form.get("holding_event_id") or "").strip()
         raw_quantity = (request.form.get("quantity") or "").strip()
         raw_amount = (request.form.get("amount_override") or "").strip()
         try:
@@ -2376,6 +2377,7 @@ def create_app() -> Flask:
                 cycle_id=cycle_id,
                 leg_type=leg_type,
                 position_id=int(raw_position_id) if raw_position_id else None,
+                holding_event_id=int(raw_holding_event_id) if raw_holding_event_id else None,
                 quantity=int(raw_quantity) if raw_quantity else None,
                 amount_override=amount_override,
                 source_ref=(request.form.get("source_ref") or ""),

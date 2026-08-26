@@ -272,14 +272,19 @@ Apuração de desempenho das estratégias:
 
 - a aba `/performance` separa `Cash-Covered Put` e `Covered Call`; a métrica principal é o resultado completo dos ciclos encerrados antes da DARF oficial.
 - a seção adicional `Ciclo Wheel` não soma os totais dessas duas estratégias. Ela registra explicitamente a PUT de origem, a aquisição das ações, as CALLs, a saída das ações e despesas documentadas para evitar duplicidade quando o PM do estoque já foi ajustado por prêmios anteriores.
-- o resultado Wheel é `prêmios líquidos + venda líquida das ações - aquisição - recompras - despesas`. DARF permanece separada; a tela também mostra capital máximo, capital consumido, retorno, duração e cobertura documental.
-- cada vínculo guarda posição, quantidade, modo e fonte. A aplicação bloqueia mistura Real/Simulado, posição acima da quantidade disponível em ciclos, saída acima da aquisição e CALL exercida acima do estoque do ciclo. Em ambiguidade, o ciclo fica em conferência: não há associação por cotação ou suposição.
+- quando o exercício da PUT entrou apenas no estoque consolidado, a aquisição do Wheel aponta para o evento `PUT_ASSIGNMENT` correspondente, e não cria uma posição artificial de ação. O vínculo exige a própria PUT exercida, ativo-base, modo, data e quantidade idênticos.
+- o resultado Wheel é `prêmios líquidos + venda líquida das ações - aquisição - recompras - despesas`. DARF permanece separada; em ciclo aberto a tela mostra apenas o fluxo acumulado e o capital aplicado, nunca um resultado realizado ou retorno antes da saída das ações.
+- cada vínculo guarda posição ou evento de estoque, quantidade, modo e fonte. A aplicação bloqueia mistura Real/Simulado, posição ou evento acima da quantidade disponível em ciclos, saída acima da aquisição e CALL exercida acima do estoque do ciclo. Em ambiguidade, o ciclo fica em conferência: não há associação por cotação ou suposição.
 - para históricos, primeiro execute o dry-run abaixo e guarde o relatório. Ele só considera cadeias legadas com ativo, modo, quantidade e cronologia inequívocos; a repetição com `--apply` é idempotente e não altera posições, estoque, ledger ou DARF.
 
 ```bash
 uv run python -m opcoes.cli repair wheel-cycle-backfill
 uv run python -m opcoes.cli repair wheel-cycle-backfill --apply
+uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-put>
+uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-put> --apply
 ```
+
+- para corrigir somente uma PUT confirmada, use sempre `--put-position-id` primeiro no dry-run e depois com `--apply`; isso impede que um backfill operacional crie ciclos para outros históricos elegíveis no mesmo momento.
 
 - o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
 - o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.

@@ -975,6 +975,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Cria os ciclos prontos apos revisar o dry-run. Sem esta flag, apenas gera relatorio.",
     )
+    wheel_backfill.add_argument(
+        "--put-position-id",
+        type=int,
+        help="Restringe o relatorio e a aplicacao a uma PUT exercida especifica.",
+    )
 
     return parser.parse_args()
 
@@ -1704,7 +1709,9 @@ def main() -> None:
             )
         elif args.subcmd == "wheel-cycle-backfill":
             try:
-                report = backfill_wheel_cycles(apply=bool(args.apply))
+                report = backfill_wheel_cycles(
+                    apply=bool(args.apply), put_position_id=args.put_position_id
+                )
             except WheelCycleError as exc:
                 raise SystemExit(f"Backfill Wheel nao aplicado: {exc}") from exc
             mode = "APLICADO" if report["applied"] else "SIMULACAO"
@@ -1712,6 +1719,9 @@ def main() -> None:
             for item in report["ready"]:
                 legs = item.get("position_legs") or []
                 ids = ", ".join(f"#{position['id']} ({leg_type})" for position, leg_type in legs)
+                event_legs = item.get("holding_event_legs") or []
+                event_ids = ", ".join(f"evento #{event['id']} ({leg_type})" for event, leg_type in event_legs)
+                ids = ", ".join(part for part in (ids, event_ids) if part)
                 print(f"  PUT #{item['put_position_id']}: {item['status']} | {ids}")
             for item in report["requires_review"]:
                 print(f"  PUT #{item['put_position_id']}: requer conferencia | {item['reason']}")

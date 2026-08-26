@@ -131,7 +131,8 @@
                 <div class="alert alert-warning py-2 mb-2">{{ cycle.error }}</div>
               {% else %}
                 <div class="row g-2 small mb-2">
-                  <div class="col-md-2"><span class="text-muted d-block">Resultado antes DARF</span><strong class="{% if cycle.result_before_darf >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(cycle.result_before_darf) }}</strong></div>
+                  <div class="col-md-2"><span class="text-muted d-block">{% if cycle.status == 'closed' %}Resultado antes DARF{% else %}Resultado realizado{% endif %}</span>{% if cycle.result_before_darf is not none %}<strong class="{% if cycle.result_before_darf >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(cycle.result_before_darf) }}</strong>{% else %}<strong class="text-muted">Em aberto</strong>{% endif %}</div>
+                  <div class="col-md-2"><span class="text-muted d-block">Fluxo acumulado</span><strong class="{% if cycle.cash_flow_before_darf >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(cycle.cash_flow_before_darf) }}</strong></div>
                   <div class="col-md-2"><span class="text-muted d-block">DARF no ledger</span><strong class="text-danger">R$ {{ '%.2f'|format(cycle.official_darf) }}</strong></div>
                   <div class="col-md-2"><span class="text-muted d-block">Capital máximo</span><strong>R$ {{ '%.2f'|format(cycle.capital_max) }}</strong></div>
                   <div class="col-md-2"><span class="text-muted d-block">Capital consumido</span><strong>R$ {{ '%.2f'|format(cycle.capital_consumed) }}</strong></div>
@@ -139,17 +140,18 @@
                   <div class="col-md-2"><span class="text-muted d-block">Duração</span><strong>{{ cycle.duration_days or '-' }} dias</strong></div>
                 </div>
                 <div class="table-responsive mb-2"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Perna</th><th>Posição</th><th class="text-end">Quantidade</th><th class="text-end">Impacto</th><th>Fonte</th></tr></thead><tbody>
-                  {% for leg in cycle.legs %}<tr><td>{{ leg.label }}</td><td>{% if leg.position_id %}#{{ leg.position_id }} {{ leg.ticker }}{% else %}Manual{% endif %}</td><td class="text-end">{{ leg.quantity or '-' }}</td><td class="text-end {% if leg.amount >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(leg.amount) }}</td><td class="small">{{ leg.source_ref or 'Sem referência: requer conferência' }}</td></tr>{% endfor %}
+                  {% for leg in cycle.legs %}<tr><td>{{ leg.label }}</td><td>{% if leg.position_id %}#{{ leg.position_id }} {{ leg.ticker }}{% elif leg.holding_event_id %}Evento estoque #{{ leg.holding_event_id }} {{ leg.ticker }}{% else %}Manual{% endif %}</td><td class="text-end">{{ leg.quantity or '-' }}</td><td class="text-end {% if leg.amount >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(leg.amount) }}</td><td class="small">{{ leg.source_ref or 'Sem referência: requer conferência' }}</td></tr>{% endfor %}
                 </tbody></table></div>
               {% endif %}
               <form method="post" action="/performance/wheel/cycles/{{ cycle.id }}/legs" class="row g-2 align-items-end">
                 {{ csrf_input() }}
                 <input type="hidden" name="mode" value="{{ mode }}">
                 <div class="col-md-2"><label class="form-label small mb-1">Tipo</label><select name="leg_type" class="form-select form-select-sm">{% for leg_type in wheel_leg_types %}<option value="{{ leg_type }}">{{ {'put_origin':'PUT de origem','stock_acquisition':'Aquisição ações','covered_call':'CALL coberta','stock_exit':'Saída ações','expense':'Despesa manual'}[leg_type] }}</option>{% endfor %}</select></div>
-                <div class="col-md-2"><label class="form-label small mb-1">ID posição</label><input name="position_id" type="number" min="1" class="form-control form-control-sm" placeholder="Obrigatório exceto despesa"></div>
+                <div class="col-md-2"><label class="form-label small mb-1">ID posição</label><input name="position_id" type="number" min="1" class="form-control form-control-sm" placeholder="Use para opções/saída"></div>
+                <div class="col-md-2"><label class="form-label small mb-1">Evento de estoque</label><input name="holding_event_id" type="number" min="1" class="form-control form-control-sm" placeholder="Só aquisição consolidada"></div>
                 <div class="col-md-2"><label class="form-label small mb-1">Quantidade</label><input name="quantity" type="number" min="1" class="form-control form-control-sm" placeholder="Obrigatória exceto despesa"></div>
-                <div class="col-md-2"><label class="form-label small mb-1">Despesa manual</label><input name="amount_override" type="number" step="0.01" min="0.01" class="form-control form-control-sm" placeholder="Apenas despesa"></div>
-                <div class="col-md-3"><label class="form-label small mb-1">Fonte da perna</label><input name="source_ref" class="form-control form-control-sm" placeholder="Obrigatória para despesa"></div>
+                <div class="col-md-1"><label class="form-label small mb-1">Despesa</label><input name="amount_override" type="number" step="0.01" min="0.01" class="form-control form-control-sm" placeholder="Só despesa"></div>
+                <div class="col-md-2"><label class="form-label small mb-1">Fonte da perna</label><input name="source_ref" class="form-control form-control-sm" placeholder="Obrigatória para despesa"></div>
                 <div class="col-md-1 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Vincular</button></div>
               </form>
             </article>
