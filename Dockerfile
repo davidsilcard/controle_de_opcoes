@@ -14,12 +14,15 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev --no-install-project \
+    && /app/.venv/bin/playwright install --with-deps chromium
+
+COPY README.md ./
 COPY opcoes ./opcoes
 
-RUN uv sync --frozen --no-dev \
-    && uv pip install --python /app/.venv/bin/python gunicorn==23.0.0 \
-    && /app/.venv/bin/playwright install --with-deps chromium
+RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --shell /bin/bash appuser \
     && mkdir -p /app/data \

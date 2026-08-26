@@ -849,24 +849,30 @@ O script:
 
 - falha cedo se a worktree estiver suja
 - roda `git fetch` + `git pull --ff-only`
+- recusa iniciar o build quando o diretório do Docker tem menos de `5GB` livres por padrão (`DOCKER_MIN_FREE_KB=5242880`)
 - rebuilda a stack Docker
+- reaproveita a camada de dependências e do Chromium quando somente o código ou o README mudam
 - espera `web` e `edge` responderem antes de concluir
 - valida `web` e `edge`
 - reinicia uma única vez quando o próprio script foi atualizado pelo `git pull`, para aplicar a nova regra antes do rebuild
-- reserva automaticamente `2GB` para cache Docker de build e remove o excedente nao utilizado; imagens, containers, volumes e dados em uso permanecem preservados. Ajuste somente se necessário com `DOCKER_BUILD_CACHE_RESERVED_SPACE`.
+- remove somente imagens antigas, sem uso e rotuladas como pertencentes ao projeto `controle_de_opcoes`; imagens ativas, imagens de outros projetos, containers, volumes e dados persistentes são preservados
+- reserva automaticamente `2GB` para cache Docker de build e remove o excedente não utilizado; ajuste somente se necessário com `DOCKER_BUILD_CACHE_RESERVED_SPACE`
+- exibe `docker system df` ao final para deixar o consumo de espaço registrado no log do deploy
 
 Importante:
 
 - `git pull` sozinho nao e suficiente, porque ele nao rebuilda os containers nem faz smoke test
 - usamos `bash deploy/scripts/update-vps.sh` em vez de executar o arquivo diretamente para nao depender do bit de execucao preservado apos `git pull` feito a partir de ambientes Windows
 
-Se a VPS estiver com arquivos locais fora do Git, limpe primeiro. O caso mais comum deve ser resolvido resetando o arquivo divergente para a versao do repositório:
+Se a VPS estiver com arquivos locais divergentes, o script deve parar. Consulte primeiro:
 
 ```bash
 cd ~/apps/controle_de_opcoes
-git checkout -- deploy/scripts/opcoes-compose-vps.sh
-bash deploy/scripts/update-vps.sh
+git status --short
+git diff
 ```
+
+Não use `git checkout`, `safe.directory`, mudança de proprietário ou permissões como atalho. Identifique a origem da divergência, faça a correção no repositório local, revise, teste, versione e publique; depois execute novamente o script oficial.
 
 ### Subir e parar a stack
 
