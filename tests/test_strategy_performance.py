@@ -168,3 +168,38 @@ def test_missing_legacy_contract_remains_visible_without_invented_return() -> No
     assert "strike nao preservado" in result["cycles"][0]["missing_reasons"]
     assert result["totals"]["complete_result"] == 0.0
     assert result["totals"]["coverage_pct"] == 0.0
+
+
+def test_shared_note_fee_keeps_cycle_incomplete_until_documented_rateio() -> None:
+    positions = [
+        {
+            "id": 30,
+            "ticker": "TAEEH392",
+            "underlying": "TAEE11",
+            "strategy_tag": "covered_call",
+            "side": "short",
+            "status": "closed",
+            "trade_date": "2026-08-17",
+            "exit_date": "2026-08-20",
+            "exit_reason": "Exercicio",
+            "qty": 400,
+            "contract_strike": 37.35,
+            "contract_expiry": "2026-08-21",
+            "capital_committed": 13760.0,
+            "shared_fee_pending": True,
+            "shared_fee_note_ref": "BTG #33861523",
+            "is_simulated": False,
+        }
+    ]
+
+    result = build_strategy_performance(
+        positions,
+        ledger_sums={30: _ledger(premium=167.79, realized=167.79)},
+    )
+
+    cycle = result["cycles"][0]
+    assert cycle["is_complete"] is False
+    assert cycle["return_pct"] is None
+    assert "taxas compartilhadas da nota sem rateio documental (BTG #33861523)" in cycle[
+        "missing_reasons"
+    ]

@@ -207,6 +207,8 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "capital_committed": "DOUBLE PRECISION",
         "capital_source": "TEXT",
         "performance_source_ref": "TEXT",
+        "shared_fee_pending": "INTEGER DEFAULT 0",
+        "shared_fee_note_ref": "TEXT",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -330,6 +332,8 @@ def add_position(
     capital_committed: Optional[float] = None,
     capital_source: Optional[str] = None,
     performance_source_ref: Optional[str] = None,
+    shared_fee_pending: bool = False,
+    shared_fee_note_ref: Optional[str] = None,
     conn: Optional[Any] = None,
 ) -> int:
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
@@ -360,6 +364,8 @@ def add_position(
         float(capital_committed) if capital_committed is not None else None,
         capital_source or None,
         performance_source_ref or None,
+        1 if shared_fee_pending else 0,
+        shared_fee_note_ref or None,
     )
     try:
         if db.backend == "postgres":
@@ -387,9 +393,11 @@ def add_position(
                     contract_expiry,
                     capital_committed,
                     capital_source,
-                    performance_source_ref
+                    performance_source_ref,
+                    shared_fee_pending,
+                    shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -420,9 +428,11 @@ def add_position(
                     contract_expiry,
                     capital_committed,
                     capital_source,
-                    performance_source_ref
+                    performance_source_ref,
+                    shared_fee_pending,
+                    shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -494,6 +504,8 @@ def update_position(
     capital_committed: Any = _UNSET,
     capital_source: Any = _UNSET,
     performance_source_ref: Any = _UNSET,
+    shared_fee_pending: Any = _UNSET,
+    shared_fee_note_ref: Any = _UNSET,
     conn: Optional[Any] = None,
 ) -> None:
     fields = []
@@ -573,6 +585,12 @@ def update_position(
     if performance_source_ref is not _UNSET:
         fields.append("performance_source_ref = ?")
         params.append(performance_source_ref)
+    if shared_fee_pending is not _UNSET:
+        fields.append("shared_fee_pending = ?")
+        params.append(1 if shared_fee_pending else 0)
+    if shared_fee_note_ref is not _UNSET:
+        fields.append("shared_fee_note_ref = ?")
+        params.append(shared_fee_note_ref)
     if not fields:
         return
 
@@ -964,6 +982,12 @@ def _row_to_dict(row: Any) -> dict:
         "capital_source": row["capital_source"] if "capital_source" in row.keys() else None,
         "performance_source_ref": (
             row["performance_source_ref"] if "performance_source_ref" in row.keys() else None
+        ),
+        "shared_fee_pending": bool(row["shared_fee_pending"] or 0)
+        if "shared_fee_pending" in row.keys()
+        else False,
+        "shared_fee_note_ref": (
+            row["shared_fee_note_ref"] if "shared_fee_note_ref" in row.keys() else None
         ),
     }
 

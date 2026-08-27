@@ -87,6 +87,12 @@ def _completion_reasons(
         reasons.append("capital comprometido nao preservado")
     if not str(position.get("contract_expiry") or "").strip():
         reasons.append("vencimento nao preservado")
+    if bool(position.get("shared_fee_pending") or 0):
+        note_ref = str(position.get("shared_fee_note_ref") or "").strip()
+        reason = "taxas compartilhadas da nota sem rateio documental"
+        if note_ref:
+            reason += f" ({note_ref})"
+        reasons.append(reason)
     if _is_call_exercise(position) and len(stock_positions) != 1:
         reasons.append("historico de acao da CALL exercida nao vinculado")
     return reasons

@@ -151,3 +151,33 @@ def test_positions_guard_flags_open_position_with_exit_fields() -> None:
     assert [(issue.position_id, issue.code) for issue in issues] == [
         (100, "ABERTA_COM_SAIDA")
     ]
+
+
+def test_positions_guard_flags_shared_note_fee_without_rateio() -> None:
+    positions = [
+        {
+            "id": 101,
+            "ticker": "TAEEH392",
+            "underlying": "TAEE11",
+            "trade_date": "2026-08-17",
+            "qty": 400,
+            "entry_price": 0.42,
+            "fees": 0.21,
+            "trade_type": "swing",
+            "side": "short",
+            "status": "closed",
+            "exit_date": "2026-08-20",
+            "exit_price": 0.0,
+            "exit_reason": "Exercicio",
+            "strategy_tag": "covered_call",
+            "shared_fee_pending": True,
+            "shared_fee_note_ref": "BTG #33861523",
+            "is_simulated": 0,
+        }
+    ]
+
+    issues = audit_positions_page(positions, ledger_sums={})
+
+    assert (101, "TAXAS_COMPARTILHADAS_SEM_RATEIO") in [
+        (issue.position_id, issue.code) for issue in issues
+    ]

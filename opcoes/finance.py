@@ -21,6 +21,7 @@ class TransactionType(str, Enum):
     DARF = "DARF"            # Provisão/pagamento de IR (DARF)
     DIVIDEND = "DIVIDEND"    # Dividendos recebidos
     REALIZED = "REALIZED"    # Resultado realizado da baixa/parcial
+    SHARED_NOTE_FEE = "SHARED_NOTE_FEE"  # Despesa de nota sem rateio por posição
 
 
 @dataclass

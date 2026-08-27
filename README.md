@@ -265,8 +265,9 @@ Fluxo operacional novo para garantia de `Covered Call`:
 - em `PUT` exercida em `Cash-Covered Put`, a aplicacao exige as despesas atribuidas a compra da nota, registra o debito total no caixa, inclui essas despesas no custo do estoque novo e sinaliza revisao do preco medio quando necessario.
 - em `CALL` exercida, a aplicacao reduz o estoque consolidado automaticamente e gera um historico fechado para manter a trilha de auditoria/resultado.
 - em `Cash-Covered Put` e `Covered Call`, os botoes `Exercido` e `Expirou` abrem uma confirmacao com data obrigatoria; sem data de vencimento/exercicio confirmada, a baixa e bloqueada para evitar registro no dia errado.
-- no exercício de `Covered Call`, informe obrigatoriamente as despesas da venda destacadas na nota (corretagem, liquidação e emolumentos); elas entram no resultado realizado e na DARF. Se a nota agrupar várias vendas, distribua o total entre elas sem repetir. Quando a nota não tiver despesas, informe `0,00`.
-- no exercício de `Cash-Covered Put`, informe obrigatoriamente as despesas atribuídas a compra destacadas na nota. Elas aumentam o custo de aquisição das ações e o débito de caixa. Quando uma mesma nota tiver compras e vendas, rateie as despesas pelo financeiro de cada operação e informe cada parcela no respectivo exercício, sem duplicar o total.
+- no exercício de `Covered Call`, informe as despesas da venda somente quando a nota ou demonstrativo da corretora atribuir o valor àquela operação; elas entram no resultado realizado e na DARF. Quando a nota não tiver despesas, informe `0,00`.
+- no exercício de `Cash-Covered Put`, informe as despesas da compra somente quando a nota ou demonstrativo da corretora atribuir o valor àquela operação. Elas aumentam o custo de aquisição das ações e o débito de caixa.
+- se uma nota agrupar exercícios de mais de uma posição sem demonstrar o rateio, registre o total uma única vez no ledger como `SHARED_NOTE_FEE`, associe a referência da nota em cada posição e mantenha os ciclos em conferência. Não distribua o custo por quantidade, financeiro ou outra estimativa.
 
 Apuração de desempenho das estratégias:
 
@@ -288,6 +289,7 @@ uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-pu
 
 - o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
 - o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.
+- uma posição com taxa compartilhada de nota sem rateio documental aparece como pendência e não compõe retorno, resultado completo ou cobertura até a corretora fornecer a separação por operação.
 - novos cadastros de `Cash-Covered Put` e `Covered Call` preservam strike, vencimento, capital e referência do snapshot ou nota. Sem contrato confirmável, o cadastro é bloqueado. Covered Call também exige prêmio no caixa e PM consolidado confirmado.
 - operações antigas sem esses campos entram em uma fila ordenada por impacto financeiro. Complete-as na própria tela com dados verificáveis da nota; a aplicação não infere contrato ou capital a partir de cotações posteriores.
 
@@ -1225,6 +1227,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 - inferencia de ticker agora nao confunde acoes como `BBAS3` com opcoes, evitando que lotes em estoque aparecam indevidamente na lista de `Cash-Covered Put`.
 - auditoria agora inclui o impacto de `ASSIGN` no caixa, reconcilia o lote criado no exercicio da PUT e mostra o liquido total da operacao incluindo exercicio.
 - reparos historicos de exercicio de CALL agora usam um comando versionado, com simulacao obrigatoria por padrao e validacao de CALL, historico de acao, evento de estoque e SELL antes de qualquer escrita. Para um caso confirmado pela nota, rode primeiro `uv run python -m opcoes.cli repair covered-call-exercise-fee --call-position-id <id-call> --stock-position-id <id-acao> --sale-fees <valor>`; somente depois de conferir o resultado use a mesma linha com `--apply`. O comando so atualiza o valor do SELL e a taxa do evento `CALL_EXERCISE`; nao altera quantidade, preco, premio, DARF ou resultado fiscal da acao.
+- despesas de nota compartilhada agora usam o tipo de ledger `SHARED_NOTE_FEE` e marcam as posições envolvidas como pendentes de rateio documental; o custo afeta o caixa uma única vez, mas não é inventado como resultado individual de Cash-Covered Put ou Covered Call.
 - artefatos Python compilados (`__pycache__` e `*.pyc`) deixaram de ser versionados, evitando ruido local no `git status`.
 - README agora documenta o cadastro manual de venda de opcao a partir da nota de corretagem e a conferencia posterior na auditoria.
 - tela de `positions` agora traz um painel didatico de resultados realizados por ano e por mes, com lista das baixas do periodo e isolamento por usuario autenticado.
