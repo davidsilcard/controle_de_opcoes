@@ -9,6 +9,7 @@ from .utils import infer_option_type
 
 
 STRATEGIES = ("cash_put", "covered_call")
+PERFORMANCE_EVIDENCE_STATES = {"pending", "documents_exhausted"}
 
 
 def _number(value: Any) -> float | None:
@@ -30,6 +31,11 @@ def _int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _performance_evidence_state(position: Mapping[str, Any]) -> str:
+    state = str(position.get("performance_evidence_state") or "pending").strip().lower()
+    return state if state in PERFORMANCE_EVIDENCE_STATES else "pending"
 
 
 def _days_between(start: Any, end: Any) -> int | None:
@@ -190,6 +196,8 @@ def build_strategy_performance(
             "capital": capital,
             "capital_source": position.get("capital_source"),
             "source_ref": position.get("performance_source_ref"),
+            "performance_evidence_state": _performance_evidence_state(position),
+            "performance_evidence_note": position.get("performance_evidence_note"),
             "premium": premium,
             "darf_provision": darf_provision,
             "option_result": option_result,

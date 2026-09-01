@@ -170,6 +170,36 @@ def test_missing_legacy_contract_remains_visible_without_invented_return() -> No
     assert result["totals"]["coverage_pct"] == 0.0
 
 
+def test_documents_exhausted_remains_excluded_from_return_and_coverage() -> None:
+    positions = [
+        {
+            "id": 21,
+            "ticker": "PETRD521",
+            "underlying": "PETR4",
+            "strategy_tag": "covered_call",
+            "side": "short",
+            "status": "closed",
+            "trade_date": "2026-04-06",
+            "exit_date": "2026-04-17",
+            "exit_reason": "Expiração",
+            "qty": 100,
+            "contract_strike": 52.15,
+            "contract_expiry": "2026-04-17",
+            "performance_evidence_state": "documents_exhausted",
+            "performance_evidence_note": "Notas e extratos auditados; capital não comprovável.",
+            "is_simulated": False,
+        }
+    ]
+
+    result = build_strategy_performance(positions, ledger_sums={21: _ledger(realized=52.95)})
+
+    cycle = result["cycles"][0]
+    assert cycle["performance_evidence_state"] == "documents_exhausted"
+    assert cycle["is_complete"] is False
+    assert cycle["return_pct"] is None
+    assert result["totals"]["coverage_pct"] == 0.0
+
+
 def test_shared_note_fee_keeps_cycle_incomplete_until_documented_rateio() -> None:
     positions = [
         {

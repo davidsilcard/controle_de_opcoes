@@ -197,6 +197,16 @@
                           <div class="col-12 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar evidência</button></div>
                         {% endif %}
                       </form>
+                      <details class="mt-2 small">
+                        <summary class="text-muted">Não encontrou documento para os campos pendentes?</summary>
+                        <form method="post" action="/performance/contract/{{ cycle.position_id }}/documents-exhausted" class="row g-1 mt-1">
+                          {{ csrf_input() }}
+                          <input type="hidden" name="mode" value="{{ mode }}">
+                          {% if not cycle.source_ref %}<div class="col-4"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Fonte da auditoria" required></div>{% endif %}
+                          <div class="{{ 'col-8' if not cycle.source_ref else 'col-10' }}"><input name="performance_evidence_note" class="form-control form-control-sm" placeholder="Documentos consultados e campos não comprováveis" required></div>
+                          <div class="col-2 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Concluir auditoria</button></div>
+                        </form>
+                      </details>
                     </td>
                   </tr>
                 {% endfor %}
@@ -205,6 +215,39 @@
           </div>
         {% else %}
           <div class="alert alert-success py-2 mb-0">Não há dados documentais pendentes neste modo.</div>
+        {% endif %}
+      </section>
+
+      <section class="mb-4">
+        <h2 class="h5">Auditoria concluída — campos sem comprovação</h2>
+        {% if performance.documents_exhausted_cycles %}
+          <p class="small text-muted">Estas operações foram auditadas, mas a fonte disponível não permite comprovar todos os campos. Elas não entram no retorno percentual nem na cobertura, porém não exigem novo preenchimento sem uma nova fonte.</p>
+          <div class="table-responsive border bg-white">
+            <table class="table table-sm mb-0 align-middle">
+              <thead class="table-light"><tr><th>Posição</th><th>Estratégia</th><th>Fechamento</th><th>Campos sem comprovação</th><th>Auditoria</th></tr></thead>
+              <tbody>
+                {% for cycle in performance.documents_exhausted_cycles %}
+                  <tr>
+                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
+                    <td>{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }}</td>
+                    <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
+                    <td class="small">{{ cycle.missing_reasons|join('; ') }}</td>
+                    <td class="small">
+                      <div>{{ cycle.performance_evidence_note or '-' }}</div>
+                      <div class="text-muted mt-1">Fonte: {{ cycle.source_ref or '-' }}</div>
+                      <form method="post" action="/performance/contract/{{ cycle.position_id }}/reopen-evidence" class="mt-2">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="mode" value="{{ mode }}">
+                        <button class="btn btn-outline-primary btn-sm" type="submit">Reabrir auditoria</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="alert alert-success py-2 mb-0">Não há auditorias concluídas com campos sem comprovação.</div>
         {% endif %}
       </section>
 

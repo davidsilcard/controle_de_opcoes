@@ -12,6 +12,14 @@ from .snapshot_repository import fetch_latest_option_snapshots
 from .utils import infer_option_type, parse_ptbr_number
 
 _UNSET = object()
+_PERFORMANCE_EVIDENCE_STATES = {"pending", "documents_exhausted"}
+
+
+def _normalize_performance_evidence_state(value: Any) -> str:
+    normalized = str(value or "pending").strip().lower()
+    if normalized not in _PERFORMANCE_EVIDENCE_STATES:
+        raise ValueError("Estado de evidência de desempenho inválido.")
+    return normalized
 
 
 class _PgResult:
@@ -207,6 +215,8 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "capital_committed": "DOUBLE PRECISION",
         "capital_source": "TEXT",
         "performance_source_ref": "TEXT",
+        "performance_evidence_state": "TEXT DEFAULT 'pending'",
+        "performance_evidence_note": "TEXT",
         "shared_fee_pending": "INTEGER DEFAULT 0",
         "shared_fee_note_ref": "TEXT",
     }
@@ -332,6 +342,8 @@ def add_position(
     capital_committed: Optional[float] = None,
     capital_source: Optional[str] = None,
     performance_source_ref: Optional[str] = None,
+    performance_evidence_state: str = "pending",
+    performance_evidence_note: Optional[str] = None,
     shared_fee_pending: bool = False,
     shared_fee_note_ref: Optional[str] = None,
     conn: Optional[Any] = None,
@@ -364,6 +376,8 @@ def add_position(
         float(capital_committed) if capital_committed is not None else None,
         capital_source or None,
         performance_source_ref or None,
+        _normalize_performance_evidence_state(performance_evidence_state),
+        performance_evidence_note or None,
         1 if shared_fee_pending else 0,
         shared_fee_note_ref or None,
     )
@@ -394,10 +408,12 @@ def add_position(
                     capital_committed,
                     capital_source,
                     performance_source_ref,
+                    performance_evidence_state,
+                    performance_evidence_note,
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -429,10 +445,12 @@ def add_position(
                     capital_committed,
                     capital_source,
                     performance_source_ref,
+                    performance_evidence_state,
+                    performance_evidence_note,
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -504,6 +522,8 @@ def update_position(
     capital_committed: Any = _UNSET,
     capital_source: Any = _UNSET,
     performance_source_ref: Any = _UNSET,
+    performance_evidence_state: Any = _UNSET,
+    performance_evidence_note: Any = _UNSET,
     shared_fee_pending: Any = _UNSET,
     shared_fee_note_ref: Any = _UNSET,
     conn: Optional[Any] = None,
@@ -585,6 +605,12 @@ def update_position(
     if performance_source_ref is not _UNSET:
         fields.append("performance_source_ref = ?")
         params.append(performance_source_ref)
+    if performance_evidence_state is not _UNSET:
+        fields.append("performance_evidence_state = ?")
+        params.append(_normalize_performance_evidence_state(performance_evidence_state))
+    if performance_evidence_note is not _UNSET:
+        fields.append("performance_evidence_note = ?")
+        params.append(performance_evidence_note)
     if shared_fee_pending is not _UNSET:
         fields.append("shared_fee_pending = ?")
         params.append(1 if shared_fee_pending else 0)
@@ -982,6 +1008,16 @@ def _row_to_dict(row: Any) -> dict:
         "capital_source": row["capital_source"] if "capital_source" in row.keys() else None,
         "performance_source_ref": (
             row["performance_source_ref"] if "performance_source_ref" in row.keys() else None
+        ),
+        "performance_evidence_state": _normalize_performance_evidence_state(
+            row["performance_evidence_state"]
+            if "performance_evidence_state" in row.keys()
+            else "pending"
+        ),
+        "performance_evidence_note": (
+            row["performance_evidence_note"]
+            if "performance_evidence_note" in row.keys()
+            else None
         ),
         "shared_fee_pending": bool(row["shared_fee_pending"] or 0)
         if "shared_fee_pending" in row.keys()

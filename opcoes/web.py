@@ -2205,6 +2205,7 @@ def create_app() -> Flask:
             is_simulated=is_simulated,
         )
         evidence_pending_cycles = []
+        documents_exhausted_cycles = []
         shared_fee_pending_cycles = []
         for cycle in context["incomplete_cycles"]:
             reasons = list(cycle.get("missing_reasons") or [])
@@ -2212,11 +2213,17 @@ def create_app() -> Flask:
                 "taxas compartilhadas da nota" not in str(reason).lower()
                 for reason in reasons
             )
-            if has_non_fee_pending:
+            if (
+                has_non_fee_pending
+                and cycle.get("performance_evidence_state") == "documents_exhausted"
+            ):
+                documents_exhausted_cycles.append(cycle)
+            elif has_non_fee_pending:
                 evidence_pending_cycles.append(cycle)
             else:
                 shared_fee_pending_cycles.append(cycle)
         context["evidence_pending_cycles"] = evidence_pending_cycles
+        context["documents_exhausted_cycles"] = documents_exhausted_cycles
         context["shared_fee_pending_cycles"] = shared_fee_pending_cycles
         try:
             wheel_cycles = list_wheel_cycles(is_simulated=is_simulated)
@@ -2373,6 +2380,7 @@ def create_app() -> Flask:
                     "contract_expiry": expiry or None,
                     "capital_committed": capital,
                     "performance_source_ref": source_ref or None,
+                    "performance_evidence_state": "pending",
                 }
                 if submitted_capital:
                     position_changes["capital_source"] = "historico_manual_confirmado"
@@ -2396,6 +2404,115 @@ def create_app() -> Flask:
                 "performance_view",
                 mode=mode,
                 performance_notice=f"Contrato da posicao #{position_id} atualizado para a apuracao.",
+            )
+        )
+
+    @app.post("/performance/contract/<int:position_id>/documents-exhausted")
+    def mark_performance_documents_exhausted(position_id: int):
+        position = get_position(position_id)
+        mode = (request.form.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        if not _is_short_strategy_performance_position(position):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho.",
+                )
+            )
+        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="A posicao informada pertence a outro modo.",
+                )
+            )
+
+        source_ref = (
+            (request.form.get("performance_source_ref") or "").strip()
+            or (position.get("performance_source_ref") or "").strip()
+        )
+        evidence_note = (request.form.get("performance_evidence_note") or "").strip()
+        if not source_ref or not evidence_note:
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Informe a fonte e a justificativa da auditoria antes de concluir que o documento não está disponível.",
+                )
+            )
+
+        def is_missing_positive_value(value: Any) -> bool:
+            try:
+                return not (float(value) > 0 and math.isfinite(float(value)))
+            except (TypeError, ValueError):
+                return True
+
+        has_missing_contract_data = (
+            is_missing_positive_value(position.get("contract_strike"))
+            or is_missing_positive_value(position.get("capital_committed"))
+            or not str(position.get("contract_expiry") or "").strip()
+        )
+        if not has_missing_contract_data:
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="O contrato já está completo; não há campo documental a encerrar nesta auditoria.",
+                )
+            )
+
+        with db_transaction() as conn:
+            update_position(
+                position_id=position_id,
+                performance_source_ref=source_ref,
+                performance_evidence_state="documents_exhausted",
+                performance_evidence_note=evidence_note,
+                conn=conn,
+            )
+        return redirect(
+            url_for(
+                "performance_view",
+                mode=mode,
+                performance_notice=f"Auditoria da posicao #{position_id} concluida sem documento para os campos pendentes.",
+            )
+        )
+
+    @app.post("/performance/contract/<int:position_id>/reopen-evidence")
+    def reopen_performance_evidence(position_id: int):
+        position = get_position(position_id)
+        mode = (request.form.get("mode") or "real").strip().lower()
+        if mode not in {"real", "simulated"}:
+            mode = "real"
+        if not _is_short_strategy_performance_position(position):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho.",
+                )
+            )
+        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="A posicao informada pertence a outro modo.",
+                )
+            )
+        with db_transaction() as conn:
+            update_position(
+                position_id=position_id,
+                performance_evidence_state="pending",
+                conn=conn,
+            )
+        return redirect(
+            url_for(
+                "performance_view",
+                mode=mode,
+                performance_notice=f"Auditoria da posicao #{position_id} reaberta para nova evidência.",
             )
         )
 
