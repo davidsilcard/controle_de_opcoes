@@ -159,3 +159,40 @@ def test_performance_separates_shared_fee_and_preserves_confirmed_contract_field
     assert updated["capital_committed"] == pytest.approx(2261.0)
     assert updated["contract_expiry"] == "2026-04-17"
     assert updated["performance_source_ref"] == "nota comprovada"
+
+
+def test_performance_accepts_expiry_evidence_without_unproven_strike_or_capital() -> None:
+    partial_id = portfolio.add_position(
+        ticker="PETRD521",
+        underlying="PETR4",
+        trade_date="2026-04-06",
+        qty=100,
+        entry_price=0.53,
+        side="short",
+        strategy_tag="covered_call",
+    )
+    portfolio.close_position(
+        position_id=partial_id,
+        exit_date="2026-04-17",
+        exit_price=0.0,
+        exit_reason="Expirou",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    response = client.post(
+        f"/performance/contract/{partial_id}",
+        data={
+            "mode": "real",
+            "contract_expiry": "2026-04-17",
+            "performance_source_ref": "Calendário oficial B3 — abril/2026",
+        },
+    )
+
+    assert response.status_code in (302, 303)
+    updated = portfolio.get_position(partial_id)
+    assert updated["contract_strike"] is None
+    assert updated["capital_committed"] is None
+    assert updated["contract_expiry"] == "2026-04-17"
+    assert updated["performance_source_ref"] == "Calendário oficial B3 — abril/2026"

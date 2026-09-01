@@ -2260,12 +2260,12 @@ def create_app() -> Flask:
                 )
             )
 
-        def resolve_positive_currency(
+        def resolve_optional_positive_currency(
             field_name: str,
             current_value: Any,
             *,
             label: str,
-        ) -> float:
+        ) -> float | None:
             submitted = (request.form.get(field_name) or "").strip()
             if submitted:
                 return _parse_required_positive_currency(submitted, label=label)
@@ -2275,15 +2275,15 @@ def create_app() -> Flask:
                 existing = 0.0
             if existing > 0 and math.isfinite(existing):
                 return existing
-            raise ValueError(f"Informe {label.lower()} maior que zero.")
+            return None
 
         try:
-            strike = resolve_positive_currency(
+            strike = resolve_optional_positive_currency(
                 "contract_strike",
                 position.get("contract_strike"),
                 label="Strike",
             )
-            capital = resolve_positive_currency(
+            capital = resolve_optional_positive_currency(
                 "capital_committed",
                 position.get("capital_committed"),
                 label="Capital comprometido",
@@ -2303,12 +2303,25 @@ def create_app() -> Flask:
             (request.form.get("performance_source_ref") or "").strip()
             or (position.get("performance_source_ref") or "").strip()
         )
-        if (submitted_expiry and not expiry) or not expiry or not source_ref:
+        submitted_strike = (request.form.get("contract_strike") or "").strip()
+        submitted_capital = (request.form.get("capital_committed") or "").strip()
+        submitted_source_ref = (request.form.get("performance_source_ref") or "").strip()
+        if not any((submitted_strike, submitted_capital, submitted_expiry, submitted_source_ref)):
             return redirect(
                 url_for(
                     "performance_view",
                     mode=mode,
-                    performance_error="Informe vencimento valido e a referencia da nota ou outra fonte verificavel.",
+                    performance_error="Informe ao menos uma evidência para atualizar.",
+                )
+            )
+        if (submitted_expiry and not expiry) or (
+            any((submitted_strike, submitted_capital, submitted_expiry)) and not source_ref
+        ):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Informe uma fonte verificável para cada evidência e use vencimento válido quando preenchido.",
                 )
             )
 
@@ -2355,14 +2368,18 @@ def create_app() -> Flask:
 
         try:
             with db_transaction() as conn:
+                position_changes: dict[str, Any] = {
+                    "contract_strike": strike,
+                    "contract_expiry": expiry or None,
+                    "capital_committed": capital,
+                    "performance_source_ref": source_ref or None,
+                }
+                if submitted_capital:
+                    position_changes["capital_source"] = "historico_manual_confirmado"
                 update_position(
                     position_id=position_id,
-                    contract_strike=strike,
-                    contract_expiry=expiry,
-                    capital_committed=capital,
-                    capital_source="historico_manual_confirmado",
-                    performance_source_ref=source_ref,
                     conn=conn,
+                    **position_changes,
                 )
                 if parent_position_id is not None:
                     update_position(
