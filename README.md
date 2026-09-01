@@ -289,7 +289,8 @@ uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-pu
 
 - o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
 - o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.
-- uma posição com taxa compartilhada de nota sem rateio documental aparece como pendência e não compõe retorno, resultado completo ou cobertura até a corretora fornecer a separação por operação.
+- uma posição com taxa compartilhada de nota sem rateio documental aparece como pendência e não compõe retorno, resultado completo ou cobertura até a corretora fornecer a separação por operação. Na tela `/performance`, ela fica em `Aguardando rateio da corretora`, sem formulário para regravar strike, vencimento ou capital já auditados.
+- a seção `Confirmações com evidência pendente` mostra somente os campos que ainda faltam. Ao salvar uma evidência parcial, os campos e a fonte já confirmados são preservados; a tela não aceita nem incentiva recadastro de dados documentados.
 - novos cadastros de `Cash-Covered Put` e `Covered Call` preservam strike, vencimento, capital e referência do snapshot ou nota. Sem contrato confirmável, o cadastro é bloqueado. Covered Call também exige prêmio no caixa e PM consolidado confirmado.
 - operações antigas sem esses campos entram em uma fila ordenada por impacto financeiro. Complete-as na própria tela com dados verificáveis da nota; a aplicação não infere contrato ou capital a partir de cotações posteriores.
 

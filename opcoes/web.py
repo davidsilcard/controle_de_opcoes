@@ -2204,6 +2204,20 @@ def create_app() -> Flask:
             ledger_sums=ledger_sums,
             is_simulated=is_simulated,
         )
+        evidence_pending_cycles = []
+        shared_fee_pending_cycles = []
+        for cycle in context["incomplete_cycles"]:
+            reasons = list(cycle.get("missing_reasons") or [])
+            has_non_fee_pending = any(
+                "taxas compartilhadas da nota" not in str(reason).lower()
+                for reason in reasons
+            )
+            if has_non_fee_pending:
+                evidence_pending_cycles.append(cycle)
+            else:
+                shared_fee_pending_cycles.append(cycle)
+        context["evidence_pending_cycles"] = evidence_pending_cycles
+        context["shared_fee_pending_cycles"] = shared_fee_pending_cycles
         try:
             wheel_cycles = list_wheel_cycles(is_simulated=is_simulated)
         except (RuntimeError, WheelCycleError) as exc:
@@ -2246,20 +2260,50 @@ def create_app() -> Flask:
                 )
             )
 
+        def resolve_positive_currency(
+            field_name: str,
+            current_value: Any,
+            *,
+            label: str,
+        ) -> float:
+            submitted = (request.form.get(field_name) or "").strip()
+            if submitted:
+                return _parse_required_positive_currency(submitted, label=label)
+            try:
+                existing = float(current_value)
+            except (TypeError, ValueError):
+                existing = 0.0
+            if existing > 0 and math.isfinite(existing):
+                return existing
+            raise ValueError(f"Informe {label.lower()} maior que zero.")
+
         try:
-            strike = _parse_required_positive_currency(
-                request.form.get("contract_strike"), label="Strike"
+            strike = resolve_positive_currency(
+                "contract_strike",
+                position.get("contract_strike"),
+                label="Strike",
             )
-            capital = _parse_required_positive_currency(
-                request.form.get("capital_committed"), label="Capital comprometido"
+            capital = resolve_positive_currency(
+                "capital_committed",
+                position.get("capital_committed"),
+                label="Capital comprometido",
             )
         except ValueError as exc:
             return redirect(
                 url_for("performance_view", mode=mode, performance_error=str(exc))
             )
-        expiry = _parse_form_date(request.form.get("contract_expiry"))
-        source_ref = (request.form.get("performance_source_ref") or "").strip()
-        if not expiry or not source_ref:
+
+        submitted_expiry = (request.form.get("contract_expiry") or "").strip()
+        expiry = (
+            _parse_form_date(submitted_expiry)
+            if submitted_expiry
+            else (position.get("contract_expiry") or "").strip()
+        )
+        source_ref = (
+            (request.form.get("performance_source_ref") or "").strip()
+            or (position.get("performance_source_ref") or "").strip()
+        )
+        if (submitted_expiry and not expiry) or not expiry or not source_ref:
             return redirect(
                 url_for(
                     "performance_view",
