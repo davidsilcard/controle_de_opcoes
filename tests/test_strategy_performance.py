@@ -166,6 +166,7 @@ def test_missing_legacy_contract_remains_visible_without_invented_return() -> No
 
     assert result["cycles"][0]["return_pct"] is None
     assert "strike nao preservado" in result["cycles"][0]["missing_reasons"]
+    assert "capital de garantia nao declarado" in result["cycles"][0]["missing_reasons"]
     assert result["totals"]["complete_result"] == 0.0
     assert result["totals"]["coverage_pct"] == 0.0
 

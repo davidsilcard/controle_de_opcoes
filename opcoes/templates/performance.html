@@ -178,7 +178,7 @@
                       <div class="small text-muted mb-1">
                         Strike: <strong>{{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else 'pendente' }}</strong> ·
                         Vencimento: <strong>{{ cycle.expiry or 'pendente' }}</strong> ·
-                        Capital: <strong>{{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else 'pendente' }}</strong>
+                        Capital de garantia: <strong>{{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else 'não declarado' }}</strong>
                       </div>
                       <div class="small">{{ cycle.missing_reasons|join('; ') }}</div>
                     </td>
@@ -188,7 +188,7 @@
                         <input type="hidden" name="mode" value="{{ mode }}">
                         {% if cycle.strike is none %}<div class="col-3"><input name="contract_strike" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Strike pendente" required></div>{% endif %}
                         {% if not cycle.expiry %}<div class="col-3"><input name="contract_expiry" type="date" class="form-control form-control-sm" required></div>{% endif %}
-                        {% if cycle.capital is none %}<div class="col-3"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Capital pendente" required></div>{% endif %}
+                        {% if cycle.capital is none %}<div class="col-3"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Capital de garantia declarado" required><div class="form-text">Declaração por posição; não exige nota.</div></div>{% endif %}
                         {% if not cycle.source_ref %}<div class="col-3"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Nota/fonte" required></div>{% endif %}
                         {% if cycle.strategy == 'covered_call' and cycle.exit_reason and 'exerc' in cycle.exit_reason|lower and not cycle.stock_position_id %}
                           <div class="col-9"><input name="stock_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="ID do histórico de venda da ação exercida" required></div>
@@ -198,7 +198,7 @@
                         {% endif %}
                       </form>
                       <details class="mt-2 small">
-                        <summary class="text-muted">Não encontrou documento para os campos pendentes?</summary>
+                        <summary class="text-muted">Não encontrou documento para strike ou vencimento?</summary>
                         <form method="post" action="/performance/contract/{{ cycle.position_id }}/documents-exhausted" class="row g-1 mt-1">
                           {{ csrf_input() }}
                           <input type="hidden" name="mode" value="{{ mode }}">
@@ -264,7 +264,7 @@
                     <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
                     <td>{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }}</td>
                     <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td class="small">Strike: {{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else '-' }} · Vencimento: {{ cycle.expiry or '-' }} · Capital: {{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else '-' }}</td>
+                    <td class="small">Strike: {{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else '-' }} · Vencimento: {{ cycle.expiry or '-' }} · Capital de garantia: {{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else '-' }}</td>
                     <td class="small">Demonstrativo da corretora com o rateio da taxa por operação. Sem esse documento, o retorno individual permanece bloqueado.</td>
                   </tr>
                 {% endfor %}

@@ -198,6 +198,40 @@ def test_performance_accepts_expiry_evidence_without_unproven_strike_or_capital(
     assert updated["performance_source_ref"] == "Calendário oficial B3 — abril/2026"
 
 
+def test_performance_accepts_declared_guarantee_without_document_source() -> None:
+    position_id = portfolio.add_position(
+        ticker="CAMLD794",
+        underlying="CAML3",
+        trade_date="2026-04-15",
+        qty=1000,
+        entry_price=0.05,
+        side="short",
+        strategy_tag="covered_call",
+        contract_strike=7.94,
+        contract_expiry="2026-04-17",
+    )
+    portfolio.close_position(
+        position_id=position_id,
+        exit_date="2026-04-17",
+        exit_price=0.0,
+        exit_reason="Expiração",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    response = client.post(
+        f"/performance/contract/{position_id}",
+        data={"mode": "real", "capital_committed": "6600.00"},
+    )
+
+    assert response.status_code in (302, 303)
+    updated = portfolio.get_position(position_id)
+    assert updated["capital_committed"] == pytest.approx(6600.0)
+    assert updated["capital_source"] == "garantia_declarada_usuario"
+    assert updated["performance_source_ref"] is None
+
+
 def test_performance_moves_documents_exhausted_out_of_action_queue() -> None:
     position_id = portfolio.add_position(
         ticker="PETRD521",
@@ -207,7 +241,6 @@ def test_performance_moves_documents_exhausted_out_of_action_queue() -> None:
         entry_price=0.53,
         side="short",
         strategy_tag="covered_call",
-        contract_strike=52.15,
         contract_expiry="2026-04-17",
         performance_source_ref="Opções.net; calendário B3",
     )

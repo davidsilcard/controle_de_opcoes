@@ -90,7 +90,7 @@ def _completion_reasons(
     if strike is None:
         reasons.append("strike nao preservado")
     if capital is None:
-        reasons.append("capital comprometido nao preservado")
+        reasons.append("capital de garantia nao declarado")
     if not str(position.get("contract_expiry") or "").strip():
         reasons.append("vencimento nao preservado")
     if bool(position.get("shared_fee_pending") or 0):

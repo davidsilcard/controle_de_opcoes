@@ -2322,7 +2322,7 @@ def create_app() -> Flask:
                 )
             )
         if (submitted_expiry and not expiry) or (
-            any((submitted_strike, submitted_capital, submitted_expiry)) and not source_ref
+            any((submitted_strike, submitted_expiry)) and not source_ref
         ):
             return redirect(
                 url_for(
@@ -2383,7 +2383,7 @@ def create_app() -> Flask:
                     "performance_evidence_state": "pending",
                 }
                 if submitted_capital:
-                    position_changes["capital_source"] = "historico_manual_confirmado"
+                    position_changes["capital_source"] = "garantia_declarada_usuario"
                 update_position(
                     position_id=position_id,
                     conn=conn,
@@ -2452,7 +2452,6 @@ def create_app() -> Flask:
 
         has_missing_contract_data = (
             is_missing_positive_value(position.get("contract_strike"))
-            or is_missing_positive_value(position.get("capital_committed"))
             or not str(position.get("contract_expiry") or "").strip()
         )
         if not has_missing_contract_data:
@@ -2460,7 +2459,7 @@ def create_app() -> Flask:
                 url_for(
                     "performance_view",
                     mode=mode,
-                    performance_error="O contrato já está completo; não há campo documental a encerrar nesta auditoria.",
+                    performance_error="Strike e vencimento já estão completos; capital de garantia deve ser declarado no campo próprio, não encerrado como falta documental.",
                 )
             )
 
