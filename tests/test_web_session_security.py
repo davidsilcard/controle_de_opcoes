@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -94,10 +95,14 @@ def test_new_browser_instance_requires_login_again(monkeypatch) -> None:
 def test_logged_user_only_sees_own_positions_and_results(monkeypatch) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
 
-    create_user(username="alice", password="SenhaForte123!")
-    create_user(username="bob", password="SenhaForte123!")
+    # Cada teste possui namespace próprio; não reutilizar os schemas literais
+    # alice/bob que outros testes de autenticação podem ter preenchido.
+    alice_schema = f"{os.environ['OPCOES_PG_SCHEMA']}_alice"
+    bob_schema = f"{os.environ['OPCOES_PG_SCHEMA']}_bob"
+    create_user(username="alice", password="SenhaForte123!", app_schema=alice_schema)
+    create_user(username="bob", password="SenhaForte123!", app_schema=bob_schema)
 
-    alice_token = set_pg_schema_override("alice")
+    alice_token = set_pg_schema_override(alice_schema)
     try:
         alice_pos = add_position(
             ticker="ALIC11",
@@ -117,7 +122,7 @@ def test_logged_user_only_sees_own_positions_and_results(monkeypatch) -> None:
     finally:
         reset_pg_schema_override(alice_token)
 
-    bob_token = set_pg_schema_override("bob")
+    bob_token = set_pg_schema_override(bob_schema)
     try:
         bob_pos = add_position(
             ticker="BOBX11",

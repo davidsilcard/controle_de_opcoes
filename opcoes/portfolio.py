@@ -640,12 +640,22 @@ def delete_position(*, position_id: int, conn: Optional[Any] = None) -> None:
         db.close()
 
 
-def get_position(position_id: int, *, conn: Optional[Any] = None) -> Optional[dict]:
+def get_position(
+    position_id: int,
+    *,
+    conn: Optional[Any] = None,
+    for_update: bool = False,
+) -> Optional[dict]:
+    if for_update and conn is None:
+        raise ValueError("Leitura bloqueada da posição exige uma transação existente.")
     db, owns_conn = _resolve_conn(conn)
     try:
         if not _table_exists(db, "positions"):
             return None
-        row = db.execute("SELECT p.* FROM positions p WHERE p.id = ?", (int(position_id),)).fetchone()
+        query = "SELECT p.* FROM positions p WHERE p.id = ?"
+        if for_update:
+            query += " FOR UPDATE"
+        row = db.execute(query, (int(position_id),)).fetchone()
         if not row:
             return None
         ticker = (_row_as_dict(row).get("ticker") or "").strip().upper()

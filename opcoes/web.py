@@ -141,6 +141,51 @@ CSRF_FIELD_NAME = "_csrf_token"
 LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
+def _position_exit_reason_key(value: Any) -> str:
+    """Compara motivos legados sem reescrever a descrição registrada."""
+
+    reason = str(value or "").strip().casefold()
+    return {
+        "exercício": "exercicio",
+        "expiração": "vencimento_sem_valor",
+        "expiracao": "vencimento_sem_valor",
+        "expirou": "vencimento_sem_valor",
+        "vencimento sem valor": "vencimento_sem_valor",
+    }.get(reason, reason)
+
+
+def _position_closure_financial_signature(position: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Dados que podem alterar os lançamentos sincronizados pela edição de posições."""
+
+    fields = (
+        "ticker", "trade_date", "qty", "entry_price", "fees", "trade_type",
+        "side", "irrf", "status", "exit_date", "exit_price", "partial_date",
+        "partial_price", "partial_qty", "exit_reason", "is_simulated", "strategy_tag",
+    )
+    zero_equivalent = {"fees", "irrf", "partial_qty"}
+    numeric_fields = {"qty", "entry_price", "exit_price", "partial_price"}
+    lowercase_fields = {"trade_type", "side", "status", "strategy_tag"}
+    normalized: list[Any] = []
+    for field in fields:
+        value = position.get(field)
+        if field in zero_equivalent:
+            value = float(value or 0.0)
+        elif field in numeric_fields:
+            value = float(value) if value is not None and value != "" else None
+        elif field == "is_simulated":
+            value = str(value or "").strip().lower() in {"1", "true", "sim", "yes", "on"}
+        elif field == "exit_reason":
+            value = _position_exit_reason_key(value)
+        else:
+            value = str(value or "").strip()
+            if field == "ticker":
+                value = value.upper()
+            elif field in lowercase_fields:
+                value = value.lower()
+        normalized.append(value)
+    return tuple(normalized)
+
+
 def _looks_like_equity_ticker_global(ticker: str | None) -> bool:
     text = (ticker or "").strip().upper()
     if not text:
@@ -2206,25 +2251,58 @@ def create_app() -> Flask:
         )
         evidence_pending_cycles = []
         documents_exhausted_cycles = []
-        shared_fee_pending_cycles = []
-        for cycle in context["incomplete_cycles"]:
-            reasons = list(cycle.get("missing_reasons") or [])
-            has_non_fee_pending = any(
-                "taxas compartilhadas da nota" not in str(reason).lower()
-                for reason in reasons
+        guarantee_pending_cycles = []
+        linkage_pending_cycles = []
+        shared_fee_groups_by_ref: dict[str, dict[str, Any]] = {}
+        for cycle in context["cycles"]:
+            contract_reasons = list(cycle.get("contract_missing_reasons") or [])
+            return_base_reasons = list(cycle.get("return_base_missing_reasons") or [])
+            linkage_reasons = list(cycle.get("linkage_missing_reasons") or [])
+            warning_reasons = list(cycle.get("warning_reasons") or [])
+
+            if contract_reasons:
+                if cycle.get("performance_evidence_state") == "documents_exhausted":
+                    documents_exhausted_cycles.append(cycle)
+                else:
+                    evidence_pending_cycles.append(cycle)
+            if return_base_reasons and cycle.get("strategy") == "covered_call":
+                guarantee_pending_cycles.append(cycle)
+            if linkage_reasons:
+                linkage_pending_cycles.append(cycle)
+            if warning_reasons:
+                note_ref = str(cycle.get("shared_fee_note_ref") or "").strip()
+                group_key = f"reference:{note_ref}" if note_ref else f"position:{cycle['position_id']}"
+                note_ref = note_ref or f"Referência não informada — posição #{cycle['position_id']}"
+                group = shared_fee_groups_by_ref.setdefault(
+                    group_key,
+                    {
+                        "note_ref": note_ref,
+                        "cycles": [],
+                    },
+                )
+                group["cycles"].append(cycle)
+
+        for queue in (evidence_pending_cycles, guarantee_pending_cycles, linkage_pending_cycles):
+            queue.sort(
+                key=lambda cycle: abs(float(cycle.get("total_result") or cycle.get("premium") or 0.0)),
+                reverse=True,
             )
-            if (
-                has_non_fee_pending
-                and cycle.get("performance_evidence_state") == "documents_exhausted"
-            ):
-                documents_exhausted_cycles.append(cycle)
-            elif has_non_fee_pending:
-                evidence_pending_cycles.append(cycle)
-            else:
-                shared_fee_pending_cycles.append(cycle)
+        shared_fee_groups = list(shared_fee_groups_by_ref.values())
+        shared_fee_groups.sort(
+            key=lambda group: max(
+                (
+                    abs(float(cycle.get("total_result") or cycle.get("premium") or 0.0))
+                    for cycle in group["cycles"]
+                ),
+                default=0.0,
+            ),
+            reverse=True,
+        )
         context["evidence_pending_cycles"] = evidence_pending_cycles
         context["documents_exhausted_cycles"] = documents_exhausted_cycles
-        context["shared_fee_pending_cycles"] = shared_fee_pending_cycles
+        context["guarantee_pending_cycles"] = guarantee_pending_cycles
+        context["linkage_pending_cycles"] = linkage_pending_cycles
+        context["shared_fee_groups"] = shared_fee_groups
         try:
             wheel_cycles = list_wheel_cycles(is_simulated=is_simulated)
         except (RuntimeError, WheelCycleError) as exc:
@@ -2300,50 +2378,85 @@ def create_app() -> Flask:
                 url_for("performance_view", mode=mode, performance_error=str(exc))
             )
 
+        submitted_strike = (request.form.get("contract_strike") or "").strip()
+        submitted_capital = (request.form.get("capital_committed") or "").strip()
         submitted_expiry = (request.form.get("contract_expiry") or "").strip()
+        submitted_source_ref = (request.form.get("performance_source_ref") or "").strip()
+        parent_position_id = _parse_optional_positive_int(
+            request.form.get("stock_position_id")
+        )
+
         expiry = (
             _parse_form_date(submitted_expiry)
             if submitted_expiry
             else (position.get("contract_expiry") or "").strip()
         )
-        source_ref = (
-            (request.form.get("performance_source_ref") or "").strip()
-            or (position.get("performance_source_ref") or "").strip()
-        )
-        submitted_strike = (request.form.get("contract_strike") or "").strip()
-        submitted_capital = (request.form.get("capital_committed") or "").strip()
-        submitted_source_ref = (request.form.get("performance_source_ref") or "").strip()
-        if not any((submitted_strike, submitted_capital, submitted_expiry, submitted_source_ref)):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Informe ao menos uma evidência para atualizar.",
-                )
+        current_source_ref = (position.get("performance_source_ref") or "").strip()
+        current_source_refs = {
+            item.strip()
+            for item in current_source_ref.split(" | ")
+            if item.strip()
+        }
+        if submitted_source_ref and submitted_source_ref not in current_source_refs:
+            source_ref = (
+                f"{current_source_ref} | {submitted_source_ref}"
+                if current_source_ref
+                else submitted_source_ref
             )
-        if (submitted_expiry and not expiry) or (
-            any((submitted_strike, submitted_expiry)) and not source_ref
+        else:
+            source_ref = current_source_ref or submitted_source_ref
+
+        if not any(
+            (
+                submitted_strike,
+                submitted_capital,
+                submitted_expiry,
+                submitted_source_ref,
+                parent_position_id,
+            )
         ):
             return redirect(
                 url_for(
                     "performance_view",
                     mode=mode,
-                    performance_error="Informe uma fonte verificável para cada evidência e use vencimento válido quando preenchido.",
+                    performance_error="Informe ao menos um dado para atualizar.",
+                )
+            )
+        if (
+            submitted_source_ref
+            and not any((submitted_strike, submitted_expiry))
+            and not submitted_capital
+            and parent_position_id is None
+        ):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Preencha o strike ou o vencimento correspondente à fonte informada.",
+                )
+            )
+        if (submitted_expiry and not expiry) or (
+            any((submitted_strike, submitted_expiry)) and not submitted_source_ref
+        ):
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Informe a fonte desta confirmação e use vencimento válido quando preenchido.",
                 )
             )
 
-        parent_position_id = _parse_optional_positive_int(
-            request.form.get("stock_position_id")
-        )
-        if _is_call_exercise_position(position):
-            if parent_position_id is None:
-                return redirect(
-                    url_for(
-                        "performance_view",
-                        mode=mode,
-                        performance_error="CALL exercida exige o ID do historico de venda da acao para calcular o resultado completo.",
-                    )
+        strategy = str(position.get("strategy_tag") or "").strip().lower()
+        if strategy == "cash_put" and submitted_capital and strike is None:
+            return redirect(
+                url_for(
+                    "performance_view",
+                    mode=mode,
+                    performance_error="Na Cash-Covered Put, confirme primeiro o strike; a garantia será calculada automaticamente como strike × quantidade.",
                 )
+            )
+
+        if parent_position_id is not None and _is_call_exercise_position(position):
             stock_position = get_position(parent_position_id)
             if not _is_matching_exercised_call_stock(position, stock_position):
                 return redirect(
@@ -2375,20 +2488,33 @@ def create_app() -> Flask:
 
         try:
             with db_transaction() as conn:
-                position_changes: dict[str, Any] = {
-                    "contract_strike": strike,
-                    "contract_expiry": expiry or None,
-                    "capital_committed": capital,
-                    "performance_source_ref": source_ref or None,
-                    "performance_evidence_state": "pending",
-                }
+                position_changes: dict[str, Any] = {}
+                if submitted_strike:
+                    position_changes["contract_strike"] = strike
+                if submitted_expiry:
+                    position_changes["contract_expiry"] = expiry or None
+                if submitted_source_ref:
+                    position_changes["performance_source_ref"] = source_ref or None
+                if any((submitted_strike, submitted_expiry, submitted_source_ref)):
+                    position_changes["performance_evidence_state"] = "pending"
                 if submitted_capital:
+                    position_changes["capital_committed"] = capital
                     position_changes["capital_source"] = "garantia_declarada_usuario"
-                update_position(
-                    position_id=position_id,
-                    conn=conn,
-                    **position_changes,
-                )
+
+                if strategy == "cash_put" and strike is not None:
+                    qty = int(position.get("qty") or 0)
+                    if qty > 0 and any(
+                        (submitted_strike, submitted_capital, submitted_expiry)
+                    ):
+                        position_changes["capital_committed"] = round(strike * qty, 2)
+                        position_changes["capital_source"] = "strike_x_quantidade"
+
+                if position_changes:
+                    update_position(
+                        position_id=position_id,
+                        conn=conn,
+                        **position_changes,
+                    )
                 if parent_position_id is not None:
                     update_position(
                         position_id=parent_position_id,
@@ -2403,7 +2529,7 @@ def create_app() -> Flask:
             url_for(
                 "performance_view",
                 mode=mode,
-                performance_notice=f"Contrato da posicao #{position_id} atualizado para a apuracao.",
+                performance_notice=f"Dados da posicao #{position_id} atualizados sem alterar os demais estados.",
             )
         )
 
@@ -2915,8 +3041,11 @@ def create_app() -> Flask:
 
     @app.post("/positions/update/<int:position_id>")
     def update_position_view(position_id: int):
-        form = request.form
-        persisted_pos = get_position(position_id)
+        with db_transaction() as conn:
+            return _update_position_from_form(position_id, request.form, conn)
+
+    def _update_position_from_form(position_id: int, form: Mapping[str, Any], conn: Any):
+        persisted_pos = get_position(position_id, conn=conn, for_update=True)
         if not persisted_pos:
             return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
         status = (form.get("status") or "").strip() or None
@@ -2960,6 +3089,28 @@ def create_app() -> Flask:
         )
         partial_qty = int(form["partial_qty"]) if form.get("partial_qty") else None
         exit_reason = (form.get("exit_reason") or "").strip() or None
+        persisted_reason = persisted_pos.get("exit_reason")
+        if _position_exit_reason_key(exit_reason) == _position_exit_reason_key(persisted_reason):
+            exit_reason = persisted_reason
+
+        # Páginas abertas antes da correção do formulário enviavam zero como vazio.
+        # Preserve um zero conhecido quando os demais dados da saída não mudaram.
+        if (
+            exit_price is None
+            and persisted_pos.get("exit_price") == 0
+            and status == "closed"
+            and str(persisted_pos.get("status") or "").strip().lower() == "closed"
+            and exit_date == (str(persisted_pos.get("exit_date") or "").strip() or None)
+            and _position_exit_reason_key(exit_reason) == _position_exit_reason_key(persisted_reason)
+        ):
+            exit_price = 0.0
+        if (
+            partial_price is None
+            and persisted_pos.get("partial_price") == 0
+            and int(partial_qty or 0) == int(persisted_pos.get("partial_qty") or 0)
+            and partial_date == (str(persisted_pos.get("partial_date") or "").strip() or None)
+        ):
+            partial_price = 0.0
         if status == "open":
             exit_date = None
             exit_price = None
@@ -3103,6 +3254,7 @@ def create_app() -> Flask:
                     holding_error=str(exc),
                 )
             )
+        financial_before = _position_closure_financial_signature(persisted_pos)
         update_position(
             position_id=position_id,
             ticker=ticker or None,
@@ -3114,7 +3266,7 @@ def create_app() -> Flask:
                 if form.get("entry_price")
                 else None
             ),
-            fees=_parse_form_float(form.get("fees")) if form.get("fees") else None,
+            fees=_parse_form_float(form.get("fees")),
             status=status,
             exit_date=exit_date,
             exit_price=exit_price,
@@ -3129,8 +3281,16 @@ def create_app() -> Flask:
             is_simulated=is_simulated,
             parent_position_id=parent_id,
             strategy_tag=(strategy_tag_raw or "").strip() or None,
+            conn=conn,
         )
-        finance.sync_position_closure_effects(position_id=position_id)
+        updated_position = get_position(position_id, conn=conn)
+        financial_after = _position_closure_financial_signature(updated_position)
+        if financial_after != financial_before:
+            finance.sync_position_closure_effects(
+                position_id=position_id,
+                position=updated_position,
+                conn=conn,
+            )
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
     @app.post("/holdings/upsert")

@@ -42,13 +42,13 @@ def test_positions_exit_reason_dropdown_includes_new_options() -> None:
 
 
 @pytest.mark.parametrize(
-    ("legacy_reason", "canonical_value"),
+    "legacy_reason",
     [
-        ("Exercício", "exercicio"),
-        ("Expiração", "vencimento_sem_valor"),
+        "Exercício",
+        "Expiração",
     ],
 )
-def test_positions_exit_reason_legacy_values_are_mapped(legacy_reason: str, canonical_value: str) -> None:
+def test_positions_exit_reason_legacy_values_are_preserved(legacy_reason: str) -> None:
     portfolio.add_position(
         ticker="WIZCB103",
         underlying="WICZ3",
@@ -69,4 +69,4 @@ def test_positions_exit_reason_legacy_values_are_mapped(legacy_reason: str, cano
     assert response.status_code == 200
     html = response.get_data(as_text=True)
 
-    assert f'value="{canonical_value}" selected' in html
+    assert f'value="{legacy_reason}" selected' in html

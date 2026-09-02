@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+import pytest
+from jinja2 import Environment, FileSystemLoader
+
 from opcoes import finance
 from opcoes.audit_reconciliation import build_audit_reconciliation
 
@@ -241,3 +247,202 @@ def test_audit_reconciliation_accepts_legacy_stock_lot_for_put_assignment() -> N
     assert put_row["expected_assignment"] == -17168.0
     assert put_row["diff_assignment"] == 0.0
     assert not ctx["audit_issues"]
+
+
+def _shared_fee_position() -> dict:
+    return {
+        "id": 60,
+        "ticker": "BBASS198",
+        "underlying": "BBAS3",
+        "trade_date": "2026-06-22",
+        "qty": 300,
+        "entry_price": 0.28,
+        "fees": 0.0,
+        "trade_type": "swing",
+        "side": "short",
+        "status": "closed",
+        "exit_date": "2026-07-17",
+        "exit_price": 0.0,
+        "exit_reason": "Expiracao",
+        "strategy_tag": "cash_put",
+        "shared_fee_pending": True,
+        "shared_fee_note_ref": "Nota BTG #32674228",
+        "is_simulated": False,
+    }
+
+
+@pytest.mark.parametrize("actual_darf", [-12.58, -9999.0, None])
+def test_shared_note_fee_does_not_certify_darf_or_dependent_cash_values(
+    actual_darf: float | None,
+) -> None:
+    ctx = build_audit_reconciliation(
+        [_shared_fee_position()],
+        ledger_sums={
+            60: {
+                finance.TransactionType.PREMIUM.value: 84.0,
+                finance.TransactionType.DARF.value: actual_darf,
+                finance.TransactionType.REALIZED.value: 84.0,
+            }
+        },
+        include_closed=True,
+    )
+
+    row = ctx["rows"][0]
+    assert row["shared_fee_unallocated"] is True
+    assert row["shared_fee_note_ref"] == "Nota BTG #32674228"
+    assert row["actual_darf"] == actual_darf
+    for metric in ("darf", "net", "cash_net", "total_cash"):
+        assert row[f"expected_{metric}"] is None
+        assert row[f"diff_{metric}"] is None
+        assert ctx["totals"][f"expected_{metric}"] is None
+        assert ctx["totals"][f"diff_{metric}"] is None
+    for metric in ("net", "cash_net", "total_cash"):
+        assert row[f"actual_{metric}"] == pytest.approx(84.0 + (actual_darf or 0.0))
+        assert ctx["totals"][f"actual_{metric}"] == pytest.approx(
+            84.0 + (actual_darf or 0.0)
+        )
+    assert ctx["totals"]["actual_darf"] == (actual_darf or 0.0)
+    assert ctx["totals"]["unverifiable_darf_count"] == 1
+    assert not ctx["audit_issues"]
+
+
+def test_shared_fee_uncertainty_propagates_to_mixed_totals_only() -> None:
+    known_position = {
+        **_shared_fee_position(),
+        "id": 61,
+        "qty": 100,
+        "entry_price": 0.50,
+        "shared_fee_pending": False,
+    }
+    ctx = build_audit_reconciliation(
+        [_shared_fee_position(), known_position],
+        ledger_sums={
+            60: {"PREMIUM": 84.0, "DARF": -9999.0, "REALIZED": 84.0},
+            61: {"PREMIUM": 50.0, "DARF": -7.50, "REALIZED": 50.0},
+        },
+        include_closed=True,
+    )
+
+    known_row = next(row for row in ctx["rows"] if row["id"] == 61)
+    assert known_row["shared_fee_unallocated"] is False
+    assert known_row["expected_darf"] == -7.50
+    assert known_row["diff_darf"] == 0.0
+    assert known_row["expected_total_cash"] == 42.50
+    assert known_row["diff_total_cash"] == 0.0
+    assert ctx["totals"]["expected_premium"] == 134.0
+    assert ctx["totals"]["actual_darf"] == -10006.50
+    assert ctx["totals"]["actual_total_cash"] == -9872.50
+    for metric in ("darf", "net", "cash_net", "total_cash"):
+        assert ctx["totals"][f"expected_{metric}"] is None
+        assert ctx["totals"][f"diff_{metric}"] is None
+
+
+def test_shared_fee_darf_uncertainty_does_not_certify_exercise_total() -> None:
+    position = {**_shared_fee_position(), "exit_reason": "Exercicio"}
+    ctx = build_audit_reconciliation(
+        [position],
+        ledger_sums={
+            60: {
+                "PREMIUM": 84.0,
+                "DARF": -9999.0,
+                "ASSIGN": -5955.0,
+                "REALIZED": 84.0,
+            }
+        },
+        include_closed=True,
+        holding_events=[
+            {
+                "related_position_id": 60,
+                "ticker": "BBAS3",
+                "event_type": "PUT_ASSIGNMENT",
+                "qty_delta": 300,
+                "price_reference": 19.85,
+            }
+        ],
+    )
+
+    row = ctx["rows"][0]
+    assert row["expected_assignment"] == -5955.0
+    assert row["diff_assignment"] == 0.0
+    assert row["actual_total_cash"] == -15870.0
+    assert row["expected_total_cash"] is None
+    assert row["diff_total_cash"] is None
+    assert ctx["totals"]["expected_total_cash"] is None
+    assert ctx["totals"]["diff_total_cash"] is None
+    assert not ctx["audit_issues"]
+
+
+def test_shared_fee_flag_does_not_hide_unexpected_darf_for_long_option() -> None:
+    position = {
+        **_shared_fee_position(),
+        "ticker": "KLBNK171",
+        "underlying": "KLBN11",
+        "side": "long",
+        "strategy_tag": "ranking",
+        "status": "open",
+        "exit_date": None,
+        "exit_price": None,
+        "exit_reason": None,
+        "qty": 100,
+        "entry_price": 3.16,
+    }
+    ctx = build_audit_reconciliation(
+        [position],
+        ledger_sums={60: {"BUY": -316.0, "DARF": -9999.0}},
+        include_closed=True,
+    )
+
+    row = ctx["rows"][0]
+    assert row["shared_fee_unallocated"] is False
+    assert row["expected_darf"] is None
+    assert row["diff_darf"] == -9999.0
+    assert ctx["totals"]["unverifiable_darf_count"] == 0
+    assert ctx["totals"]["expected_darf"] == 0.0
+    assert ctx["totals"]["diff_darf"] == -9999.0
+    assert any(issue.code == "DARF_DIVERGENTE" for issue in ctx["audit_issues"])
+
+
+def test_darf_remains_verifiable_without_shared_fee_pending() -> None:
+    position = {**_shared_fee_position(), "shared_fee_pending": False}
+    ctx = build_audit_reconciliation(
+        [position],
+        ledger_sums={60: {"PREMIUM": 84.0, "DARF": -9999.0, "REALIZED": 84.0}},
+        include_closed=True,
+    )
+
+    row = ctx["rows"][0]
+    assert row["shared_fee_unallocated"] is False
+    assert row["expected_darf"] == -12.60
+    assert row["diff_darf"] == -9986.40
+    assert any(issue.code == "DARF_DIVERGENTE" for issue in ctx["audit_issues"])
+
+
+def test_audit_template_marks_unverifiable_darf_without_green_reconciliation() -> None:
+    ctx = build_audit_reconciliation(
+        [_shared_fee_position()],
+        ledger_sums={60: {"PREMIUM": 84.0, "DARF": -9999.0, "REALIZED": 84.0}},
+        include_closed=True,
+    )
+    templates = Path(__file__).resolve().parents[1] / "opcoes" / "templates"
+    template = Environment(
+        loader=FileSystemLoader(templates), autoescape=True
+    ).get_template("audit.html")
+    html = template.render(
+        **ctx, mode="real", include_closed=True, inventory_summary=[]
+    )
+
+    assert "Provisão DARF não verificável por falta de rateio" in html
+    assert "não é certificado como correto" in html
+    assert "Nota BTG #32674228" in html
+    assert "A Auditoria encontrou regras quebradas" not in html
+    assert html.count('<span class="text-muted">Não verificável</span>') == 16
+    table_row = next(
+        row for row in re.findall(r"<tr>(.*?)</tr>", html, flags=re.DOTALL)
+        if "<td>60</td>" in row
+    )
+    cells = re.findall(r"<td\b[^>]*>.*?</td>", table_row, flags=re.DOTALL)
+    assert "-9999.00" in cells[12]
+    for index in (11, 13, 26, 28, 29, 31, 32, 34):
+        assert "Não verificável" in cells[index]
+        assert "text-success" not in cells[index]
+        assert "0.00" not in cells[index]

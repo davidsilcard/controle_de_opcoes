@@ -138,6 +138,7 @@ def build_audit_reconciliation(
         "actual_cash_net": 0.0,
         "actual_total_cash": 0.0,
         "actual_realized": 0.0,
+        "unverifiable_darf_count": 0,
     }
 
     def add_issue(pos_id: int, ticker: str, code: str, message: str) -> None:
@@ -277,6 +278,14 @@ def build_audit_reconciliation(
         actual_assignment = sums.get(finance.TransactionType.ASSIGNMENT.value)
         actual_sell = sums.get(finance.TransactionType.SELL.value)
         actual_realized = sums.get(finance.TransactionType.REALIZED.value)
+        shared_fee_unallocated = (
+            bool(pos.get("shared_fee_pending") or 0) and expected_darf is not None
+        )
+        if shared_fee_unallocated:
+            # A falta de rateio impede reconstruir a provisão por posição.
+            # O lançamento real continua visível, mas não serve como prova de
+            # si próprio nem como base para certificar os líquidos derivados.
+            expected_darf = None
 
         expected_net = None
         actual_net = None
@@ -285,12 +294,14 @@ def build_audit_reconciliation(
         expected_total_cash = None
         actual_total_cash = None
 
-        if expected_premium is not None or expected_darf is not None:
+        if not shared_fee_unallocated and (
+            expected_premium is not None or expected_darf is not None
+        ):
             expected_net = float(expected_premium or 0.0) + float(expected_darf or 0.0)
         if actual_premium is not None or actual_darf is not None:
             actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
 
-        if (
+        if not shared_fee_unallocated and (
             expected_net is not None
             or expected_buyback is not None
             or expected_option_buy is not None
@@ -311,7 +322,7 @@ def build_audit_reconciliation(
                 + float(actual_option_buy or 0.0)
             )
 
-        if (
+        if not shared_fee_unallocated and (
             expected_cash_net is not None
             or expected_assignment is not None
             or expected_sell is not None
@@ -356,8 +367,12 @@ def build_audit_reconciliation(
             "actual_assignment": actual_assignment,
             "actual_sell": actual_sell,
             "actual_realized": actual_realized,
+            "shared_fee_unallocated": shared_fee_unallocated,
+            "shared_fee_note_ref": _norm(pos.get("shared_fee_note_ref")),
             "diff_premium": _money_diff(actual_premium, expected_premium),
-            "diff_darf": _money_diff(actual_darf, expected_darf),
+            "diff_darf": (
+                None if shared_fee_unallocated else _money_diff(actual_darf, expected_darf)
+            ),
             "diff_buyback": _money_diff(actual_buyback, expected_buyback),
             "diff_option_buy": _money_diff(actual_option_buy, expected_option_buy),
             "diff_assignment": _money_diff(actual_assignment, expected_assignment),
@@ -365,13 +380,23 @@ def build_audit_reconciliation(
             "diff_realized": _money_diff(actual_realized, expected_realized),
             "expected_net": expected_net,
             "actual_net": actual_net,
-            "diff_net": _money_diff(actual_net, expected_net),
+            "diff_net": (
+                None if shared_fee_unallocated else _money_diff(actual_net, expected_net)
+            ),
             "expected_cash_net": expected_cash_net,
             "actual_cash_net": actual_cash_net,
-            "diff_cash_net": _money_diff(actual_cash_net, expected_cash_net),
+            "diff_cash_net": (
+                None
+                if shared_fee_unallocated
+                else _money_diff(actual_cash_net, expected_cash_net)
+            ),
             "expected_total_cash": expected_total_cash,
             "actual_total_cash": actual_total_cash,
-            "diff_total_cash": _money_diff(actual_total_cash, expected_total_cash),
+            "diff_total_cash": (
+                None
+                if shared_fee_unallocated
+                else _money_diff(actual_total_cash, expected_total_cash)
+            ),
             "assignment_stock_ticker": assignment_stock_ticker,
             "assignment_stock_qty": assignment_stock_qty,
             "assignment_stock_price": assignment_stock_price,
@@ -432,6 +457,8 @@ def build_audit_reconciliation(
                 add_issue(pid, ticker, code, message)
 
         rows.append(row)
+        if shared_fee_unallocated:
+            totals["unverifiable_darf_count"] += 1
 
         for key in (
             "expected_premium",
@@ -470,6 +497,14 @@ def build_audit_reconciliation(
     totals["actual_total_cash"] = (
         totals["actual_cash_net"] + totals["actual_assignment"] + totals["actual_sell"]
     )
+    for metric in ("darf", "net", "cash_net", "total_cash"):
+        if totals["unverifiable_darf_count"]:
+            totals[f"expected_{metric}"] = None
+            totals[f"diff_{metric}"] = None
+        else:
+            totals[f"diff_{metric}"] = _money_diff(
+                totals[f"actual_{metric}"], totals[f"expected_{metric}"]
+            )
 
     orphan_rows = []
     for pid, sums in ledger_sums.items():

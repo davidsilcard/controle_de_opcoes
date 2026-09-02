@@ -71,7 +71,6 @@ def test_performance_page_renders_auditable_result_and_updates_legacy_contract()
             "mode": "real",
             "contract_strike": "19.50",
             "contract_expiry": "2026-06-19",
-            "capital_committed": "1950.00",
             "performance_source_ref": "nota de corretagem 2",
         },
     )
@@ -138,11 +137,11 @@ def test_performance_separates_shared_fee_and_preserves_confirmed_contract_field
     client = app.test_client()
 
     html = client.get("/performance?mode=real").get_data(as_text=True)
-    assert "Confirmações com evidência pendente" in html
-    assert "Aguardando rateio da corretora" in html
+    assert "Contratos aguardando confirmação documental" in html
+    assert "Custos compartilhados sem rateio" in html
     assert f"/performance/contract/{shared_id}" not in html
     assert f"/performance/contract/{partial_id}" in html
-    assert "Strike pendente" in html
+    assert 'placeholder="Strike"' in html
     assert 'name="contract_expiry"' not in html
 
     response = client.post(
@@ -151,6 +150,7 @@ def test_performance_separates_shared_fee_and_preserves_confirmed_contract_field
             "mode": "real",
             "contract_strike": "22.61",
             "capital_committed": "2261.00",
+            "performance_source_ref": "Opções.net BBASP226",
         },
     )
     assert response.status_code in (302, 303)
@@ -158,7 +158,9 @@ def test_performance_separates_shared_fee_and_preserves_confirmed_contract_field
     assert updated["contract_strike"] == pytest.approx(22.61)
     assert updated["capital_committed"] == pytest.approx(2261.0)
     assert updated["contract_expiry"] == "2026-04-17"
-    assert updated["performance_source_ref"] == "nota comprovada"
+    assert updated["performance_source_ref"] == (
+        "nota comprovada | Opções.net BBASP226"
+    )
 
 
 def test_performance_accepts_expiry_evidence_without_unproven_strike_or_capital() -> None:
@@ -209,6 +211,8 @@ def test_performance_accepts_declared_guarantee_without_document_source() -> Non
         strategy_tag="covered_call",
         contract_strike=7.94,
         contract_expiry="2026-04-17",
+        performance_evidence_state="documents_exhausted",
+        performance_evidence_note="Contrato auditado anteriormente.",
     )
     portfolio.close_position(
         position_id=position_id,
@@ -230,6 +234,41 @@ def test_performance_accepts_declared_guarantee_without_document_source() -> Non
     assert updated["capital_committed"] == pytest.approx(6600.0)
     assert updated["capital_source"] == "garantia_declarada_usuario"
     assert updated["performance_source_ref"] is None
+    assert updated["performance_evidence_state"] == "documents_exhausted"
+
+
+def test_performance_updates_call_guarantee_without_forcing_stock_link() -> None:
+    position_id = portfolio.add_position(
+        ticker="PETRG405",
+        underlying="PETR4",
+        trade_date="2026-06-22",
+        qty=100,
+        entry_price=1.09,
+        side="short",
+        strategy_tag="covered_call",
+        contract_strike=39.36,
+        contract_expiry="2026-07-17",
+        performance_source_ref="Nota BTG #32674228",
+    )
+    portfolio.close_position(
+        position_id=position_id,
+        exit_date="2026-07-17",
+        exit_price=0.0,
+        exit_reason="Exercicio",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    response = client.post(
+        f"/performance/contract/{position_id}",
+        data={"mode": "real", "capital_committed": "3190.00"},
+    )
+
+    assert response.status_code in (302, 303)
+    updated = portfolio.get_position(position_id)
+    assert updated["capital_committed"] == pytest.approx(3190.0)
+    assert updated["capital_source"] == "garantia_declarada_usuario"
 
 
 def test_performance_moves_documents_exhausted_out_of_action_queue() -> None:
@@ -267,7 +306,9 @@ def test_performance_moves_documents_exhausted_out_of_action_queue() -> None:
 
     html = client.get("/performance?mode=real").get_data(as_text=True)
     assert "Auditoria concluída — campos sem comprovação" in html
-    assert f'action="/performance/contract/{position_id}"' not in html
+    assert "Nenhum contrato aguarda confirmação documental." in html
+    assert "Garantias históricas a declarar" in html
+    assert f'action="/performance/contract/{position_id}"' in html
     assert f'action="/performance/contract/{position_id}/reopen-evidence"' in html
 
     response = client.post(

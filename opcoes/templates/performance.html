@@ -39,7 +39,8 @@
       </div>
 
       <div class="alert alert-info py-2 small" role="alert">
-        A métrica principal usa apenas ciclos encerrados, antes da DARF oficial. A provisão de DARF aparece separada porque a apuração fiscal é mensal e pode compensar resultados de outras operações. Prêmios e resultado realizado não são somados entre si.
+        Resultado, contrato, garantia, vínculo de estoque e custos compartilhados são controles independentes. Um campo documental ausente não apaga o resultado já registrado. A provisão de DARF continua separada porque a apuração fiscal é mensal.
+        {% if performance.shared_fee_groups %}<div class="fw-semibold mt-1">Resultados e retornos por operação não descontam custos compartilhados sem rateio; não representam o lucro líquido final.</div>{% endif %}
       </div>
       {% if performance_error %}
         <div class="alert alert-danger py-2" role="alert">{{ performance_error }}</div>
@@ -51,13 +52,13 @@
       <div class="row g-3 mb-3">
         <div class="col-md-3">
           <div class="border bg-white p-3 h-100">
-            <div class="small text-muted">Resultado completo encerrado</div>
+            <div class="small text-muted">Resultado conhecido encerrado</div>
             <div class="h4 mb-0 {% if performance.totals.complete_result >= 0 %}text-success{% else %}text-danger{% endif %}">R$ {{ '%.2f'|format(performance.totals.complete_result) }}</div>
           </div>
         </div>
         <div class="col-md-3">
           <div class="border bg-white p-3 h-100">
-            <div class="small text-muted">Retorno ponderado</div>
+            <div class="small text-muted">Retorno ponderado com base disponível</div>
             <div class="h4 mb-0">{% if performance.totals.weighted_return_pct is not none %}{{ '%.2f'|format(performance.totals.weighted_return_pct) }}%{% else %}-{% endif %}</div>
           </div>
         </div>
@@ -69,7 +70,7 @@
         </div>
         <div class="col-md-3">
           <div class="border bg-white p-3 h-100">
-            <div class="small text-muted">Cobertura do histórico encerrado</div>
+            <div class="small text-muted">Completude cadastral do histórico</div>
             <div class="h4 mb-0">{{ '%.2f'|format(performance.totals.coverage_pct) }}%</div>
             <div class="small text-muted">{{ performance.totals.complete_cycles }}/{{ performance.totals.closed_cycles }} ciclos; {{ performance.totals.open_cycles }} em aberto</div>
           </div>
@@ -80,12 +81,12 @@
         <h2 class="h5">Resumo por estratégia</h2>
         <div class="table-responsive border bg-white">
           <table class="table table-sm mb-0 align-middle">
-            <thead class="table-light"><tr><th>Estratégia</th><th class="text-end">Ciclos</th><th class="text-end">Prêmios recebidos</th><th class="text-end">Resultado opção</th><th class="text-end">Resultado ação</th><th class="text-end">Resultado completo</th><th class="text-end">Retorno</th><th class="text-end">DARF provisionada</th></tr></thead>
+            <thead class="table-light"><tr><th>Estratégia</th><th class="text-end">Ciclos com resultado</th><th class="text-end">Prêmios recebidos</th><th class="text-end">Resultado opção</th><th class="text-end">Resultado ação</th><th class="text-end">Resultado conhecido</th><th class="text-end">Retorno</th><th class="text-end">DARF provisionada</th></tr></thead>
             <tbody>
               {% for item in performance.summaries %}
                 <tr>
                   <td>{{ 'Cash-Covered Put' if item.strategy == 'cash_put' else 'Covered Call' }}</td>
-                  <td class="text-end">{{ item.complete_cycles }}/{{ item.closed_cycles }} encerrados</td>
+                  <td class="text-end">{{ item.result_complete_cycles }}/{{ item.closed_cycles }} encerrados</td>
                   <td class="text-end">R$ {{ '%.2f'|format(item.option_premium) }}</td>
                   <td class="text-end">R$ {{ '%.2f'|format(item.option_result) }}</td>
                   <td class="text-end">R$ {{ '%.2f'|format(item.stock_result) }}</td>
@@ -162,48 +163,34 @@
       </section>
 
       <section class="mb-4">
-        <h2 class="h5">Confirmações com evidência pendente</h2>
+        <h2 class="h5">Contratos aguardando confirmação documental</h2>
         {% if performance.evidence_pending_cycles %}
-          <p class="small text-muted">A lista está ordenada pelo maior impacto financeiro. Só aparecem campos ainda ausentes; os dados já confirmados não são regravados.</p>
+          <p class="small text-muted">Esta fila contém somente strike ou vencimento ausentes. Garantia, vínculo de estoque e taxa são tratados separadamente.</p>
           <div class="table-responsive border bg-white">
             <table class="table table-sm mb-0 align-middle">
-              <thead class="table-light"><tr><th>Posição</th><th>Estratégia</th><th>Fechamento</th><th>Dados confirmados e pendências</th><th>Complementar com evidência</th></tr></thead>
+              <thead class="table-light"><tr><th>Posição</th><th>Fechamento</th><th>Contrato</th><th>Confirmar um ou mais campos</th></tr></thead>
               <tbody>
                 {% for cycle in performance.evidence_pending_cycles %}
                   <tr>
-                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
-                    <td>{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }}</td>
+                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }} · {{ cycle.qty }} ações</span></td>
                     <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td>
-                      <div class="small text-muted mb-1">
-                        Strike: <strong>{{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else 'pendente' }}</strong> ·
-                        Vencimento: <strong>{{ cycle.expiry or 'pendente' }}</strong> ·
-                        Capital de garantia: <strong>{{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else 'não declarado' }}</strong>
-                      </div>
-                      <div class="small">{{ cycle.missing_reasons|join('; ') }}</div>
-                    </td>
-                    <td style="min-width: 32rem;">
+                    <td class="small">Strike: <strong>{{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else 'pendente' }}</strong><br>Vencimento: <strong>{{ cycle.expiry or 'pendente' }}</strong><br><span class="text-muted">{{ cycle.contract_missing_reasons|join('; ') }}</span></td>
+                    <td style="min-width: 34rem;">
                       <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
                         {{ csrf_input() }}
                         <input type="hidden" name="mode" value="{{ mode }}">
-                        {% if cycle.strike is none %}<div class="col-3"><input name="contract_strike" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Strike pendente" required></div>{% endif %}
-                        {% if not cycle.expiry %}<div class="col-3"><input name="contract_expiry" type="date" class="form-control form-control-sm" required></div>{% endif %}
-                        {% if cycle.capital is none %}<div class="col-3"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Capital de garantia declarado" required><div class="form-text">Declaração por posição; não exige nota.</div></div>{% endif %}
-                        {% if not cycle.source_ref %}<div class="col-3"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Nota/fonte" required></div>{% endif %}
-                        {% if cycle.strategy == 'covered_call' and cycle.exit_reason and 'exerc' in cycle.exit_reason|lower and not cycle.stock_position_id %}
-                          <div class="col-9"><input name="stock_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="ID do histórico de venda da ação exercida" required></div>
-                          <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar</button></div>
-                        {% else %}
-                          <div class="col-12 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar evidência</button></div>
-                        {% endif %}
+                        {% if cycle.strike is none %}<div class="col-3"><input name="contract_strike" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Strike"></div>{% endif %}
+                        {% if not cycle.expiry %}<div class="col-3"><input name="contract_expiry" type="date" class="form-control form-control-sm"></div>{% endif %}
+                        <div class="col"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Fonte desta confirmação (nota, B3 ou Opções.net)" required></div>
+                        <div class="col-2 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar contrato</button></div>
                       </form>
                       <details class="mt-2 small">
-                        <summary class="text-muted">Não encontrou documento para strike ou vencimento?</summary>
+                        <summary class="text-muted">Os documentos disponíveis não comprovam o campo?</summary>
                         <form method="post" action="/performance/contract/{{ cycle.position_id }}/documents-exhausted" class="row g-1 mt-1">
                           {{ csrf_input() }}
                           <input type="hidden" name="mode" value="{{ mode }}">
-                          {% if not cycle.source_ref %}<div class="col-4"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Fonte da auditoria" required></div>{% endif %}
-                          <div class="{{ 'col-8' if not cycle.source_ref else 'col-10' }}"><input name="performance_evidence_note" class="form-control form-control-sm" placeholder="Documentos consultados e campos não comprováveis" required></div>
+                          {% if not cycle.source_ref %}<div class="col-4"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Documentos consultados" required></div>{% endif %}
+                          <div class="{{ 'col-8' if not cycle.source_ref else 'col-10' }}"><input name="performance_evidence_note" class="form-control form-control-sm" placeholder="Campo não comprovável e motivo" required></div>
                           <div class="col-2 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Concluir auditoria</button></div>
                         </form>
                       </details>
@@ -214,14 +201,72 @@
             </table>
           </div>
         {% else %}
-          <div class="alert alert-success py-2 mb-0">Não há dados documentais pendentes neste modo.</div>
+          <div class="alert alert-success py-2 mb-0">Nenhum contrato aguarda confirmação documental.</div>
         {% endif %}
       </section>
 
       <section class="mb-4">
+        <h2 class="h5">Garantias históricas a declarar</h2>
+        {% if performance.guarantee_pending_cycles %}
+          <p class="small text-muted">A garantia da Covered Call é uma declaração histórica por operação e não exige nota. Na Cash-Covered Put, o sistema calcula automaticamente strike × quantidade.</p>
+          <div class="table-responsive border bg-white">
+            <table class="table table-sm mb-0 align-middle">
+              <thead class="table-light"><tr><th>Posição</th><th>Contrato</th><th>Garantia declarada</th></tr></thead>
+              <tbody>
+                {% for cycle in performance.guarantee_pending_cycles %}
+                  <tr>
+                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
+                    <td class="small">Strike: {{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else '-' }} · Vencimento: {{ cycle.expiry or '-' }}</td>
+                    <td style="min-width: 24rem;">
+                      <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="mode" value="{{ mode }}">
+                        <div class="col"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Valor histórico usado como garantia" required></div>
+                        <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar garantia</button></div>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="alert alert-success py-2 mb-0">Nenhuma garantia histórica aguarda declaração.</div>
+        {% endif %}
+      </section>
+
+      {% if performance.linkage_pending_cycles %}
+        <section class="mb-4">
+          <h2 class="h5">Vínculos de ações exercidas</h2>
+          <p class="small text-muted">Este vínculo identifica a venda das ações decorrente da CALL exercida. Ele não altera contrato nem garantia.</p>
+          <div class="table-responsive border bg-white">
+            <table class="table table-sm mb-0 align-middle">
+              <thead class="table-light"><tr><th>Posição</th><th>Fechamento</th><th>Histórico da venda das ações</th></tr></thead>
+              <tbody>
+                {% for cycle in performance.linkage_pending_cycles %}
+                  <tr>
+                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
+                    <td>{{ cycle.exit_date or '-' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
+                    <td>
+                      <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="mode" value="{{ mode }}">
+                        <div class="col"><input name="stock_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="ID da venda das ações" required></div>
+                        <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Vincular</button></div>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+
+      <section class="mb-4">
         <h2 class="h5">Auditoria concluída — campos sem comprovação</h2>
         {% if performance.documents_exhausted_cycles %}
-          <p class="small text-muted">Estas operações foram auditadas, mas a fonte disponível não permite comprovar todos os campos. Elas não entram no retorno percentual nem na cobertura, porém não exigem novo preenchimento sem uma nova fonte.</p>
+          <p class="small text-muted">Estas operações foram auditadas, mas a fonte disponível não permite comprovar parte do contrato. O resultado e o retorno continuam obedecendo aos seus próprios dados; não é necessário repetir a busca sem uma nova fonte.</p>
           <div class="table-responsive border bg-white">
             <table class="table table-sm mb-0 align-middle">
               <thead class="table-light"><tr><th>Posição</th><th>Estratégia</th><th>Fechamento</th><th>Campos sem comprovação</th><th>Auditoria</th></tr></thead>
@@ -231,7 +276,7 @@
                     <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
                     <td>{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }}</td>
                     <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td class="small">{{ cycle.missing_reasons|join('; ') }}</td>
+                    <td class="small">{{ cycle.contract_missing_reasons|join('; ') }}</td>
                     <td class="small">
                       <div>{{ cycle.performance_evidence_note or '-' }}</div>
                       <div class="text-muted mt-1">Fonte: {{ cycle.source_ref or '-' }}</div>
@@ -251,44 +296,47 @@
         {% endif %}
       </section>
 
-      <section class="mb-4">
-        <h2 class="h5">Aguardando rateio da corretora</h2>
-        {% if performance.shared_fee_pending_cycles %}
-          <p class="small text-muted">Essas operações já têm contrato e encerramento auditados. A taxa está registrada uma única vez no caixa; não preencha novamente strike, vencimento ou capital.</p>
-          <div class="table-responsive border bg-white">
+      {% if performance.shared_fee_groups %}
+        <details class="mb-4 border bg-white p-3">
+          <summary class="fw-semibold">Custos compartilhados sem rateio — informativo ({{ performance.shared_fee_groups|length }} referências)</summary>
+          <p class="small text-muted mt-2">O rateio não é uma pendência sua. Esta lista mostra as referências informadas no cadastro; não verifica a contabilização da despesa no caixa. O resultado individual é exibido antes desse custo. Referências iguais são agrupadas; referências ausentes permanecem separadas por posição.</p>
+          <div class="table-responsive">
             <table class="table table-sm mb-0 align-middle">
-              <thead class="table-light"><tr><th>Posição</th><th>Estratégia</th><th>Fechamento</th><th>Dados confirmados</th><th>Próximo documento necessário</th></tr></thead>
+              <thead class="table-light"><tr><th>Nota</th><th>Operações vinculadas</th><th>Tratamento</th></tr></thead>
               <tbody>
-                {% for cycle in performance.shared_fee_pending_cycles %}
+                {% for group in performance.shared_fee_groups %}
                   <tr>
-                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
-                    <td>{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }}</td>
-                    <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td class="small">Strike: {{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else '-' }} · Vencimento: {{ cycle.expiry or '-' }} · Capital de garantia: {{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else '-' }}</td>
-                    <td class="small">Demonstrativo da corretora com o rateio da taxa por operação. Sem esse documento, o retorno individual permanece bloqueado.</td>
+                    <td>{{ group.note_ref }}</td>
+                    <td>{% for cycle in group.cycles %}<span class="badge text-bg-light border me-1">#{{ cycle.position_id }} {{ cycle.ticker }}</span>{% endfor %}</td>
+                    <td class="small">Custo informado sem rateio individual. Consulte o lançamento no caixa.</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
-        {% else %}
-          <div class="alert alert-success py-2 mb-0">Não há taxas compartilhadas pendentes de rateio neste modo.</div>
-        {% endif %}
-      </section>
+        </details>
+      {% endif %}
 
       <section>
         <h2 class="h5">Ciclos da estratégia</h2>
         <div class="table-responsive border bg-white">
           <table class="table table-sm mb-0 align-middle">
-            <thead class="table-light"><tr><th>Posição</th><th>Status</th><th class="text-end">Capital</th><th class="text-end">Prêmio</th><th class="text-end">Resultado completo</th><th class="text-end">Retorno</th><th>Fonte</th></tr></thead>
+            <thead class="table-light"><tr><th>Posição</th><th>Estados independentes</th><th class="text-end">Capital</th><th class="text-end">Prêmio</th><th class="text-end">Resultado conhecido</th><th class="text-end">Retorno</th><th>Fonte legada agrupada</th></tr></thead>
             <tbody>
               {% for cycle in performance.cycles %}
                 <tr>
                   <td>#{{ cycle.position_id }} {{ cycle.ticker }}<br><span class="small text-muted">{{ cycle.strategy }}</span></td>
-                  <td>{{ 'Encerrada' if cycle.status == 'closed' else 'Em aberto' }}</td>
-                  <td class="text-end">{% if cycle.capital is not none %}R$ {{ '%.2f'|format(cycle.capital) }}{% else %}-{% endif %}</td>
+                  <td class="small">
+                    <span class="badge text-bg-{{ 'success' if cycle.status == 'closed' else 'secondary' }}">{{ 'Encerrada' if cycle.status == 'closed' else 'Em aberto' }}</span>
+                    <span class="badge text-bg-{{ 'success' if cycle.is_contract_complete else 'warning' }}">Contrato {{ 'ok' if cycle.is_contract_complete else 'pendente' }}</span>
+                    <span class="badge text-bg-{{ 'success' if cycle.is_return_base_complete else 'warning' }}">Base {{ 'ok' if cycle.is_return_base_complete else 'pendente' }}</span>
+                    {% if not cycle.is_linkage_complete %}<span class="badge text-bg-warning">Vínculo pendente</span>{% endif %}
+                    {% if cycle.status == 'closed' and cycle.option_result is none %}<span class="badge text-bg-warning">Resultado não lançado</span>{% endif %}
+                    {% if cycle.warning_reasons %}<span class="badge text-bg-info">Custo sem rateio</span>{% endif %}
+                  </td>
+                  <td class="text-end">{% if cycle.capital is not none %}R$ {{ '%.2f'|format(cycle.capital) }}{% if cycle.capital_is_derived %}<br><span class="small text-muted">automático</span>{% endif %}{% else %}-{% endif %}</td>
                   <td class="text-end">R$ {{ '%.2f'|format(cycle.premium) }}</td>
-                  <td class="text-end">{% if cycle.total_result is not none %}R$ {{ '%.2f'|format(cycle.total_result) }}{% else %}-{% endif %}</td>
+                  <td class="text-end">{% if cycle.total_result is not none %}R$ {{ '%.2f'|format(cycle.total_result) }}{% if not cycle.is_result_complete %}<br><span class="small text-muted">parcial — vínculo pendente</span>{% endif %}{% else %}-{% endif %}</td>
                   <td class="text-end">{% if cycle.return_pct is not none %}{{ '%.2f'|format(cycle.return_pct) }}%{% else %}-{% endif %}</td>
                   <td class="small">{{ cycle.source_ref or '-' }}</td>
                 </tr>

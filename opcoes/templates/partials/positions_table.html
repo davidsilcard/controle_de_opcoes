@@ -174,11 +174,11 @@
                   <div class="d-flex gap-1">
                     <div class="flex-fill">
                       <small>Qtd parcial</small>
-                      <input name="partial_qty" type="number" min="0" class="form-control form-control-sm" value="{{ pos.partial_qty or '' }}">
+                      <input name="partial_qty" type="number" min="0" class="form-control form-control-sm" value="{{ pos.partial_qty if pos.partial_qty is not none else '' }}">
                     </div>
                     <div class="flex-fill">
                       <small>Preço parcial</small>
-                      <input name="partial_price" type="number" step="0.01" class="form-control form-control-sm" value="{{ pos.partial_price or '' }}">
+                      <input name="partial_price" type="number" step="0.01" class="form-control form-control-sm" value="{{ pos.partial_price if pos.partial_price is not none else '' }}">
                     </div>
                   </div>
                   <div class="d-flex gap-1">
@@ -188,16 +188,19 @@
                     </div>
                     <div class="flex-fill">
                       <small>Motivo</small>
-                      {% set reason_norm = (pos.exit_reason or '')|trim|lower %}
+                      {% set canonical_reasons = ['stop', 'parcial', 'alvo', 'recompra_encerramento', 'rolagem', 'exercicio', 'vencimento_sem_valor', 'ajuste_manual', 'outro'] %}
                       <select name="exit_reason" class="form-select form-select-sm">
                         <option value="" {% if not pos.exit_reason %}selected{% endif %}>-</option>
+                        {% if pos.exit_reason and pos.exit_reason not in canonical_reasons %}
+                          <option value="{{ pos.exit_reason }}" selected>{{ pos.exit_reason }} (registrado)</option>
+                        {% endif %}
                         <option value="stop" {% if pos.exit_reason == 'stop' %}selected{% endif %}>Stop</option>
                         <option value="parcial" {% if pos.exit_reason == 'parcial' %}selected{% endif %}>Parcial</option>
                         <option value="alvo" {% if pos.exit_reason == 'alvo' %}selected{% endif %}>Alvo</option>
                         <option value="recompra_encerramento" {% if pos.exit_reason == 'recompra_encerramento' %}selected{% endif %}>Recompra para encerrar</option>
                         <option value="rolagem" {% if pos.exit_reason == 'rolagem' %}selected{% endif %}>Rolagem</option>
-                        <option value="exercicio" {% if reason_norm in ['exercicio', 'exercício'] %}selected{% endif %}>Exercício</option>
-                        <option value="vencimento_sem_valor" {% if reason_norm in ['vencimento_sem_valor', 'expiracao', 'expiração'] %}selected{% endif %}>Vencimento sem valor</option>
+                        <option value="exercicio" {% if pos.exit_reason == 'exercicio' %}selected{% endif %}>Exercício</option>
+                        <option value="vencimento_sem_valor" {% if pos.exit_reason == 'vencimento_sem_valor' %}selected{% endif %}>Vencimento sem valor</option>
                         <option value="ajuste_manual" {% if pos.exit_reason == 'ajuste_manual' %}selected{% endif %}>Ajuste manual</option>
                         <option value="outro" {% if pos.exit_reason == 'outro' %}selected{% endif %}>Outro</option>
                       </select>
@@ -206,14 +209,23 @@
                   <div class="d-flex gap-1">
                     <div class="flex-fill">
                       <small>IRRF</small>
-                      <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" value="{{ pos.irrf or '' }}">
+                      <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" value="{{ pos.irrf if pos.irrf is not none else '' }}">
                     </div>
                   </div>
                 </div>
               </td>
               <td style="min-width: 200px;">
                 <div class="d-flex flex-wrap gap-1 mb-1">
-                  <button class="btn btn-success btn-sm" type="submit">Salvar</button>
+                  {% if pos.strategy_tag in ['cash_put', 'covered_call'] %}
+                    <button
+                      class="btn btn-warning btn-sm"
+                      type="submit"
+                      onclick="return confirm('Esta alteração muda dados operacionais da estratégia e pode sincronizar o resultado financeiro. Confirma?');"
+                    >Salvar operação</button>
+                    <span class="small text-muted align-self-center">Notas isoladas não recalculam mais o ledger.</span>
+                  {% else %}
+                    <button class="btn btn-success btn-sm" type="submit">Salvar</button>
+                  {% endif %}
                   {% if pos.is_option and pos.side == 'short' %}
                     {% if pos.premium_recorded %}
                       <span class="badge text-bg-secondary align-self-center">Prêmio ok</span>
@@ -242,8 +254,8 @@
                 <div class="mb-1">
                   <small>Saída total</small>
                   <input name="exit_date" class="form-control form-control-sm" placeholder="YYYY-MM-DD" value="{{ pos.exit_date or '' }}">
-                  <input name="exit_price" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Preço saída" value="{{ pos.exit_price or '' }}">
-                  <input name="fees" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Taxas" value="{{ pos.fees or '' }}">
+                  <input name="exit_price" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Preço saída" value="{{ pos.exit_price if pos.exit_price is not none else '' }}">
+                  <input name="fees" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Taxas" value="{{ pos.fees if pos.fees is not none else '' }}">
                   <input name="notes" class="form-control form-control-sm" placeholder="Notas" value="{{ pos.notes }}">
                   {% set premium_total = (pos.entry_price or 0) * (pos.qty or 0) %}
                   {% if pos.side == 'short' and premium_total > 0 and (pos.fees or 0) / premium_total > 0.10 %}

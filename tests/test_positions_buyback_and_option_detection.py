@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+from html import unescape
+
 import pytest
 
 from opcoes import finance, portfolio
+from opcoes.db import open_db
 from opcoes.holdings import upsert_holding
 from opcoes.scraper.snapshots import SnapshotDB
 from opcoes.web import create_app
@@ -57,6 +60,13 @@ def _buyback_txs(position_id: int):
 
 def test_closing_short_option_creates_buyback_tx_and_is_idempotent() -> None:
     _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="WIZC3",
+        quantity=300,
+        avg_price=7.16,
+        is_simulated=False,
+        notes="Cobertura necessária para reabrir a CALL no teste",
+    )
 
     pos_id = portfolio.add_position(
         ticker="WIZCB103",
@@ -104,7 +114,152 @@ def test_closing_short_option_creates_buyback_tx_and_is_idempotent() -> None:
         data=_build_update_payload(status="open", exit_date="", exit_price=""),
     )
     assert res.status_code in (302, 303)
+    assert "holding_error=" not in (res.headers.get("Location") or "")
+    assert portfolio.get_position(pos_id)["status"] == "open"
     assert _buyback_txs(pos_id) == []
+
+
+def test_notes_only_update_does_not_resynchronize_financial_ledger(monkeypatch) -> None:
+    _ensure_snapshot_tables()
+    pos_id = portfolio.add_position(
+        ticker="WIZCB103",
+        underlying="WIZC3",
+        trade_date="2026-02-05",
+        qty=300,
+        entry_price=0.23,
+        fees=0.07,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+    portfolio.close_position(
+        position_id=pos_id,
+        exit_date="2026-02-18",
+        exit_price=0.01,
+        exit_reason="recompra_encerramento",
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        finance,
+        "sync_position_closure_effects",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    app = create_app()
+    app.testing = True
+    response = app.test_client().post(
+        f"/positions/update/{pos_id}",
+        data=_build_update_payload(notes="Conferido na nota BTG"),
+    )
+
+    assert response.status_code in (302, 303)
+    assert calls == []
+    assert portfolio.get_position(pos_id)["notes"] == "Conferido na nota BTG"
+
+
+def test_financial_update_syncs_inside_same_transaction(monkeypatch) -> None:
+    _ensure_snapshot_tables()
+    pos_id = portfolio.add_position(
+        ticker="WIZCB103",
+        underlying="WIZC3",
+        trade_date="2026-02-05",
+        qty=300,
+        entry_price=0.23,
+        fees=0.07,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        finance,
+        "sync_position_closure_effects",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    app = create_app()
+    app.testing = True
+    response = app.test_client().post(
+        f"/positions/update/{pos_id}",
+        data=_build_update_payload(),
+    )
+
+    assert response.status_code in (302, 303)
+    assert len(calls) == 1
+    assert calls[0]["position_id"] == pos_id
+    assert calls[0]["position"]["status"] == "closed"
+    assert calls[0]["conn"] is not None
+
+
+def test_financial_update_rolls_back_position_and_ledger_after_sync_failure(monkeypatch) -> None:
+    _ensure_snapshot_tables()
+    pos_id = portfolio.add_position(
+        ticker="WIZCB103",
+        underlying="WIZC3",
+        trade_date="2026-02-05",
+        qty=300,
+        entry_price=0.23,
+        fees=0.07,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+    finance.recalc_position_premium_and_darf(
+        position_id=pos_id,
+        trade_date="2026-02-05",
+        ticker="WIZCB103",
+        qty=300,
+        premium_amount=finance.calculate_option_premium(entry_price=0.23, qty=300, fees=0.07),
+        trade_type="swing",
+        is_simulated=False,
+    )
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    response = client.post(
+        f"/positions/update/{pos_id}",
+        data=_build_update_payload(notes="Nota original"),
+    )
+    assert response.status_code in (302, 303)
+    assert len(_buyback_txs(pos_id)) == 1
+
+    def snapshot_state(conn):
+        position = dict(
+            conn.execute("SELECT * FROM positions WHERE id = %s", (pos_id,)).fetchone()
+        )
+        ledger = [dict(row) for row in conn.execute("SELECT * FROM ledger ORDER BY id").fetchall()]
+        return position, ledger
+
+    with open_db() as conn:
+        before_position, before_ledger = snapshot_state(conn)
+
+    original_sync = finance.sync_position_closure_effects
+    synchronized_states = []
+
+    def sync_then_fail(**kwargs):
+        original_sync(**kwargs)
+        synchronized_states.append(snapshot_state(kwargs["conn"]))
+        raise RuntimeError("Falha após sincronização financeira")
+
+    monkeypatch.setattr(finance, "sync_position_closure_effects", sync_then_fail)
+
+    with pytest.raises(RuntimeError, match="Falha após sincronização financeira"):
+        client.post(
+            f"/positions/update/{pos_id}",
+            data=_build_update_payload(exit_price="0.02", notes="Nota que não deve persistir"),
+        )
+
+    assert len(synchronized_states) == 1
+    changed_position, changed_ledger = synchronized_states[0]
+    assert changed_position["exit_price"] == pytest.approx(0.02)
+    assert changed_position["notes"] == "Nota que não deve persistir"
+    assert changed_ledger != before_ledger
+    assert any(row["type"] == "BUY" and row["amount"] == -6.0 for row in changed_ledger)
+
+    with open_db() as conn:
+        after_position, after_ledger = snapshot_state(conn)
+    assert after_position == before_position
+    assert after_ledger == before_ledger
 
 
 def test_stock_with_mismatched_underlying_is_not_treated_as_option() -> None:
@@ -367,8 +522,17 @@ def test_covered_call_page_uses_stock_underlying_reference_for_mismatched_lot_ti
     assert "WIZCC100" in html
     assert "Nenhuma call real para resumir." not in html
     assert "Nenhuma call de WIZC3 em aberto nas posi" not in html
-    assert "Cobertas (calls)" in html
+    assert 'hx-get="/covered-call/partial/audit?' in html
     assert ">300<" in html
+
+    audit_response = client.get("/covered-call/partial/audit?underlying=WIZC3")
+    assert audit_response.status_code == 200
+    audit_html = audit_response.get_data(as_text=True)
+    assert "Lotes legados de WIZC3 (real)" in audit_html
+    assert "Qtd coberta" in audit_html
+    assert "WIZCC100" in audit_html
+    assert "7.16" in audit_html
+    assert ">300<" in audit_html
 
 
 def test_audit_shows_operational_net_with_buyback() -> None:
@@ -407,11 +571,26 @@ def test_audit_shows_operational_net_with_buyback() -> None:
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
 
-    assert "Líquido operação (Prêmio + DARF + Recompra)" in html
+    assert "Líquido operação antes de exercício" in html
 
-    plain_text = re.sub(r"<[^>]+>", " ", html)
-    plain_text = " ".join(plain_text.split())
-    assert re.search(
-        r"WIZCB103 .* -3\.00 -3\.00 0\.00 58\.59 58\.59 0\.00 55\.59 55\.59 0\.00",
-        plain_text,
+    def cell_text(cell: str) -> str:
+        return " ".join(unescape(re.sub(r"<[^>]+>", " ", cell)).split())
+
+    table = next(
+        table
+        for table in re.findall(r"<table\b[^>]*>.*?</table>", html, re.DOTALL)
+        if "Líquido operação esp." in table
     )
+    headers = [cell_text(cell) for cell in re.findall(r"<th\b[^>]*>(.*?)</th>", table, re.DOTALL)]
+    rows = [
+        [cell_text(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.DOTALL)]
+        for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table, re.DOTALL)
+    ]
+    values = dict(zip(headers, next(row for row in rows if len(row) > 1 and row[1] == "WIZCB103")))
+    assert values["Recompra esp."] == values["Recompra caixa"] == "-3.00"
+    assert values["Dif. recompra"] == "0.00"
+    assert values["Líquido fiscal esp."] == values["Líquido fiscal caixa"] == "58.59"
+    assert values["Dif. fiscal"] == "0.00"
+    assert values["Líquido operação esp."] == values["Líquido operação caixa"] == "55.59"
+    assert values["Dif. operação"] == "0.00"
+    assert values["Realizado esp."] == values["Realizado ledger"] == "65.93"

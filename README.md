@@ -271,7 +271,7 @@ Fluxo operacional novo para garantia de `Covered Call`:
 
 Apuração de desempenho das estratégias:
 
-- a aba `/performance` separa `Cash-Covered Put` e `Covered Call`; a métrica principal é o resultado completo dos ciclos encerrados antes da DARF oficial.
+- a aba `/performance` separa `Cash-Covered Put` e `Covered Call`; resultado conhecido, contrato, base de retorno, vínculo de estoque e custo compartilhado são estados independentes. Um campo documental ausente não apaga o resultado já registrado.
 - a seção adicional `Ciclo Wheel` não soma os totais dessas duas estratégias. Ela registra explicitamente a PUT de origem, a aquisição das ações, as CALLs, a saída das ações e despesas documentadas para evitar duplicidade quando o PM do estoque já foi ajustado por prêmios anteriores.
 - quando o exercício da PUT entrou apenas no estoque consolidado, a aquisição do Wheel aponta para o evento `PUT_ASSIGNMENT` correspondente, e não cria uma posição artificial de ação. O vínculo exige a própria PUT exercida, ativo-base, modo, data e quantidade idênticos.
 - o resultado Wheel é `prêmios líquidos + venda líquida das ações - aquisição - recompras - despesas`. DARF permanece separada; em ciclo aberto a tela mostra apenas o fluxo acumulado e o capital aplicado, nunca um resultado realizado ou retorno antes da saída das ações.
@@ -288,13 +288,17 @@ uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-pu
 - para corrigir somente uma PUT confirmada, use sempre `--put-position-id` primeiro no dry-run e depois com `--apply`; isso impede que um backfill operacional crie ciclos para outros históricos elegíveis no mesmo momento.
 
 - o resultado da opção vem exclusivamente do `REALIZED` do ledger. Em `Covered Call` exercida, o resultado da ação entra uma única vez, pelo histórico fechado vinculado à CALL; o prêmio é exibido como indicador e não é somado novamente.
-- o retorno ponderado só usa ciclos encerrados com strike, vencimento, capital comprometido e fonte preservados. A cobertura mostra a proporção do histórico que atende a esses requisitos.
-- uma posição com taxa compartilhada de nota sem rateio documental aparece como pendência e não compõe retorno, resultado completo ou cobertura até a corretora fornecer a separação por operação. Na tela `/performance`, ela fica em `Aguardando rateio da corretora`, sem formulário para regravar strike, vencimento ou capital já auditados.
-- a seção `Confirmações com evidência pendente` mostra somente os campos que ainda faltam. É possível salvar uma evidência parcial com sua fonte — por exemplo, somente o vencimento oficial — sem inventar strike; os campos e a fonte já confirmados são preservados.
-- strike e vencimento exigem uma fonte verificável. Já o capital de garantia pode ser declarado pelo usuário, sem nota fiscal, e fica identificado como `garantia_declarada_usuario`; ele é necessário para calcular retorno, mas não é tratado como prova documental.
-- quando uma busca documental foi concluída e strike ou vencimento continuam sem prova, use `Concluir auditoria`: a posição sai da fila acionável e vai para `Auditoria concluída — campos sem comprovação`. Ela continua excluída do retorno percentual e da cobertura até aparecer uma fonte nova; `Reabrir auditoria` a devolve à fila de evidências.
+- o resultado absoluto usa os lançamentos realizados e o vínculo de estoque quando aplicável. O retorno percentual exige somente resultado completo, base de retorno e vínculo; strike ou vencimento pendentes continuam visíveis na auditoria contratual, mas não apagam um retorno matematicamente calculável.
+- a completude cadastral mostra a proporção do histórico com contrato, base de retorno e vínculo completos. Ela não deve ser confundida com o total de resultados conhecidos; ausência de lançamento `REALIZED` é resultado desconhecido, não zero.
+- taxa compartilhada de nota sem rateio documental é aviso, não pendência do usuário. `/performance` agrupa as operações pela referência exata informada em `Custos compartilhados sem rateio`; referências ausentes ficam separadas por posição. Essa lista não verifica a contabilização no caixa. Resultados e retornos individuais ficam antes desse custo e não representam o lucro líquido final.
+- `Contratos aguardando confirmação documental` mostra somente strike ou vencimento ausentes. Cada confirmação exige a fonte usada naquele envio e pode ser parcial; os valores já confirmados não são regravados.
+- `Garantias históricas a declarar` é uma fila separada e não exige nota. Na `Cash-Covered Put`, a aplicação deriva automaticamente `strike × quantidade`; na `Covered Call`, o valor histórico é preservado no cadastro ou declarado pelo usuário como `garantia_declarada_usuario`.
+- declarar garantia não reabre uma auditoria documental concluída. Vincular a venda das ações de uma CALL exercida também é uma ação separada e não força nova gravação de contrato ou capital.
+- quando uma busca documental foi concluída e strike ou vencimento continuam sem prova, use `Concluir auditoria`: a posição vai para `Auditoria concluída — campos sem comprovação`. O resultado e o retorno continuam obedecendo aos estados próprios; `Reabrir auditoria` só é necessário quando surgir uma fonte nova.
 - novos cadastros de `Cash-Covered Put` e `Covered Call` preservam strike, vencimento, capital e referência do snapshot ou nota. Sem contrato confirmável, o cadastro é bloqueado. Covered Call também exige prêmio no caixa e PM consolidado confirmado.
-- operações antigas sem esses campos entram em uma fila ordenada por impacto financeiro. Complete-as na própria tela com dados verificáveis da nota; a aplicação não infere contrato ou capital a partir de cotações posteriores.
+- operações antigas sem contrato entram na fila documental ordenada por impacto financeiro. A aplicação não inventa strike ou vencimento; capital não é tratado como prova documental.
+
+Na grade genérica de `Posições`, alterações financeiras continuam disponíveis por compatibilidade com o fluxo histórico de recompra, mas aparecem como `Salvar operação` com confirmação explícita. Alterar somente a observação não ressincroniza mais o ledger. Quando houver mudança financeira, posição e efeitos no ledger são gravados na mesma transação: em caso de falha, nenhuma metade fica persistida.
 
 Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
 
@@ -1177,6 +1181,12 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
+Plano e critérios de aceitação da estabilização: [docs/plano-estabilizacao-auditoria.md](docs/plano-estabilizacao-auditoria.md). Esta primeira etapa não executa reparo financeiro histórico nem migração em lote.
+
+- `Desempenho` agora separa contrato, garantia, vínculo de estoque, resultado e custos compartilhados; preencher um estado não reabre nem reclassifica os demais.
+- custos de nota sem rateio deixam de ser alerta vermelho e pendência do usuário: são agrupados por referência exata, sem certificar automaticamente o lançamento no caixa. A conciliação de DARF e líquidos dependentes fica explicitamente não verificável enquanto faltar a base individual.
+- `Cash-Covered Put` deriva automaticamente o capital de garantia como `strike × quantidade`, inclusive no histórico quando o capital persistido estiver ausente ou inválido.
+- atualizações na grade genérica de `Posições` agora são transacionais e só ressincronizam o ledger quando um campo financeiro realmente muda; editar apenas observações não altera resultado ou caixa.
 - `Cash-Covered Put` agora tem guarda isolada de estrategia: bloqueia cadastro/edicao com ticker que nao seja PUT, data invalida, posicao nao vendida, ativo-base ausente, fechamento sem motivo e recompra/exercicio incoerentes.
 - ao cadastrar `cash_put`, a aplicacao registra premio e provisao DARF automaticamente, mesmo que o usuario esqueca o checkbox, evitando posicao sem ledger financeiro.
 - o cadastro de `cash_put` agora e atomico: se falhar qualquer lancamento financeiro obrigatorio, a posicao tambem nao fica gravada pela metade.

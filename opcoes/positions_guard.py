@@ -197,21 +197,6 @@ def audit_positions_page(
                 )
             continue
 
-        if bool(pos.get("shared_fee_pending") or 0):
-            note_ref = _norm(pos.get("shared_fee_note_ref"))
-            detail = f" ({note_ref})" if note_ref else ""
-            add(
-                pos,
-                "TAXAS_COMPARTILHADAS_SEM_RATEIO",
-                "Taxas da nota estao registradas no caixa, mas sem rateio documental por posicao"
-                f"{detail}.",
-                severity="PRECISA_NOTA",
-                action=(
-                    "Mantenha a taxa no nivel da nota e informe o rateio somente quando a "
-                    "corretora fornecer o demonstrativo por operacao."
-                ),
-            )
-
         if not _valid_iso_date(pos.get("exit_date")):
             add(
                 pos,

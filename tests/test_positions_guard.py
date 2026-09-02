@@ -153,7 +153,7 @@ def test_positions_guard_flags_open_position_with_exit_fields() -> None:
     ]
 
 
-def test_positions_guard_flags_shared_note_fee_without_rateio() -> None:
+def test_positions_guard_does_not_treat_shared_note_fee_as_user_pending() -> None:
     positions = [
         {
             "id": 101,
@@ -178,6 +178,6 @@ def test_positions_guard_flags_shared_note_fee_without_rateio() -> None:
 
     issues = audit_positions_page(positions, ledger_sums={})
 
-    assert (101, "TAXAS_COMPARTILHADAS_SEM_RATEIO") in [
-        (issue.position_id, issue.code) for issue in issues
-    ]
+    assert "TAXAS_COMPARTILHADAS_SEM_RATEIO" not in {
+        issue.code for issue in issues
+    }
