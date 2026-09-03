@@ -63,6 +63,10 @@ from .put_assignment_pm_repair import (
     PutAssignmentPmRepairError,
     repair_put_assignment_average_price,
 )
+from .cash_put_exercise_repair import (
+    CashPutExerciseRepairError,
+    repair_cash_put_exercise,
+)
 from .wheel_cycles import WheelCycleError, backfill_wheel_cycles
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
@@ -966,6 +970,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Aplica a correcao depois de validar PUT, evento e estoque. Sem esta flag, apenas simula.",
     )
+    put_exercise_repair = repairs.add_parser(
+        "cash-put-exercise",
+        help="Simula ou corrige data, custos e strikes de uma PUT exercida auditada.",
+    )
+    put_exercise_repair.add_argument(
+        "--put-position-id", type=int, required=True, help="ID da PUT exercida."
+    )
+    put_exercise_repair.add_argument(
+        "--exercise-date", required=True, help="Data documental do exercício (YYYY-MM-DD)."
+    )
+    put_exercise_repair.add_argument(
+        "--original-strike", type=float, required=True, help="Strike da nota de abertura."
+    )
+    put_exercise_repair.add_argument(
+        "--exercise-strike", type=float, required=True, help="Strike efetivamente aplicado no exercício."
+    )
+    put_exercise_repair.add_argument(
+        "--purchase-fees", type=float, required=True, help="Despesas individuais da nota de exercício."
+    )
+    put_exercise_repair.add_argument(
+        "--source-ref", required=True, help="Referência documental da auditoria."
+    )
+    put_exercise_repair.add_argument(
+        "--apply",
+        action="store_true",
+        help="Aplica a correção depois de validar posição, ledger e cadeia de estoque. Sem esta flag, apenas simula.",
+    )
     wheel_backfill = repairs.add_parser(
         "wheel-cycle-backfill",
         help="Simula ou cria ciclos Wheel somente para cadeias historicas inequivocas.",
@@ -1706,6 +1737,34 @@ def main() -> None:
                 f"  PM atual: R$ {report['previous_avg_price']:.6f} | "
                 f"PM corrigido: R$ {report['corrected_avg_price']:.6f} | "
                 f"ajuste necessario: {'sim' if report['update_required'] else 'nao'}"
+            )
+        elif args.subcmd == "cash-put-exercise":
+            try:
+                report = repair_cash_put_exercise(
+                    put_position_id=args.put_position_id,
+                    exercise_date=args.exercise_date,
+                    original_strike=args.original_strike,
+                    exercise_strike=args.exercise_strike,
+                    purchase_fees=args.purchase_fees,
+                    source_ref=args.source_ref,
+                    apply=bool(args.apply),
+                )
+            except CashPutExerciseRepairError as exc:
+                raise SystemExit(f"Correção não aplicada: {exc}") from exc
+            mode = "APLICADA" if report["applied"] else "SIMULAÇÃO"
+            print(f"Correção de exercício de PUT: {mode}")
+            print(
+                f"  PUT #{report['put_position_id']} | evento #{report['holding_event_id']} | "
+                f"ASSIGN #{report['assignment_ledger_id']} | REALIZED #{report['realized_ledger_id']}"
+            )
+            print(
+                f"  Exercício: {report['exercise_date']} | strike original: R$ {report['original_strike']:.2f} | "
+                f"strike aplicado: R$ {report['exercise_strike']:.2f}"
+            )
+            print(
+                f"  Despesas: R$ {report['purchase_fees']:.2f} | débito ASSIGN: R$ {report['assignment_amount']:.2f} | "
+                "referências posteriores refeitas: "
+                + (", ".join(f"#{event_id}" for event_id in report["holding_events_rebased"]) or "nenhuma")
             )
         elif args.subcmd == "wheel-cycle-backfill":
             try:
