@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
 from typing import Any, Iterable, List, Mapping, Optional
 
@@ -630,6 +631,94 @@ def update_position(
     if owns_conn:
         db.commit()
         db.close()
+
+
+def update_position_performance_metadata(
+    *,
+    position_id: int,
+    conn: Any,
+    contract_strike: Any = _UNSET,
+    contract_expiry: Any = _UNSET,
+    capital_committed: Any = _UNSET,
+    capital_source: Any = _UNSET,
+    performance_source_ref: Any = _UNSET,
+    performance_evidence_state: Any = _UNSET,
+    performance_evidence_note: Any = _UNSET,
+    parent_position_id: Any = _UNSET,
+) -> None:
+    """Update only performance metadata inside an existing locked transaction.
+
+    Performance evidence must not invoke the generic position schema/bootstrap path:
+    callers are required to open a transaction and lock the affected position first.
+    """
+
+    if conn is None:
+        raise ValueError("Metadados de desempenho exigem uma transação existente.")
+
+    fields: list[str] = []
+    params: list[object] = []
+
+    if contract_strike is not _UNSET:
+        parsed_strike = (
+            float(contract_strike) if contract_strike is not None else None
+        )
+        if parsed_strike is not None and (
+            parsed_strike <= 0 or not math.isfinite(parsed_strike)
+        ):
+            raise ValueError("Strike deve ser maior que zero.")
+        fields.append("contract_strike = ?")
+        params.append(parsed_strike)
+    if contract_expiry is not _UNSET:
+        parsed_expiry = str(contract_expiry or "").strip() or None
+        if parsed_expiry is not None:
+            try:
+                parsed_expiry = dt.date.fromisoformat(parsed_expiry).isoformat()
+            except ValueError as exc:
+                raise ValueError("Vencimento do contrato inválido.") from exc
+        fields.append("contract_expiry = ?")
+        params.append(parsed_expiry)
+    if capital_committed is not _UNSET:
+        parsed_capital = (
+            float(capital_committed) if capital_committed is not None else None
+        )
+        if parsed_capital is not None and (
+            parsed_capital <= 0 or not math.isfinite(parsed_capital)
+        ):
+            raise ValueError("Capital comprometido deve ser maior que zero.")
+        fields.append("capital_committed = ?")
+        params.append(parsed_capital)
+    if capital_source is not _UNSET:
+        fields.append("capital_source = ?")
+        params.append(str(capital_source or "").strip() or None)
+    if performance_source_ref is not _UNSET:
+        fields.append("performance_source_ref = ?")
+        params.append(str(performance_source_ref or "").strip() or None)
+    if performance_evidence_state is not _UNSET:
+        fields.append("performance_evidence_state = ?")
+        params.append(_normalize_performance_evidence_state(performance_evidence_state))
+    if performance_evidence_note is not _UNSET:
+        fields.append("performance_evidence_note = ?")
+        params.append(str(performance_evidence_note or "").strip() or None)
+    if parent_position_id is not _UNSET:
+        parsed_parent_id = (
+            int(parent_position_id) if parent_position_id is not None else None
+        )
+        if parsed_parent_id is not None and parsed_parent_id <= 0:
+            raise ValueError("Posição de origem inválida.")
+        fields.append("parent_position_id = ?")
+        params.append(parsed_parent_id)
+
+    if not fields:
+        return
+
+    params.append(int(position_id))
+    db, _ = _resolve_conn(conn)
+    cur = db.execute(
+        f"UPDATE positions SET {', '.join(fields)} WHERE id = ?",
+        params,
+    )
+    if cur.rowcount == 0:
+        raise ValueError(f"Posição {position_id} não encontrada.")
 
 
 def delete_position(*, position_id: int, conn: Optional[Any] = None) -> None:

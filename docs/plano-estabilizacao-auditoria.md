@@ -39,6 +39,9 @@ falhas legadas descritas abaixo; a aprovação deste recorte não certifica toda
 
 ## Etapa 2 — fronteiras de gravação e migrações (próxima entrega)
 
+- [Concluído] Isolar as gravações da auditoria de desempenho: bloquear a posição
+  dentro da transação, preservar fontes anteriores e atualizar somente os metadados
+  permitidos, sem acionar bootstrap ou normalização global de posições.
 - Corrigir separadamente o limitador de login para limite de uma tentativa e revisar
   confiança em cabeçalhos de proxy, preservando o backend restrito à interface local.
 - Introduzir migrações versionadas explícitas. Retirar DDL e normalizações globais
@@ -68,6 +71,9 @@ em mudanças separadas, sem enfraquecer validações financeiras para fazer test
 - Guardar fonte por campo e evento, distinguindo nota, cadastro de mercado e declaração.
 - Para strike histórico ajustado, conferir a data da fonte; não usar um preço atual
   como prova automática do valor válido no passado.
+- Evoluir o contrato para distinguir strike original de abertura e strike efetivo
+  ajustado quando as fontes demonstrarem os dois valores. Até essa migração, registrar
+  divergências como auditoria pendente e não sobrescrever silenciosamente o histórico.
 - Aplicar correções isoladas, conferir caixa/estoque/DARF e testar repetição idempotente.
 
 ## Publicação e espaço na VPS

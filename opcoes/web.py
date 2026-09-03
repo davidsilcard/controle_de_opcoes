@@ -47,6 +47,7 @@ from .portfolio import (
     list_positions,
     summarize_realized_positions,
     update_position,
+    update_position_performance_metadata,
     close_position,
     get_position,
 )
@@ -2324,60 +2325,9 @@ def create_app() -> Flask:
 
     @app.post("/performance/contract/<int:position_id>")
     def update_performance_contract(position_id: int):
-        position = get_position(position_id)
         mode = (request.form.get("mode") or "real").strip().lower()
         if mode not in {"real", "simulated"}:
             mode = "real"
-        if not _is_short_strategy_performance_position(position):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Somente vendas de PUT/Call das estrategias podem receber dados de desempenho.",
-                )
-            )
-        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="A posicao informada pertence a outro modo.",
-                )
-            )
-
-        def resolve_optional_positive_currency(
-            field_name: str,
-            current_value: Any,
-            *,
-            label: str,
-        ) -> float | None:
-            submitted = (request.form.get(field_name) or "").strip()
-            if submitted:
-                return _parse_required_positive_currency(submitted, label=label)
-            try:
-                existing = float(current_value)
-            except (TypeError, ValueError):
-                existing = 0.0
-            if existing > 0 and math.isfinite(existing):
-                return existing
-            return None
-
-        try:
-            strike = resolve_optional_positive_currency(
-                "contract_strike",
-                position.get("contract_strike"),
-                label="Strike",
-            )
-            capital = resolve_optional_positive_currency(
-                "capital_committed",
-                position.get("capital_committed"),
-                label="Capital comprometido",
-            )
-        except ValueError as exc:
-            return redirect(
-                url_for("performance_view", mode=mode, performance_error=str(exc))
-            )
-
         submitted_strike = (request.form.get("contract_strike") or "").strip()
         submitted_capital = (request.form.get("capital_committed") or "").strip()
         submitted_expiry = (request.form.get("contract_expiry") or "").strip()
@@ -2385,27 +2335,6 @@ def create_app() -> Flask:
         parent_position_id = _parse_optional_positive_int(
             request.form.get("stock_position_id")
         )
-
-        expiry = (
-            _parse_form_date(submitted_expiry)
-            if submitted_expiry
-            else (position.get("contract_expiry") or "").strip()
-        )
-        current_source_ref = (position.get("performance_source_ref") or "").strip()
-        current_source_refs = {
-            item.strip()
-            for item in current_source_ref.split(" | ")
-            if item.strip()
-        }
-        if submitted_source_ref and submitted_source_ref not in current_source_refs:
-            source_ref = (
-                f"{current_source_ref} | {submitted_source_ref}"
-                if current_source_ref
-                else submitted_source_ref
-            )
-        else:
-            source_ref = current_source_ref or submitted_source_ref
-
         if not any(
             (
                 submitted_strike,
@@ -2435,9 +2364,7 @@ def create_app() -> Flask:
                     performance_error="Preencha o strike ou o vencimento correspondente à fonte informada.",
                 )
             )
-        if (submitted_expiry and not expiry) or (
-            any((submitted_strike, submitted_expiry)) and not submitted_source_ref
-        ):
+        if any((submitted_strike, submitted_expiry)) and not submitted_source_ref:
             return redirect(
                 url_for(
                     "performance_view",
@@ -2446,48 +2373,84 @@ def create_app() -> Flask:
                 )
             )
 
-        strategy = str(position.get("strategy_tag") or "").strip().lower()
-        if strategy == "cash_put" and submitted_capital and strike is None:
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Na Cash-Covered Put, confirme primeiro o strike; a garantia será calculada automaticamente como strike × quantidade.",
-                )
-            )
-
-        if parent_position_id is not None and _is_call_exercise_position(position):
-            stock_position = get_position(parent_position_id)
-            if not _is_matching_exercised_call_stock(position, stock_position):
-                return redirect(
-                    url_for(
-                        "performance_view",
-                        mode=mode,
-                        performance_error="O ID informado nao e a venda de acao correspondente a esta CALL exercida.",
-                    )
-                )
-            linked_parent_id = _parse_optional_positive_int(
-                str(stock_position.get("parent_position_id") or "")
-            )
-            if linked_parent_id not in {None, position_id}:
-                return redirect(
-                    url_for(
-                        "performance_view",
-                        mode=mode,
-                        performance_error="O historico de acao ja esta vinculado a outra CALL.",
-                    )
-                )
-        elif parent_position_id is not None:
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="O vinculo de acao so pode ser informado para CALL exercida.",
-                )
-            )
-
         try:
             with db_transaction() as conn:
+                position = get_position(position_id, conn=conn, for_update=True)
+                if not _is_short_strategy_performance_position(position):
+                    raise ValueError(
+                        "Somente vendas de PUT/Call das estrategias podem receber dados de desempenho."
+                    )
+                if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+                    raise ValueError("A posicao informada pertence a outro modo.")
+
+                def resolve_optional_positive_currency(
+                    submitted: str,
+                    current_value: Any,
+                    *,
+                    label: str,
+                ) -> float | None:
+                    if submitted:
+                        return _parse_required_positive_currency(submitted, label=label)
+                    try:
+                        existing = float(current_value)
+                    except (TypeError, ValueError):
+                        existing = 0.0
+                    if existing > 0 and math.isfinite(existing):
+                        return existing
+                    return None
+
+                strike = resolve_optional_positive_currency(
+                    submitted_strike,
+                    position.get("contract_strike"),
+                    label="Strike",
+                )
+                capital = resolve_optional_positive_currency(
+                    submitted_capital,
+                    position.get("capital_committed"),
+                    label="Capital comprometido",
+                )
+                expiry = (
+                    _parse_form_date(submitted_expiry)
+                    if submitted_expiry
+                    else (position.get("contract_expiry") or "").strip()
+                )
+                if submitted_expiry and not expiry:
+                    raise ValueError(
+                        "Informe a fonte desta confirmação e use vencimento válido quando preenchido."
+                    )
+                source_ref = _merge_performance_source_refs(
+                    position.get("performance_source_ref"),
+                    submitted_source_ref,
+                )
+                strategy = str(position.get("strategy_tag") or "").strip().lower()
+                if strategy == "cash_put" and submitted_capital and strike is None:
+                    raise ValueError(
+                        "Na Cash-Covered Put, confirme primeiro o strike; a garantia será calculada automaticamente como strike × quantidade."
+                    )
+
+                stock_position = None
+                if parent_position_id is not None and _is_call_exercise_position(position):
+                    stock_position = get_position(
+                        parent_position_id,
+                        conn=conn,
+                        for_update=True,
+                    )
+                    if not _is_matching_exercised_call_stock(position, stock_position):
+                        raise ValueError(
+                            "O ID informado nao e a venda de acao correspondente a esta CALL exercida."
+                        )
+                    linked_parent_id = _parse_optional_positive_int(
+                        str(stock_position.get("parent_position_id") or "")
+                    )
+                    if linked_parent_id not in {None, position_id}:
+                        raise ValueError(
+                            "O historico de acao ja esta vinculado a outra CALL."
+                        )
+                elif parent_position_id is not None:
+                    raise ValueError(
+                        "O vinculo de acao so pode ser informado para CALL exercida."
+                    )
+
                 position_changes: dict[str, Any] = {}
                 if submitted_strike:
                     position_changes["contract_strike"] = strike
@@ -2510,13 +2473,13 @@ def create_app() -> Flask:
                         position_changes["capital_source"] = "strike_x_quantidade"
 
                 if position_changes:
-                    update_position(
+                    update_position_performance_metadata(
                         position_id=position_id,
                         conn=conn,
                         **position_changes,
                     )
                 if parent_position_id is not None:
-                    update_position(
+                    update_position_performance_metadata(
                         position_id=parent_position_id,
                         parent_position_id=position_id,
                         conn=conn,
@@ -2535,67 +2498,59 @@ def create_app() -> Flask:
 
     @app.post("/performance/contract/<int:position_id>/documents-exhausted")
     def mark_performance_documents_exhausted(position_id: int):
-        position = get_position(position_id)
         mode = (request.form.get("mode") or "real").strip().lower()
         if mode not in {"real", "simulated"}:
             mode = "real"
-        if not _is_short_strategy_performance_position(position):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho.",
-                )
-            )
-        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="A posicao informada pertence a outro modo.",
-                )
-            )
-
-        source_ref = (
-            (request.form.get("performance_source_ref") or "").strip()
-            or (position.get("performance_source_ref") or "").strip()
-        )
+        submitted_source_ref = (
+            request.form.get("performance_source_ref") or ""
+        ).strip()
         evidence_note = (request.form.get("performance_evidence_note") or "").strip()
-        if not source_ref or not evidence_note:
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Informe a fonte e a justificativa da auditoria antes de concluir que o documento não está disponível.",
+        try:
+            with db_transaction() as conn:
+                position = get_position(position_id, conn=conn, for_update=True)
+                if not _is_short_strategy_performance_position(position):
+                    raise ValueError(
+                        "Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho."
+                    )
+                if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+                    raise ValueError("A posicao informada pertence a outro modo.")
+
+                source_ref = _merge_performance_source_refs(
+                    position.get("performance_source_ref"),
+                    submitted_source_ref,
                 )
-            )
+                if not source_ref or not evidence_note:
+                    raise ValueError(
+                        "Informe a fonte e a justificativa da auditoria antes de concluir que o documento não está disponível."
+                    )
 
-        def is_missing_positive_value(value: Any) -> bool:
-            try:
-                return not (float(value) > 0 and math.isfinite(float(value)))
-            except (TypeError, ValueError):
-                return True
+                def is_missing_positive_value(value: Any) -> bool:
+                    try:
+                        return not (
+                            float(value) > 0 and math.isfinite(float(value))
+                        )
+                    except (TypeError, ValueError):
+                        return True
 
-        has_missing_contract_data = (
-            is_missing_positive_value(position.get("contract_strike"))
-            or not str(position.get("contract_expiry") or "").strip()
-        )
-        if not has_missing_contract_data:
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Strike e vencimento já estão completos; capital de garantia deve ser declarado no campo próprio, não encerrado como falta documental.",
+                has_missing_contract_data = (
+                    is_missing_positive_value(position.get("contract_strike"))
+                    or not str(position.get("contract_expiry") or "").strip()
                 )
-            )
+                if not has_missing_contract_data:
+                    raise ValueError(
+                        "Strike e vencimento já estão completos; capital de garantia deve ser declarado no campo próprio, não encerrado como falta documental."
+                    )
 
-        with db_transaction() as conn:
-            update_position(
-                position_id=position_id,
-                performance_source_ref=source_ref,
-                performance_evidence_state="documents_exhausted",
-                performance_evidence_note=evidence_note,
-                conn=conn,
+                update_position_performance_metadata(
+                    position_id=position_id,
+                    performance_source_ref=source_ref,
+                    performance_evidence_state="documents_exhausted",
+                    performance_evidence_note=evidence_note,
+                    conn=conn,
+                )
+        except ValueError as exc:
+            return redirect(
+                url_for("performance_view", mode=mode, performance_error=str(exc))
             )
         return redirect(
             url_for(
@@ -2607,31 +2562,26 @@ def create_app() -> Flask:
 
     @app.post("/performance/contract/<int:position_id>/reopen-evidence")
     def reopen_performance_evidence(position_id: int):
-        position = get_position(position_id)
         mode = (request.form.get("mode") or "real").strip().lower()
         if mode not in {"real", "simulated"}:
             mode = "real"
-        if not _is_short_strategy_performance_position(position):
-            return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho.",
+        try:
+            with db_transaction() as conn:
+                position = get_position(position_id, conn=conn, for_update=True)
+                if not _is_short_strategy_performance_position(position):
+                    raise ValueError(
+                        "Somente vendas de PUT/Call das estrategias podem receber auditoria de desempenho."
+                    )
+                if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+                    raise ValueError("A posicao informada pertence a outro modo.")
+                update_position_performance_metadata(
+                    position_id=position_id,
+                    performance_evidence_state="pending",
+                    conn=conn,
                 )
-            )
-        if bool(position.get("is_simulated") or 0) != (mode == "simulated"):
+        except ValueError as exc:
             return redirect(
-                url_for(
-                    "performance_view",
-                    mode=mode,
-                    performance_error="A posicao informada pertence a outro modo.",
-                )
-            )
-        with db_transaction() as conn:
-            update_position(
-                position_id=position_id,
-                performance_evidence_state="pending",
-                conn=conn,
+                url_for("performance_view", mode=mode, performance_error=str(exc))
             )
         return redirect(
             url_for(
@@ -3411,6 +3361,18 @@ def create_app() -> Flask:
         except ValueError:
             return None
         return parsed if parsed > 0 else None
+
+    def _merge_performance_source_refs(current: Any, submitted: Any) -> str:
+        current_ref = str(current or "").strip()
+        submitted_ref = str(submitted or "").strip()
+        existing_refs = {
+            item.strip()
+            for item in current_ref.split(" | ")
+            if item.strip()
+        }
+        if submitted_ref and submitted_ref not in existing_refs:
+            return f"{current_ref} | {submitted_ref}" if current_ref else submitted_ref
+        return current_ref or submitted_ref
 
     def _is_short_strategy_performance_position(position: dict[str, Any] | None) -> bool:
         if not position:
