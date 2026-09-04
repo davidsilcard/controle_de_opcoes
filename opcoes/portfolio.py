@@ -212,6 +212,8 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "parent_position_id": "BIGINT",
         "strategy_tag": "TEXT",
         "contract_strike": "DOUBLE PRECISION",
+        "contract_adjusted_strike": "DOUBLE PRECISION",
+        "contract_adjustment_date": "TEXT",
         "contract_exercise_strike": "DOUBLE PRECISION",
         "contract_expiry": "TEXT",
         "capital_committed": "DOUBLE PRECISION",
@@ -340,6 +342,8 @@ def add_position(
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
     contract_strike: Optional[float] = None,
+    contract_adjusted_strike: Optional[float] = None,
+    contract_adjustment_date: Optional[str] = None,
     contract_exercise_strike: Optional[float] = None,
     contract_expiry: Optional[str] = None,
     capital_committed: Optional[float] = None,
@@ -375,6 +379,8 @@ def add_position(
         int(parent_position_id) if parent_position_id is not None else None,
         strategy_tag or None,
         float(contract_strike) if contract_strike is not None else None,
+        float(contract_adjusted_strike) if contract_adjusted_strike is not None else None,
+        contract_adjustment_date or None,
         float(contract_exercise_strike) if contract_exercise_strike is not None else None,
         contract_expiry or None,
         float(capital_committed) if capital_committed is not None else None,
@@ -408,6 +414,8 @@ def add_position(
                     parent_position_id,
                     strategy_tag,
                     contract_strike,
+                    contract_adjusted_strike,
+                    contract_adjustment_date,
                     contract_exercise_strike,
                     contract_expiry,
                     capital_committed,
@@ -418,7 +426,7 @@ def add_position(
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -446,6 +454,8 @@ def add_position(
                     parent_position_id,
                     strategy_tag,
                     contract_strike,
+                    contract_adjusted_strike,
+                    contract_adjustment_date,
                     contract_exercise_strike,
                     contract_expiry,
                     capital_committed,
@@ -456,7 +466,7 @@ def add_position(
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -524,6 +534,8 @@ def update_position(
     parent_position_id: Any = _UNSET,
     strategy_tag: Any = _UNSET,
     contract_strike: Any = _UNSET,
+    contract_adjusted_strike: Any = _UNSET,
+    contract_adjustment_date: Any = _UNSET,
     contract_exercise_strike: Any = _UNSET,
     contract_expiry: Any = _UNSET,
     capital_committed: Any = _UNSET,
@@ -600,6 +612,16 @@ def update_position(
     if contract_strike is not _UNSET:
         fields.append("contract_strike = ?")
         params.append(float(contract_strike) if contract_strike is not None else None)
+    if contract_adjusted_strike is not _UNSET:
+        fields.append("contract_adjusted_strike = ?")
+        params.append(
+            float(contract_adjusted_strike)
+            if contract_adjusted_strike is not None
+            else None
+        )
+    if contract_adjustment_date is not _UNSET:
+        fields.append("contract_adjustment_date = ?")
+        params.append(contract_adjustment_date)
     if contract_exercise_strike is not _UNSET:
         fields.append("contract_exercise_strike = ?")
         params.append(
@@ -651,6 +673,8 @@ def update_position_performance_metadata(
     position_id: int,
     conn: Any,
     contract_strike: Any = _UNSET,
+    contract_adjusted_strike: Any = _UNSET,
+    contract_adjustment_date: Any = _UNSET,
     contract_exercise_strike: Any = _UNSET,
     contract_expiry: Any = _UNSET,
     capital_committed: Any = _UNSET,
@@ -682,6 +706,27 @@ def update_position_performance_metadata(
             raise ValueError("Strike deve ser maior que zero.")
         fields.append("contract_strike = ?")
         params.append(parsed_strike)
+    if contract_adjusted_strike is not _UNSET:
+        parsed_adjusted_strike = (
+            float(contract_adjusted_strike)
+            if contract_adjusted_strike is not None
+            else None
+        )
+        if parsed_adjusted_strike is not None and (
+            parsed_adjusted_strike <= 0 or not math.isfinite(parsed_adjusted_strike)
+        ):
+            raise ValueError("Strike ajustado deve ser maior que zero.")
+        fields.append("contract_adjusted_strike = ?")
+        params.append(parsed_adjusted_strike)
+    if contract_adjustment_date is not _UNSET:
+        parsed_adjustment_date = str(contract_adjustment_date or "").strip() or None
+        if parsed_adjustment_date is not None:
+            try:
+                parsed_adjustment_date = dt.date.fromisoformat(parsed_adjustment_date).isoformat()
+            except ValueError as exc:
+                raise ValueError("Data do ajuste do contrato inválida.") from exc
+        fields.append("contract_adjustment_date = ?")
+        params.append(parsed_adjustment_date)
     if contract_exercise_strike is not _UNSET:
         parsed_exercise_strike = (
             float(contract_exercise_strike)
@@ -1072,6 +1117,11 @@ def _row_to_dict(row: Any) -> dict:
     pct_2x = None
     last_strike = None
     contract_strike = parse_decimal(row["contract_strike"]) if "contract_strike" in row.keys() else None
+    contract_adjusted_strike = (
+        parse_decimal(row["contract_adjusted_strike"])
+        if "contract_adjusted_strike" in row.keys()
+        else None
+    )
     contract_exercise_strike = (
         parse_decimal(row["contract_exercise_strike"])
         if "contract_exercise_strike" in row.keys()
@@ -1129,6 +1179,12 @@ def _row_to_dict(row: Any) -> dict:
         "strike": contract_strike if contract_strike is not None else last_strike,
         "strategy_tag": row["strategy_tag"] if "strategy_tag" in row.keys() else None,
         "contract_strike": contract_strike,
+        "contract_adjusted_strike": contract_adjusted_strike,
+        "contract_adjustment_date": (
+            row["contract_adjustment_date"]
+            if "contract_adjustment_date" in row.keys()
+            else None
+        ),
         "contract_exercise_strike": contract_exercise_strike,
         "contract_expiry": row["contract_expiry"] if "contract_expiry" in row.keys() else None,
         "capital_committed": (

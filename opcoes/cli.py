@@ -67,6 +67,10 @@ from .cash_put_exercise_repair import (
     CashPutExerciseRepairError,
     repair_cash_put_exercise,
 )
+from .contract_adjustment_repair import (
+    ContractAdjustmentRepairError,
+    repair_contract_adjustment,
+)
 from .wheel_cycles import WheelCycleError, backfill_wheel_cycles
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
@@ -997,6 +1001,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Aplica a correção depois de validar posição, ledger e cadeia de estoque. Sem esta flag, apenas simula.",
     )
+    contract_adjustment = repairs.add_parser(
+        "contract-adjustment",
+        help="Simula ou registra strikes original e ajustado comprovados para uma opção vendida.",
+    )
+    contract_adjustment.add_argument("--position-id", type=int, required=True, help="ID da opção vendida.")
+    contract_adjustment.add_argument("--original-strike", type=float, required=True, help="Strike na abertura.")
+    contract_adjustment.add_argument("--adjusted-strike", type=float, required=True, help="Strike após o ajuste.")
+    contract_adjustment.add_argument("--adjustment-date", required=True, help="Data do ajuste (YYYY-MM-DD).")
+    contract_adjustment.add_argument("--source-ref", required=True, help="Referência documental da auditoria.")
+    contract_adjustment.add_argument(
+        "--apply",
+        action="store_true",
+        help="Aplica apenas os metadados documentais após validar a posição. Sem esta flag, apenas simula.",
+    )
     wheel_backfill = repairs.add_parser(
         "wheel-cycle-backfill",
         help="Simula ou cria ciclos Wheel somente para cadeias historicas inequivocas.",
@@ -1765,6 +1783,24 @@ def main() -> None:
                 f"  Despesas: R$ {report['purchase_fees']:.2f} | débito ASSIGN: R$ {report['assignment_amount']:.2f} | "
                 "referências posteriores refeitas: "
                 + (", ".join(f"#{event_id}" for event_id in report["holding_events_rebased"]) or "nenhuma")
+            )
+        elif args.subcmd == "contract-adjustment":
+            try:
+                report = repair_contract_adjustment(
+                    position_id=args.position_id,
+                    original_strike=args.original_strike,
+                    adjusted_strike=args.adjusted_strike,
+                    adjustment_date=args.adjustment_date,
+                    source_ref=args.source_ref,
+                    apply=bool(args.apply),
+                )
+            except ContractAdjustmentRepairError as exc:
+                raise SystemExit(f"Correção não aplicada: {exc}") from exc
+            mode = "APLICADA" if report["applied"] else "SIMULAÇÃO"
+            print(f"Correção de ajuste de contrato: {mode}")
+            print(
+                f"  Posição #{report['position_id']} {report['ticker']} | strike original: R$ {report['original_strike']:.2f} | "
+                f"strike ajustado: R$ {report['adjusted_strike']:.2f} em {report['adjustment_date']}"
             )
         elif args.subcmd == "wheel-cycle-backfill":
             try:
