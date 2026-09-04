@@ -107,6 +107,26 @@ def test_performance_view_renders_independent_action_queues(monkeypatch) -> None
     assert 'action="/performance/contract/4"' in html
 
 
+def test_performance_view_shows_audited_contract_adjustment(monkeypatch) -> None:
+    position = _option(
+        53, "PETRE500", strategy="covered_call", strike=50.0,
+        expiry="2026-05-15", capital=None,
+    )
+    position.update(contract_adjusted_strike=49.46, contract_adjustment_date="2026-04-23")
+    monkeypatch.setattr("opcoes.web.list_positions", lambda **_kwargs: [position])
+    monkeypatch.setattr(
+        "opcoes.web.finance.get_ledger_sums_by_position",
+        lambda **_kwargs: {53: {TransactionType.PREMIUM.value: 106.0, TransactionType.REALIZED.value: 106.0}},
+    )
+    monkeypatch.setattr("opcoes.web.list_wheel_cycles", lambda **_kwargs: [])
+
+    app = create_app()
+    app.testing = True
+    html = app.test_client().get("/performance?mode=real").get_data(as_text=True)
+
+    assert "Strike ajustado: R$ 49.46 em 2026-04-23" in html
+
+
 def test_shared_fee_groups_do_not_merge_unknown_references(monkeypatch) -> None:
     positions = [
         _option(

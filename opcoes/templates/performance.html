@@ -338,7 +338,10 @@
                   <td class="text-end">R$ {{ '%.2f'|format(cycle.premium) }}</td>
                   <td class="text-end">{% if cycle.total_result is not none %}R$ {{ '%.2f'|format(cycle.total_result) }}{% if not cycle.is_result_complete %}<br><span class="small text-muted">parcial — vínculo pendente</span>{% endif %}{% else %}-{% endif %}</td>
                   <td class="text-end">{% if cycle.return_pct is not none %}{{ '%.2f'|format(cycle.return_pct) }}%{% else %}-{% endif %}</td>
-                  <td class="small">{{ cycle.source_ref or '-' }}</td>
+                  <td class="small">
+                    {{ cycle.source_ref or '-' }}
+                    {% if cycle.adjusted_strike is not none %}<br><span class="text-muted">Strike ajustado: R$ {{ '%.2f'|format(cycle.adjusted_strike) }}{% if cycle.adjustment_date %} em {{ cycle.adjustment_date }}{% endif %}</span>{% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>

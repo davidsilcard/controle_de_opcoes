@@ -245,6 +245,8 @@ def build_strategy_performance(
             "exit_reason": position.get("exit_reason"),
             "qty": qty,
             "strike": strike,
+            "adjusted_strike": _positive_number(position.get("contract_adjusted_strike")),
+            "adjustment_date": position.get("contract_adjustment_date"),
             "expiry": position.get("contract_expiry"),
             "capital": capital,
             "capital_source": capital_source,
