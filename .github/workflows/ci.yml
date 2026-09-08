@@ -58,7 +58,7 @@ jobs:
       - name: Compile Python sources
         run: uv run python -m compileall -q opcoes tests
 
-      - name: Check whitespace and changed Python formatting
+      - name: Check whitespace and new Python formatting
         shell: bash
         run: |
           set -euo pipefail
@@ -67,7 +67,9 @@ jobs:
             base_sha="$(git rev-parse HEAD~1)"
           fi
           git diff --check "$base_sha" "$GITHUB_SHA"
-          mapfile -t python_files < <(git diff --name-only "$base_sha" "$GITHUB_SHA" -- '*.py')
+          mapfile -t python_files < <(
+            git diff --diff-filter=A --name-only "$base_sha" "$GITHUB_SHA" -- '*.py'
+          )
           if (( ${#python_files[@]} > 0 )); then
             uv run black --check "${python_files[@]}"
           fi

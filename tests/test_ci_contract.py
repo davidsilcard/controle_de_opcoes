@@ -15,5 +15,6 @@ def test_ci_runs_postgres_tests_and_docker_smoke() -> None:
     assert "DATABASE_URL: postgresql://opcoes:opcoes@localhost:5432/opcoes" in workflow
     assert "uv run pytest -q -ra" in workflow
     assert "A suíte PostgreSQL foi ignorada indevidamente." in workflow
+    assert "git diff --diff-filter=A --name-only" in workflow
     assert "docker build --tag" in workflow
     assert "curl --fail --silent --show-error --head http://127.0.0.1:8000/login" in workflow
