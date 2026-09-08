@@ -588,6 +588,13 @@ Observacao:
 - use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
 - troque para `1` quando colocar HTTPS com proxy reverso
 - o login aplica rate limit por IP e usa o IP percebido pelo Flask depois do `ProxyFix`; em ambiente com proxy reverso, o proxy precisa ser confiavel.
+- `ProxyFix` confia em um salto: a porta Web não pode ficar exposta diretamente a
+  clientes externos. Na topologia verificada em 2026-09-08, Caddy encaminha para
+  `127.0.0.1:8000`; preserve o bind local e a sanitização dos cabeçalhos pelo proxy.
+  O teste Flask cobre o último IP encaminhado e ignora prefixos não confiáveis;
+  não simula o Caddy completo nem protege acesso direto ao backend. Referências:
+  [Werkzeug](https://werkzeug.palletsprojects.com/en/stable/middleware/proxy_fix/) e
+  [Caddy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#defaults).
 - o rate limit agora fica persistido no schema de autenticacao (`OPCOES_AUTH_SCHEMA`), entao continua valendo mesmo com multiplos workers/instancias da web.
 - ajustes opcionais:
 

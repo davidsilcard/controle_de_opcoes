@@ -908,3 +908,12 @@ e 5, reset e isolamento por IP. A suíte local anterior teve 285 aprovados e 97
 ignorados; não é evidência PostgreSQL. Concorrência do contador de login ainda
 precisa de teste específico no endurecimento de autenticação; não confundir com
 a concorrência de expiração já testada.
+
+A CI seguinte (`34237192544`, `d6940b9`) confirmou a correção do limite 1, mas revelou
+que o mesmo teste simulava cabeçalho forjado enviado diretamente ao Flask, enquanto
+o runtime usa `ProxyFix(x_for=1)`. Verificação somente leitura na VPS confirmou
+Caddy encaminhando para `127.0.0.1:8000` e porta Docker publicada só em loopback.
+O teste passa a representar a fronteira efetiva: somente o último IP, informado
+pelo proxy confiável, pode alimentar o bloqueio; prefixos forjados não mudam esse IP.
+Não foi alterado o runtime de proxy nem a VPS. O README registra a dependência e
+as fontes oficiais; acesso direto ao backend não está coberto por essa confiança.

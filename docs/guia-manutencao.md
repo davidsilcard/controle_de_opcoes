@@ -116,6 +116,9 @@ globais. Bash de Git para Windows pode validar sintaxe quando o WSL não está i
 - Configuração oficial da VPS: `/etc/controle_de_opcoes/app.env`, carregada pelo helper
   `deploy/scripts/opcoes-compose-vps.sh`. Não criar outra fonte de segredos nem imprimir
   variáveis/`docker inspect` completo. Verificar presença sem mostrar o valor.
+- O `ProxyFix` atual confia em um proxy. Preservar backend inacessível externamente
+  e cabeçalhos saneados pelo proxy; um teste que chama Flask diretamente não testa
+  essa proteção de borda. Revalidar a topologia antes de alterar essa confiança.
 - Acompanhar o processo até obter código de saída. Guardar identificador da sessão e
   continuar lendo a mesma execução. Saída silenciosa ou build lento de Chromium não
   prova travamento. Não iniciar outro deploy para tentar obter mais saída; o script

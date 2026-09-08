@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from opcoes.auth import create_user
+from opcoes.auth import create_user, get_login_block_remaining_seconds
 from opcoes.web import create_app
 
 
@@ -91,7 +91,9 @@ def test_login_rate_limit_blocks_repeated_failures(monkeypatch) -> None:
 
 
 @pytest.mark.requires_postgres
-def test_login_rate_limit_ignores_forged_forwarded_for(monkeypatch) -> None:
+def test_login_rate_limit_ignores_untrusted_prefix_behind_one_proxy(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("OPCOES_SECRET_KEY", "teste-seguro")
     monkeypatch.setenv("OPCOES_LOGIN_MAX_ATTEMPTS", "1")
     monkeypatch.setenv("OPCOES_LOGIN_BLOCK_SECONDS", "120")
@@ -110,9 +112,21 @@ def test_login_rate_limit_ignores_forged_forwarded_for(monkeypatch) -> None:
             "next": "/positions",
             "_csrf_token": csrf_token,
         },
-        headers={"X-Forwarded-For": "198.51.100.10"},
+        # ProxyFix trusts exactly the rightmost hop, supplied by the trusted proxy.
+        # Calling Flask directly with only a forged header bypasses that boundary.
+        headers={"X-Forwarded-For": "198.51.100.10, 192.0.2.50"},
     )
     assert first.status_code == 429
+    assert (
+        get_login_block_remaining_seconds(client_key="192.0.2.50", window_seconds=120)
+        is not None
+    )
+    assert (
+        get_login_block_remaining_seconds(
+            client_key="198.51.100.10", window_seconds=120
+        )
+        is None
+    )
 
     second = client.post(
         "/login",
@@ -122,7 +136,7 @@ def test_login_rate_limit_ignores_forged_forwarded_for(monkeypatch) -> None:
             "next": "/positions",
             "_csrf_token": csrf_token,
         },
-        headers={"X-Forwarded-For": "203.0.113.20"},
+        headers={"X-Forwarded-For": "203.0.113.20, 192.0.2.50"},
     )
     assert second.status_code == 429
     assert "Muitas tentativas de login" in second.get_data(as_text=True)
