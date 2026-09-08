@@ -7,9 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_update_vps_serializes_concurrent_deploys() -> None:
-    script = (ROOT / "deploy" / "scripts" / "update-vps.sh").read_text(
-        encoding="utf-8"
-    )
+    script = (ROOT / "deploy" / "scripts" / "update-vps.sh").read_text(encoding="utf-8")
 
     expected_lock = (
         'DEPLOY_LOCK_FILE="${OPCOES_DEPLOY_LOCK_FILE:-'
