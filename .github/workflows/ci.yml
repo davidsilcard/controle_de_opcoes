@@ -97,6 +97,10 @@ jobs:
             pytest-results.xml
           if-no-files-found: ignore
 
+      - name: Annotate test failures
+        if: failure()
+        run: uv run python deploy/scripts/report-test-failures.py
+
       - name: Build and smoke-test the Docker image
         shell: bash
         run: |

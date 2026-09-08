@@ -1186,6 +1186,7 @@ A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e
 Os resultados da suíte ficam no artefato `pytest-results` do GitHub Actions, inclusive
 quando há falhas. Antes do deploy, confirme que os testes PostgreSQL e o smoke Docker
 executaram com sucesso no commit que será publicado; etapas ignoradas não contam como validação.
+Falhas e erros do relatório JUnit também aparecem nas anotações da execução do CI.
 
 O deploy oficial possui lock exclusivo: se uma atualização já estiver em andamento, o
 segundo processo falha sem reconstruir imagens ou reiniciar containers. Aguarde o
