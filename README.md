@@ -1183,6 +1183,17 @@ deploy\scripts\release-check.ps1
 
 A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e os remove ao final. O contrato atual das telas, partials, CLI e Edge está em [docs/contrato-funcional-atual.md](docs/contrato-funcional-atual.md).
 
+Antes de uma migração, gere uma linha de base somente leitura. A chave não entra no
+arquivo: ela apenas assina o inventário de schemas, tabelas, constraints e volumes.
+
+```powershell
+$env:OPCOES_BASELINE_HMAC_KEY = "gere-e-guarde-uma-chave-fora-do-repositorio"
+uv run python -m opcoes.cli db inventory --output data\baselines\inventario-pre-migracao.json
+```
+
+O comando não lê valores financeiros nem altera o banco. Guarde o JSON em local seguro;
+para refazê-lo no mesmo caminho, use `--overwrite` conscientemente.
+
 E2E opcional:
 
 ```bash

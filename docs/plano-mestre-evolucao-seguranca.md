@@ -1,8 +1,8 @@
 # Plano mestre de evolução, segurança de dados e funcionalidade
 
-Status: execução autorizada em 2026-09-04. Entrega 0 em andamento: este primeiro
-commit cria a base de CI PostgreSQL, limpeza de schemas temporários, release check e
-contrato funcional; os gates de banco real e E2E continuam pendentes nesta entrega.
+Status: execução autorizada em 2026-09-04. Entrega 0 em andamento: os commits iniciais
+criam CI PostgreSQL, limpeza de schemas temporários, release check, contrato funcional e
+inventário assinado somente leitura; os gates de banco real e E2E continuam pendentes.
 
 Data-base da revisão: 2026-09-04.
 

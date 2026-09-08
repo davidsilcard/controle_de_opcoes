@@ -27,6 +27,7 @@ from .db_health import is_postgres_ready, run_db_check
 from .db_health import resolve_postgres_target
 from .db_migrate import clone_postgres_schema, migrate_postgres
 from .db_optimize import optimize_postgres_schema
+from .db_inventory import collect_postgres_inventory, write_inventory_report
 from . import finance
 from .fundamentus import (
     FundamentusFilterConfig,
@@ -839,6 +840,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Não limpa as tabelas de destino antes da cópia. Use apenas em cenários muito controlados.",
     )
+    db_inventory = dbs.add_parser(
+        "inventory",
+        help="Gera inventário somente leitura de schemas, tabelas, constraints e volumes.",
+    )
+    db_inventory.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Arquivo JSON de destino. Não é sobrescrito sem --overwrite.",
+    )
+    db_inventory.add_argument(
+        "--hmac-key-env",
+        default="OPCOES_BASELINE_HMAC_KEY",
+        help="Nome da variável com a chave externa que assina o relatório.",
+    )
+    db_inventory.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Permite substituir o relatório informado em --output.",
+    )
 
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
     fc.add_argument(
@@ -1646,6 +1667,45 @@ def main() -> None:
                 )
             print(f"Total de linhas copiadas: {report.get('total_rows', 0)}")
             print("Migração concluída com contagem validada.")
+        elif args.subcmd == "inventory":
+            target, target_errors = resolve_postgres_target()
+            if target is None:
+                details = (
+                    "; ".join(target_errors)
+                    if target_errors
+                    else "configuração ausente"
+                )
+                raise SystemExit(
+                    f"Falha ao resolver PostgreSQL para inventário: {details}"
+                )
+            key_env_name = str(args.hmac_key_env).strip()
+            hmac_key = os.getenv(key_env_name, "")
+            if not hmac_key:
+                raise SystemExit(
+                    f"Variável {key_env_name} ausente. "
+                    "Defina uma chave externa antes do inventário."
+                )
+            if loaded_env_path is not None:
+                print(f".env carregado: {loaded_env_path}")
+            print(f"Destino PostgreSQL: {target.redacted_dsn}")
+            print("Lendo metadados e agregados, sem exportar valores financeiros...")
+            try:
+                report = collect_postgres_inventory(dsn=target.dsn, hmac_key=hmac_key)
+                write_inventory_report(
+                    report,
+                    output=args.output,
+                    overwrite=bool(args.overwrite),
+                )
+            except Exception as exc:
+                raise SystemExit(f"Falha no inventário: {exc}") from exc
+            inventory = report["inventory"]
+            print(
+                "Inventário concluído: "
+                f"{len(inventory['schemas'])} schemas, "
+                f"{len(inventory['tables'])} tabelas, "
+                f"{len(inventory['constraints'])} constraints."
+            )
+            print(f"Relatório assinado: {args.output}")
     elif args.cmd == "fundamentus":
         snap = None
         if args.snapshot_date:
