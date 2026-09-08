@@ -1224,6 +1224,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
+- O bloqueio de login respeita também o limite configurado de uma única tentativa
+  inválida; a proteção não precisa esperar a segunda falha para começar a contar.
 - Expiração de PUT/CALL agora grava encerramento e efeitos financeiros em uma única
   transação, com bloqueio da posição. Falha na gravação financeira reverte também o
   encerramento; repetição não duplica efeitos. Não há reparo automático do histórico.

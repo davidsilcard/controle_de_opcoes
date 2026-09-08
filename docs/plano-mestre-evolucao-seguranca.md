@@ -898,3 +898,13 @@ Pendências que não podem desaparecer em uma troca de chat:
 
 Antes de qualquer nova publicação, conferir CI, Git e VPS ao vivo. Não assumir que
 um SHA anotado na conversa continua sendo a versão publicada.
+
+Validação intermediária: o commit `19c6978`, CI `34236827764`, passou nos casos de
+expiração (incluindo concorrência/isolamento), mas falhou no bloqueio de login com
+`OPCOES_LOGIN_MAX_ATTEMPTS=1`; o smoke Docker foi ignorado e não houve deploy.
+A causa é a checagem do limite ocorrer somente após uma falha anterior. A correção
+aplica a checagem também à primeira falha e acrescenta regressão para limites 1, 2
+e 5, reset e isolamento por IP. A suíte local anterior teve 285 aprovados e 97
+ignorados; não é evidência PostgreSQL. Concorrência do contador de login ainda
+precisa de teste específico no endurecimento de autenticação; não confundir com
+a concorrência de expiração já testada.

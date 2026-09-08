@@ -746,10 +746,11 @@ def record_failed_login_attempt(
             blocked_until = None
         else:
             failed_count += 1
-            if failed_count >= max_attempts:
-                failed_count = 0
-                first_failure_at = now
-                blocked_until = now + dt.timedelta(seconds=max(int(block_seconds or 0), 60))
+
+        if failed_count >= max_attempts:
+            failed_count = 0
+            first_failure_at = now
+            blocked_until = now + dt.timedelta(seconds=max(int(block_seconds or 0), 60))
 
         conn.execute(
             f"""
