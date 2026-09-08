@@ -945,3 +945,58 @@ executar somente `deploy/scripts/update-vps.sh`, aguardar seu código de saída 
 conferir containers, login público, health do Edge e hashes dos arquivos de runtime.
 O resultado da implantação precisa ser confirmado ao vivo; aprovação não equivale
 a deploy concluído.
+
+Implantação confirmada em 2026-09-08: `83c9404`, após [CI 34238839549](https://github.com/davidsilcard/controle_de_opcoes/actions/runs/34238839549)
+aprovar PostgreSQL e Docker. Script oficial executado como `root`, saída zero;
+Web/Edge em execução sem reinícios, login público HTTP 200, health público do Edge
+`ok`, conexão TCP e `SELECT 1` no PostgreSQL aprovados. Hashes SHA-256 de `web.py`
+e `auth.py` iguais no checkout e nos dois containers. Sem migração ou reparo
+financeiro. Não foi realizado E2E autenticado completo. O registro posterior de
+auditoria/documentação não altera esse código de runtime; conferir SHA vigente
+na VPS antes do próximo deploy.
+
+## 14. Auditoria inicial de recuperacao — 2026-09-08
+
+Escopo: inspeção somente leitura de código, metadados dos diretórios documentados,
+timers/systemd e arquivos de cron; sem abrir conteúdo das exportações, executar
+migração, restaurar banco ou enviar dados a terceiros.
+
+Achados:
+
+- O diretório `/home/david/backups/controle_de_opcoes/` contém oito exportações JSON
+  pontuais, com datas entre julho e setembro. Não são evidência de backup completo
+  restaurável de todos os schemas. Não foi encontrado dump completo, rotina de
+  backup da aplicação ou relatório de restauração nos locais/agendamentos inspecionados.
+  Isso não exclui cópias ou snapshots do provedor fora desse escopo.
+- `pg_dump` e `pg_restore` estão disponíveis na VPS; o cliente informa versão 16.15.
+  Não foram encontrados scripts/timers/testes versionados de backup, criptografia,
+  retenção ou restore drill. O inventário HMAC existente não substitui esses controles.
+- `opcoes/db_migrate.py:migrate_postgres` copia apenas os schemas app/auth indicados,
+  confirma o `TRUNCATE` antes da cópia e confirma cada tabela. Falha parcial não é
+  revertida integralmente. O README passou a sinalizar o procedimento como legado,
+  não aprovado para backup/recuperação de produção; a interface não foi removida.
+- `opcoes/auth.py:migrate_user_app_schemas` confirma os novos ponteiros `app_schema`
+  antes de clonar. Uma falha de clonagem pode publicar um destino incompleto.
+  Corrigir a ordem e testar falha antes de qualquer execução desse fluxo em produção.
+- Ainda faltam migrações SQL versionadas, journal e gates `status/plan/apply/verify`
+  previstos na Entrega 1. DDL no runtime continua sendo dívida, não uma fase concluída.
+
+Próximo recorte proposto, antes de agendar produção:
+
+1. Ferramenta versionada de backup custom do PostgreSQL com manifesto/checksum,
+   escrita temporária seguida de publicação do artefato somente após sucesso,
+   permissões restritas e sem DSN/senha em logs ou argumentos.
+2. Cobrir app/auth/shared/todos os schemas de usuários, além de tratar roles/globals
+   e configuração sensível separadamente. Dump de um banco não inclui os objetos
+   globais do cluster, conforme [pg_dump](https://www.postgresql.org/docs/16/app-pgdump.html)
+   e [pg_dumpall](https://www.postgresql.org/docs/16/app-pg-dumpall.html).
+3. Ensaio com dados sintéticos em PostgreSQL 16 descartável na CI: restaurar,
+   comparar contagens e fingerprints lógicos e testar arquivo inválido, falha
+   parcial e recusa de destino não vazio. O restaurador precisa ser isolado e
+   aceitar apenas artefatos confiáveis ([pg_restore](https://www.postgresql.org/docs/16/app-pgrestore.html)).
+4. Escolher com o usuário o destino externo e a custódia da chave, validar recuperação
+   usando a cópia externa, só então ativar agendamento/retenção conforme seção 8.
+
+Decisão pendente: o usuário possui armazenamento externo ou deseja pesquisa de
+provedor? Nenhum serviço foi contratado/configurado, chave criada ou backup enviado.
+Não prometer RPO/RTO nem proteção contra perda da VPS enquanto esse gate não existir.

@@ -82,6 +82,9 @@ e não expor detalhes internos ao usuário.
 
 - PostgreSQL de testes deve ser descartável e separado da produção. Nunca rodar
   `pytest` apontando para o banco financeiro da VPS, mesmo usando schemas aleatórios.
+- Um helper com nome de consulta pode inicializar tabelas e fazer commit. Para
+  auditoria estritamente somente leitura na VPS, confira a implementação e use
+  conexão marcada read-only/consultas qualificadas, sem inicializadores de runtime.
 - A CI provisiona PostgreSQL 16. A fixture prepara schemas aleatórios para aplicação
   e autenticação, isola também configuração compartilhada/automação e limpa somente
   nomes validados. Não depender da ordem dos testes para inicializar o banco.
@@ -135,6 +138,9 @@ globais. Bash de Git para Windows pode validar sintaxe quando o WSL não está i
   da VPS. Uma chave guardada na própria máquina não atende proteção fora dela.
 - Migração, restore e correção histórica exigem o gate e a autorização específicos do
   plano. Não restaurar banco inteiro sobre operações novas sem plano de recuperação.
+- `db migrate`/clonagem de schema legados não são backup ou restore: confirmam
+  alterações por etapas. Não usar esse copiador para recuperar produção nem trocar
+  `web_users.app_schema` antes de preparar e verificar o schema de destino.
 
 ## 7. Encerramento de cada entrega
 

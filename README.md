@@ -714,11 +714,20 @@ cd ~/apps/controle_de_opcoes
 deploy/scripts/opcoes-compose-vps.sh logs -f web
 ```
 
-### Migracao integral do PostgreSQL local para a VPS
+### Copia legada de schemas — nao usar como backup ou restauracao
 
-Quando a origem local ja esta em PostgreSQL e voce quer levar **todas as tabelas da aplicacao**
-para a VPS, use o fluxo abaixo. O comando faz copia **table-to-table via `COPY` streaming**,
-preserva IDs/identidades e valida a contagem no final.
+Aviso de seguranca: o procedimento abaixo e referencia historica, nao um runbook
+aprovado para recuperar producao. `db migrate` copia somente os dois schemas
+informados; nao cobre automaticamente todos os usuarios nem objetos globais.
+Faz `TRUNCATE` com commit antes da copia e commits por tabela: uma falha pode deixar
+o destino incompleto. Contagens iguais nao comprovam equivalencia financeira.
+Nao executar em producao sem plano especifico, backup restaurado em ensaio e
+autorizacao. Nao passar senhas reais em argumentos ou colar comandos com segredos
+no chat. O exemplo de DSN abaixo contem apenas um placeholder historico.
+
+Parar apenas `web` nao impede escritas por scraper, Edge, CLI ou outros processos.
+A recuperacao da Entrega 1 sera baseada em `pg_dump`/`pg_restore`, com ensaio isolado,
+nao neste copiador. Estado e pendencias: [plano mestre](docs/plano-mestre-evolucao-seguranca.md#14-auditoria-inicial-de-recuperacao--2026-09-08).
 
 Tabelas migradas a partir dos schemas da aplicacao:
 
@@ -741,7 +750,7 @@ Tabelas migradas a partir dos schemas da aplicacao:
 - `admin.ticker_metadata`
 - `admin.service_runs`
 
-Recomendacao operacional:
+Sequencia legada, mantida somente como referencia tecnica:
 
 1. no VPS, pare momentaneamente a escrita da aplicacao:
 
@@ -769,8 +778,8 @@ uv run python -m opcoes.cli db migrate \
 
 Observacoes:
 
-- por padrao, o destino sofre `TRUNCATE` antes da copia. Isso e o modo correto para migracao integral.
-- use `--no-truncate` apenas em cenario muito controlado.
+- por padrao, o destino sofre `TRUNCATE` antes da copia; isso e destrutivo e nao e restauracao segura.
+- `--no-truncate` tambem nao torna a operacao atomica nem garante ausencia de duplicacao/conflito.
 - para tabelas grandes como `option_snapshots` e `flow_history`, o processo pode levar algum tempo.
 
 4. ao terminar, religue a aplicacao no VPS:
