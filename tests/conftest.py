@@ -56,8 +56,31 @@ def _cleanup_test_schemas(
                 cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
 
 
+def _prepare_test_schemas(
+    *,
+    dsn: str,
+    schema_names: Iterable[str],
+    connect_factory: Callable[..., object] | None = None,
+) -> None:
+    """Reproduz o bootstrap dos schemas somente no banco de testes."""
+
+    schemas = tuple(dict.fromkeys(schema_names))
+    if any(_TEST_SCHEMA_NAME.fullmatch(schema) is None for schema in schemas):
+        raise RuntimeError("Recusa de preparo: schema de teste inválido.")
+    if not schemas:
+        return
+    if connect_factory is None:
+        import psycopg
+
+        connect_factory = psycopg.connect
+    with connect_factory(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            for schema in schemas:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+
+
 @pytest.fixture(autouse=True)
-def _isolated_pg_schema(monkeypatch):
+def _isolated_pg_schema(monkeypatch, request):
     """Isola estado de banco por teste em schema PostgreSQL temporário."""
 
     app_schema = f"t_{uuid.uuid4().hex[:12]}"
@@ -65,14 +88,22 @@ def _isolated_pg_schema(monkeypatch):
 
     monkeypatch.setenv("OPCOES_PG_SCHEMA", app_schema)
     monkeypatch.setenv("OPCOES_AUTH_SCHEMA", auth_schema)
+    monkeypatch.setenv("OPCOES_SHARED_SCHEMA", app_schema)
+    monkeypatch.setenv("OPCOES_AUTOMATION_SCHEMA", app_schema)
     monkeypatch.setenv("OPCOES_SKIP_PRODUCTION_CHECKS", "1")
-    yield
-
-    if _POSTGRES_TEST_DSN:
-        _cleanup_test_schemas(
-            dsn=_POSTGRES_TEST_DSN,
-            schema_names=(app_schema, auth_schema),
-        )
+    try:
+        if _POSTGRES_TEST_DSN and "requires_postgres" in request.keywords:
+            _prepare_test_schemas(
+                dsn=_POSTGRES_TEST_DSN,
+                schema_names=(app_schema, auth_schema),
+            )
+        yield
+    finally:
+        if _POSTGRES_TEST_DSN:
+            _cleanup_test_schemas(
+                dsn=_POSTGRES_TEST_DSN,
+                schema_names=(app_schema, auth_schema),
+            )
 
 
 @pytest.fixture

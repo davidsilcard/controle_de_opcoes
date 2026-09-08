@@ -87,7 +87,9 @@ def test_covered_call_audit_flags_probable_duplicate() -> None:
     )
 
     assert any(issue.code == "DUPLICIDADE_PROVAVEL" for issue in issues)
-    assert any(issue.code == "VALIDACAO" and issue.position_id == 49 for issue in issues)
+    assert any(
+        issue.code == "VALIDACAO" and issue.position_id == 49 for issue in issues
+    )
 
 
 def test_covered_call_audit_flags_exercise_without_stock_event() -> None:
@@ -273,7 +275,9 @@ def test_covered_call_exercise_without_confirmed_date_is_blocked() -> None:
     app.testing = True
     client = app.test_client()
 
-    res = client.post("/finance/callaway", data={"position_id": str(pos_id), "date": ""})
+    res = client.post(
+        "/finance/callaway", data={"position_id": str(pos_id), "date": ""}
+    )
 
     assert res.status_code in (302, 303)
     assert "holding_error=" in (res.headers.get("Location") or "")
@@ -329,14 +333,21 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
     assert len(stock_rows) == 1
     stock = stock_rows[0]
     assert stock["fees"] == 1.25
-    assert stock["realized_pl"] == pytest.approx(1470.75)
+    assert stock["realized_pl"] == pytest.approx(1472.0)
+    assert stock["pl"] == pytest.approx(1470.75)
     ledger = finance.get_ledger_sums_by_position()
-    assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
-    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
+    assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(
+        1470.75
+    )
+    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(
+        18054.75
+    )
 
 
 @pytest.mark.requires_postgres
-def test_covered_call_fee_repair_updates_legacy_cash_and_event_without_changing_tax_result() -> None:
+def test_covered_call_fee_repair_updates_legacy_cash_and_event_without_changing_tax_result() -> (
+    None
+):
     _ensure_snapshot_tables()
     upsert_holding(
         ticker="GGBR4",
@@ -407,8 +418,16 @@ def test_covered_call_fee_repair_updates_legacy_cash_and_event_without_changing_
     assert report["applied"] is True
     assert list_holding_events(related_position_id=call_id)[0]["fees"] == 1.25
     ledger = finance.get_ledger_sums_by_position()
-    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
-    assert portfolio.get_position(stock["id"])["realized_pl"] == pytest.approx(1470.75)
+    assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(
+        18054.75
+    )
+    repaired_stock = portfolio.get_position(stock["id"])
+    assert repaired_stock["fees"] == 1.25
+    assert repaired_stock["realized_pl"] == pytest.approx(1472.0)
+    assert repaired_stock["pl"] == pytest.approx(1470.75)
+    assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(
+        1470.75
+    )
 
 
 def test_covered_call_exercise_rejects_missing_sale_fees() -> None:
@@ -455,7 +474,9 @@ def test_covered_call_expiration_without_confirmed_date_is_blocked() -> None:
 
 
 @pytest.mark.requires_postgres
-def test_covered_call_page_uses_confirmation_modals_for_expiration_and_exercise() -> None:
+def test_covered_call_page_uses_confirmation_modals_for_expiration_and_exercise() -> (
+    None
+):
     _ensure_snapshot_tables()
     upsert_holding(
         ticker="GGBR4",

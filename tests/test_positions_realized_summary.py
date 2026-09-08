@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 import pytest
 
 from opcoes import portfolio
 from opcoes.web import create_app
 
 pytestmark = pytest.mark.requires_postgres
+
+
+class _TableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._row: list[str] = []
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.tables.append([])
+        elif tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"}:
+            self._cell = []
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag):
+        if tag in {"td", "th"} and self._cell is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "tr" and self.tables:
+            self.tables[-1].append(self._row)
 
 
 def _close_position(position_id: int, *, exit_date: str, exit_price: float) -> None:
@@ -70,8 +99,52 @@ def test_positions_page_shows_realized_results_by_month_and_year() -> None:
     assert "03/2026" in html
     assert "2026" in html
     assert "R$ 150.00" in html
-    assert "R$ 200.00" in html
-    assert "R$ -50.00" in html
-    assert "PETR4" in html
-    assert "VALE3" in html
 
+    parsed = _TableParser()
+    parsed.feed(html)
+    by_month = next(table for table in parsed.tables if table[0][0] == "Mês")
+    assert ["03/2026", "2", "150.00", "0.00", "150.00"] in by_month
+    assert ["02/2026", "1", "10.00", "0.00", "10.00"] in by_month
+    by_year = next(table for table in parsed.tables if table[0][0] == "Ano")
+    assert ["2026", "3", "160.00", "0.00", "160.00"] in by_year
+
+    details = next(
+        table
+        for table in parsed.tables
+        if table[0]
+        == [
+            "Saída",
+            "Ticker",
+            "Ativo",
+            "Estratégia",
+            "Motivo",
+            "Qtd",
+            "Bruto",
+            "Taxas",
+            "Fiscal",
+        ]
+    )
+    assert details[1:] == [
+        [
+            "2026-03-15",
+            "VALE3",
+            "VALE3",
+            "ranking",
+            "-",
+            "50",
+            "-50.00",
+            "0.00",
+            "-50.00",
+        ],
+        [
+            "2026-03-10",
+            "PETR4",
+            "PETR4",
+            "ranking",
+            "-",
+            "100",
+            "200.00",
+            "0.00",
+            "200.00",
+        ],
+    ]

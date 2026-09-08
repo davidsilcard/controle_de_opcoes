@@ -3,6 +3,15 @@
 Aplicação para controle de estratégias com opções, com foco didático para cliente leigo.
 Arquitetura operacional consolidada em **PostgreSQL** para manter histórico único e consistente.
 
+## Continuidade da manutenção
+
+Antes de alterar a aplicação, leia o [guia de manutenção](docs/guia-manutencao.md),
+o [contrato funcional](docs/contrato-funcional-atual.md) e o status do
+[plano mestre](docs/plano-mestre-evolucao-seguranca.md). O `AGENTS.md` orienta novos
+chats a seguir esses documentos e verificar Git/CI/VPS antes de confiar no histórico.
+Decisões duráveis ficam no guia; evidências e pendências ficam no plano. A documentação
+é atualizada junto das alterações, sem guardar credenciais ou dados financeiros.
+
 ## Pré-requisitos
 
 - Python 3.12+
@@ -1183,6 +1192,10 @@ deploy\scripts\release-check.ps1
 
 A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e os remove ao final. O contrato atual das telas, partials, CLI e Edge está em [docs/contrato-funcional-atual.md](docs/contrato-funcional-atual.md).
 
+Use somente banco descartável para testes, nunca o banco da VPS. A fixture prepara
+os schemas antes dos testes PostgreSQL e isola também configurações compartilhadas
+e de automação; a suíte não depende de outro teste ter inicializado o banco.
+
 Os resultados da suíte ficam no artefato `pytest-results` do GitHub Actions, inclusive
 quando há falhas. Antes do deploy, confirme que os testes PostgreSQL e o smoke Docker
 executaram com sucesso no commit que será publicado; etapas ignoradas não contam como validação.
@@ -1210,6 +1223,12 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 ```
 
 ## Melhorias recentes
+
+- Expiração de PUT/CALL agora grava encerramento e efeitos financeiros em uma única
+  transação, com bloqueio da posição. Falha na gravação financeira reverte também o
+  encerramento; repetição não duplica efeitos. Não há reparo automático do histórico.
+- Regras de manutenção e continuidade entre chats estão versionadas em `AGENTS.md`
+  e `docs/guia-manutencao.md`, com pendências registradas no plano mestre.
 
 Plano e critérios de aceitação da estabilização: [docs/plano-estabilizacao-auditoria.md](docs/plano-estabilizacao-auditoria.md). Esta primeira etapa não executa reparo financeiro histórico nem migração em lote.
 

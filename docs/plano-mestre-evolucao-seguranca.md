@@ -4,6 +4,10 @@ Status: execução autorizada em 2026-09-04. Entrega 0 em andamento: os commits 
 criam CI PostgreSQL, limpeza de schemas temporários, release check, contrato funcional e
 inventário assinado somente leitura; os gates de banco real e E2E continuam pendentes.
 
+Continuidade entre chats: ler [guia de manutenção](guia-manutencao.md) e o registro
+da seção 13 antes de retomar. A memória externa serve como índice, não como prova
+do estado atual da aplicação.
+
 Data-base da revisão: 2026-09-04.
 
 Este é o plano mestre de evolução da aplicação. O documento
@@ -709,8 +713,11 @@ Endpoints auxiliares também fazem parte do contrato:
 - `/positions/partial/live`;
 - `/live-market/bootstrap`.
 
-Sem `HX-Request`, um endpoint partial retorna/redireciona para página completa. A
-linha de base também congela a CLI: nomes, opções, códigos de saída e efeitos de
+Contrato-alvo de degradação: sem `HX-Request`, um endpoint partial deverá
+retornar/redirecionar para página completa. Isso ainda não está implementado em
+todas as rotas (por exemplo, `/partial/ranking` retorna o fragmento diretamente).
+Não tratar esse objetivo como comportamento já entregue. A linha de base também
+congela a CLI: nomes, opções, códigos de saída e efeitos de
 `position`, `scrape`, `report`, `snapshot`, `fundamentus`, `tax`, `user`,
 `service-run`, `db` e `repair`. A Edge congela `/health`, cotações, busca, métricas,
 preview, ordens, token e WebSocket antes da introdução de escopos.
@@ -849,3 +856,45 @@ Não iniciar pela reorganização visual. A sequência inicial deve ser:
 Depois dessas cinco entregas, a modularização e a nova experiência visual poderão
 usar uma base confiável. A execução deve ocorrer uma entrega por vez, com revisão do
 plano e autorização antes de qualquer migração ou alteração financeira.
+
+## 13. Registro de continuidade
+
+### 2026-09-08 — CI, expiração atômica e regras entre chats
+
+Recorte autorizado: corrigir a validação PostgreSQL, conter a gravação parcial na
+expiração de opções e documentar práticas duráveis. Não executar migração nem reparo
+de valores históricos. A contenção de atomicidade antecipa um item da Entrega 2 por
+risco concreto; não significa concluir essa entrega ou pular backup/restore.
+
+Decisões e evidências de código:
+
+- CI conserva relatório JUnit e expõe falhas em anotações. A execução `34232572189`
+  revelou dez falhas PostgreSQL antes não observadas na suíte local sem banco.
+- Corrigir fixtures incompatíveis com guards de Ranking e identidade protegida,
+  sem flexibilizar as regras; afirmar estado persistido, rejeição e ledger.
+- Preparar schemas temporários antes de cada teste PostgreSQL e isolar configuração
+  compartilhada/automação; não executar testes no banco financeiro da VPS.
+- Corrigir expectativas de bruto/líquido e de células HTML; testar shell/partial
+  do Ranking na camada correta, preservando cache, invalidação e isolamento.
+- `/finance/expire` passa a reler/bloquear posição e gravar encerramento e efeitos
+  financeiros na mesma transação. Regressão em `tests/test_expiration_atomicity.py`
+  cobre PUT/CALL, real/simulado, repetição, data inválida, rollback com nova tentativa,
+  duas requisições concorrentes e isolamento entre usuários com sessões assinadas.
+- `AGENTS.md` exige leitura do guia e deste status em novos chats. README aponta para
+  as referências versionadas; práticas reutilizáveis não ficam só na conversa.
+
+Gate desta entrega: executar a suíte integral com PostgreSQL e smoke Docker na CI
+do SHA publicado; validar o deploy apenas pelo script oficial. Os testes locais com
+skips não encerram esse gate. Nenhuma migração ou correção financeira está incluída.
+
+Pendências que não podem desaparecer em uma troca de chat:
+
+1. Concluir a evidência funcional autenticada por estratégia, além de HTTP/login.
+2. Validar backup protegido fora da VPS e restauração em ambiente descartável.
+3. Evoluir inventário para leitura coerente e reconciliação de valores conforme plano;
+   HMAC de estrutura/contagens sozinho não atende recuperação nem integridade financeira.
+4. Prosseguir com migrações, tipos exatos, demais transações/idempotência e ledger
+   rastreável, uma entrega com seu gate por vez.
+
+Antes de qualquer nova publicação, conferir CI, Git e VPS ao vivo. Não assumir que
+um SHA anotado na conversa continua sendo a versão publicada.

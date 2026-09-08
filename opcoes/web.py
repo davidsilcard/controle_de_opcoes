@@ -1774,72 +1774,74 @@ def create_app() -> Flask:
         parsed_date = _parse_form_date(form.get("date"))
         date = parsed_date or datetime.date.today().isoformat()
 
-        pos = get_position(position_id)
-        if not pos:
-            return redirect(url_for("positions"))
+        with db_transaction() as conn:
+            pos = get_position(position_id, conn=conn, for_update=True)
+            if not pos:
+                return redirect(url_for("positions"))
 
-        ticker = pos.get("ticker")
-        underlying = (pos.get("underlying") or "").strip().upper()
-        opt_type = infer_option_type(ticker)
+            ticker = pos.get("ticker")
+            underlying = (pos.get("underlying") or "").strip().upper()
+            opt_type = infer_option_type(ticker)
 
-        if not underlying or (ticker and (str(ticker).strip().upper() == underlying)):
-            return redirect(url_for("positions"))
+            if not underlying or (ticker and (str(ticker).strip().upper() == underlying)):
+                return redirect(url_for("positions"))
 
-        if (pos.get("status") or "").strip().lower() != "open":
-            if opt_type == "PUT":
+            if (pos.get("status") or "").strip().lower() != "open":
+                if opt_type == "PUT":
+                    return redirect(
+                        url_for("cash_covered_put", underlying=underlying)
+                        if underlying
+                        else url_for("cash_covered_put")
+                    )
+                if opt_type == "CALL":
+                    return redirect(
+                        url_for("covered_call", underlying=underlying)
+                        if underlying
+                        else url_for("covered_call")
+                    )
+                return redirect(url_for("positions"))
+
+            if opt_type not in {"PUT", "CALL"}:
+                return redirect(url_for("positions"))
+            if (
+                opt_type == "PUT"
+                and (pos.get("strategy_tag") or "").strip().lower() == "cash_put"
+                and not parsed_date
+            ):
                 return redirect(
-                    url_for("cash_covered_put", underlying=underlying)
-                    if underlying
-                    else url_for("cash_covered_put")
+                    url_for(
+                        "cash_covered_put",
+                        underlying=underlying,
+                        position_error=(
+                            "Nao foi possivel confirmar o vencimento da PUT. "
+                            "A expiracao foi bloqueada para evitar fechamento na data errada."
+                        ),
+                    )
                 )
-            if opt_type == "CALL":
+            if (
+                opt_type == "CALL"
+                and (pos.get("strategy_tag") or "").strip().lower() == "covered_call"
+                and not parsed_date
+            ):
                 return redirect(
-                    url_for("covered_call", underlying=underlying)
-                    if underlying
-                    else url_for("covered_call")
+                    url_for(
+                        "covered_call",
+                        underlying=underlying,
+                        holding_error=(
+                            "Nao foi possivel confirmar o vencimento da CALL. "
+                            "A expiracao foi bloqueada para evitar fechamento na data errada."
+                        ),
+                    )
                 )
-            return redirect(url_for("positions"))
 
-        if opt_type not in {"PUT", "CALL"}:
-            return redirect(url_for("positions"))
-        if (
-            opt_type == "PUT"
-            and (pos.get("strategy_tag") or "").strip().lower() == "cash_put"
-            and not parsed_date
-        ):
-            return redirect(
-                url_for(
-                    "cash_covered_put",
-                    underlying=underlying,
-                    position_error=(
-                        "Nao foi possivel confirmar o vencimento da PUT. "
-                        "A expiracao foi bloqueada para evitar fechamento na data errada."
-                    ),
-                )
+            close_position(
+                position_id=position_id,
+                exit_date=date,
+                exit_price=0.0,
+                exit_reason="Expiração",
+                conn=conn,
             )
-        if (
-            opt_type == "CALL"
-            and (pos.get("strategy_tag") or "").strip().lower() == "covered_call"
-            and not parsed_date
-        ):
-            return redirect(
-                url_for(
-                    "covered_call",
-                    underlying=underlying,
-                    holding_error=(
-                        "Nao foi possivel confirmar o vencimento da CALL. "
-                        "A expiracao foi bloqueada para evitar fechamento na data errada."
-                    ),
-                )
-            )
-
-        close_position(
-            position_id=position_id,
-            exit_date=date,
-            exit_price=0.0,
-            exit_reason="Expiração",
-        )
-        finance.sync_position_closure_effects(position_id=position_id)
+            finance.sync_position_closure_effects(position_id=position_id, conn=conn)
 
         if opt_type == "PUT":
             return redirect(

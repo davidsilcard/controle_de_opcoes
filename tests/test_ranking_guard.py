@@ -109,8 +109,8 @@ def test_ranking_web_add_records_buy_automatically() -> None:
     assert txs[0].amount == -316.40
 
 
-@pytest.mark.requires_postgres
-def test_ranking_update_keeps_buy_idempotent() -> None:
+@pytest.fixture
+def ranking_position_id() -> int:
     _ensure_snapshot_tables()
     pos_id = portfolio.add_position(
         ticker="KLBNK171",
@@ -124,10 +124,12 @@ def test_ranking_update_keeps_buy_idempotent() -> None:
         strategy_tag="ranking",
     )
 
-    app = create_app()
-    app.testing = True
-    client = app.test_client()
-    payload = {
+    finance.sync_position_closure_effects(position_id=pos_id)
+    return pos_id
+
+
+def _ranking_update_payload() -> dict[str, str]:
+    return {
         "ticker": "KLBNK171",
         "underlying": "KLBN11",
         "status": "open",
@@ -138,7 +140,7 @@ def test_ranking_update_keeps_buy_idempotent() -> None:
         "is_simulated": "0",
         "trade_date": "2026-05-29",
         "qty": "100",
-        "entry_price": "3.00",
+        "entry_price": "3.16",
         "fees": "0.50",
         "exit_date": "",
         "exit_price": "",
@@ -151,12 +153,58 @@ def test_ranking_update_keeps_buy_idempotent() -> None:
         "next": "/positions",
     }
 
-    res = client.post(f"/positions/update/{pos_id}", data=payload)
-    assert res.status_code in (302, 303)
-    res = client.post(f"/positions/update/{pos_id}", data=payload)
-    assert res.status_code in (302, 303)
+
+@pytest.mark.requires_postgres
+def test_ranking_update_keeps_buy_idempotent(ranking_position_id: int) -> None:
+    pos_id = ranking_position_id
+    before = [
+        tx for tx in finance.get_transactions(limit=50) if tx.position_id == pos_id
+    ]
+    assert len(before) == 1
+    assert before[0].type == finance.TransactionType.BUY
+    assert before[0].amount == pytest.approx(-316.40)
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    payload = _ranking_update_payload()
+
+    for _ in range(2):
+        res = client.post(f"/positions/update/{pos_id}", data=payload)
+        assert res.status_code in (302, 303)
+        assert "position_error=" not in res.location
+        position = portfolio.get_position(pos_id)
+        assert position is not None
+        assert position["status"] == "open"
+        assert position["entry_price"] == pytest.approx(3.16)
+        assert position["fees"] == pytest.approx(0.50)
 
     txs = [tx for tx in finance.get_transactions(limit=50) if tx.position_id == pos_id]
     assert len(txs) == 1
+    assert txs[0].id == before[0].id
     assert txs[0].type == finance.TransactionType.BUY
-    assert txs[0].amount == -300.50
+    assert txs[0].amount == pytest.approx(-316.50)
+
+
+@pytest.mark.requires_postgres
+def test_ranking_update_rejects_entry_price_change_without_mutation(
+    ranking_position_id: int,
+) -> None:
+    pos_id = ranking_position_id
+    before = portfolio.get_position(pos_id)
+    ledger_before = finance.get_transactions(limit=50)
+    assert before is not None
+    assert len([tx for tx in ledger_before if tx.position_id == pos_id]) == 1
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    payload = _ranking_update_payload()
+    payload["entry_price"] = "3.00"
+
+    response = client.post(f"/positions/update/{pos_id}", data=payload)
+
+    assert response.status_code in (302, 303)
+    assert "position_error=" in response.location
+    assert portfolio.get_position(pos_id) == before
+    assert finance.get_transactions(limit=50) == ledger_before

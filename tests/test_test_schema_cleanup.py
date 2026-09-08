@@ -73,3 +73,36 @@ def test_cleanup_test_schemas_refuses_non_test_schema(schema: str) -> None:
             schema_names=(schema,),
             connect_factory=lambda *_args, **_kwargs: _FakeConnection([]),
         )
+
+
+def test_prepare_test_schemas_bootstraps_only_generated_names() -> None:
+    connection = _FakeConnection([])
+    received: list[tuple[str, bool]] = []
+
+    def connect_factory(dsn: str, *, autocommit: bool) -> _FakeConnection:
+        received.append((dsn, autocommit))
+        return connection
+
+    conftest._prepare_test_schemas(
+        dsn="postgresql://test",
+        schema_names=("t_0123456789ab", "auth_0123456789", "t_0123456789ab"),
+        connect_factory=connect_factory,
+    )
+    assert received == [("postgresql://test", True)]
+    assert connection.cursor_instance.queries == [
+        ('CREATE SCHEMA IF NOT EXISTS "t_0123456789ab"', None),
+        ('CREATE SCHEMA IF NOT EXISTS "auth_0123456789"', None),
+    ]
+
+
+@pytest.mark.parametrize("schema", ("public", "admin", "t_invalid", "auth_bad"))
+def test_prepare_test_schemas_refuses_non_test_schema(schema: str) -> None:
+    def unexpected_connection(*_args, **_kwargs):
+        pytest.fail("Não deve conectar com schema inválido.")
+
+    with pytest.raises(RuntimeError, match="schema de teste inválido"):
+        conftest._prepare_test_schemas(
+            dsn="postgresql://test",
+            schema_names=(schema,),
+            connect_factory=unexpected_connection,
+        )
