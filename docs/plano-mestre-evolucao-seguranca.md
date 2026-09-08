@@ -936,3 +936,12 @@ Não houve mudança de permissões, configuração Git, migração ou alteraçã
 A VPS permaneceu em `5ff5ba5`; aprovação explícita do operador de deploy é a próxima
 decisão necessária. Não repetir com `root` nem mudar ownership para contornar o
 bloqueio. Após a decisão, revalidar a CI do SHA atual antes de publicar.
+
+Retomada em 2026-09-08: o usuário autorizou explicitamente executar esta atualização
+como `root`, mantendo permissões e configuração Git intactas. O bloqueio de
+autorização descrito acima está resolvido para esta publicação; isso não muda a
+regra geral nem autoriza reparo financeiro/migração. Revalidar a CI do SHA atual,
+executar somente `deploy/scripts/update-vps.sh`, aguardar seu código de saída e
+conferir containers, login público, health do Edge e hashes dos arquivos de runtime.
+O resultado da implantação precisa ser confirmado ao vivo; aprovação não equivale
+a deploy concluído.
