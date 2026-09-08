@@ -1183,6 +1183,10 @@ deploy\scripts\release-check.ps1
 
 A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e os remove ao final. O contrato atual das telas, partials, CLI e Edge está em [docs/contrato-funcional-atual.md](docs/contrato-funcional-atual.md).
 
+O deploy oficial possui lock exclusivo: se uma atualização já estiver em andamento, o
+segundo processo falha sem reconstruir imagens ou reiniciar containers. Aguarde o
+primeiro encerrar e execute novamente o mesmo comando versionado.
+
 Antes de uma migração, gere uma linha de base somente leitura. A chave não entra no
 arquivo: ela apenas assina o inventário de schemas, tabelas, constraints e volumes.
 

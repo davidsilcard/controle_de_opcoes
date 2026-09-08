@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/home/david/apps/controle_de_opcoes}"
 REMOTE="${REMOTE:-origin}"
 BRANCH="${BRANCH:-main}"
+DEPLOY_LOCK_FILE="${OPCOES_DEPLOY_LOCK_FILE:-/tmp/controle_de_opcoes-deploy.lock}"
 COMPOSE_HELPER="${COMPOSE_HELPER:-${APP_DIR}/deploy/scripts/opcoes-compose-vps.sh}"
 WEB_CHECK_URL="${WEB_CHECK_URL:-http://127.0.0.1:8000/login}"
 EDGE_CHECK_URL="${EDGE_CHECK_URL:-http://127.0.0.1:8011/health}"
@@ -14,6 +15,11 @@ DOCKER_MIN_FREE_KB="${DOCKER_MIN_FREE_KB:-5242880}"
 DOCKER_IMAGE_PRUNE_LABEL="${DOCKER_IMAGE_PRUNE_LABEL:-com.docker.compose.project=controle_de_opcoes}"
 
 cd "$APP_DIR"
+exec 9>"$DEPLOY_LOCK_FILE"
+if ! flock -n 9; then
+  echo "Outro deploy já está em execução. Aguarde a conclusão antes de tentar novamente." >&2
+  exit 75
+fi
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIGEST_BEFORE="$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')"
 

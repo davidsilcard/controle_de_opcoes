@@ -58,6 +58,9 @@ jobs:
       - name: Compile Python sources
         run: uv run python -m compileall -q opcoes tests
 
+      - name: Validate deployment script syntax
+        run: bash -n deploy/scripts/update-vps.sh
+
       - name: Check whitespace and new Python formatting
         shell: bash
         run: |
