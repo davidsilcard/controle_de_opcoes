@@ -1,8 +1,9 @@
 # Plano mestre de evolução, segurança de dados e funcionalidade
 
-Status: execução autorizada em 2026-09-04. Entrega 0 em andamento: os commits iniciais
-criam CI PostgreSQL, limpeza de schemas temporários, release check, contrato funcional e
-inventário assinado somente leitura; os gates de banco real e E2E continuam pendentes.
+Status: execução autorizada em 2026-09-04. Entrega 0 em andamento. Em 2026-09-08,
+a CI do commit `22bbdbf` aprovou a suíte completa PostgreSQL e o smoke Docker.
+Contrato funcional, release check e inventário assinado somente leitura existem;
+validação funcional autenticada completa e gates de backup/restore permanecem pendentes.
 
 Continuidade entre chats: ler [guia de manutenção](guia-manutencao.md) e o registro
 da seção 13 antes de retomar. A memória externa serve como índice, não como prova
@@ -917,3 +918,10 @@ O teste passa a representar a fronteira efetiva: somente o último IP, informado
 pelo proxy confiável, pode alimentar o bloqueio; prefixos forjados não mudam esse IP.
 Não foi alterado o runtime de proxy nem a VPS. O README registra a dependência e
 as fontes oficiais; acesso direto ao backend não está coberto por essa confiança.
+
+Checkpoint validado em 2026-09-08: [CI 34237642113](https://github.com/davidsilcard/controle_de_opcoes/actions/runs/34237642113)
+aprovada no commit `22bbdbf`, incluindo suíte integral PostgreSQL e build/smoke Docker.
+Não confundir esse resultado com E2E autenticado completo ou teste de restauração.
+Publicar somente SHA com sua própria CI verde pelo script oficial; confirmar a versão
+em execução na VPS ao vivo. Próximo recorte do plano: Entrega 1, proteção e restauração
+de backup em ambiente descartável, antes de migrações monetárias/ledger.
