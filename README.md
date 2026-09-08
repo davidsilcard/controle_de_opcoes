@@ -1212,6 +1212,10 @@ O deploy oficial possui lock exclusivo: se uma atualização já estiver em anda
 segundo processo falha sem reconstruir imagens ou reiniciar containers. Aguarde o
 primeiro encerrar e execute novamente o mesmo comando versionado.
 
+Se houver `Permission denied` no lock, confira o operador e a propriedade do arquivo
+antes de qualquer nova tentativa. Não apague o lock, altere permissões ou troque
+automaticamente para `root`; a política do usuário de deploy precisa estar aprovada.
+
 Antes de uma migração, gere uma linha de base somente leitura. A chave não entra no
 arquivo: ela apenas assina o inventário de schemas, tabelas, constraints e volumes.
 

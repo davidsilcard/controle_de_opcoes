@@ -113,6 +113,8 @@ globais. Bash de Git para Windows pode validar sintaxe quando o WSL não está i
 - Antes do deploy, verificar checkout/usuário operacional da VPS e alterações locais.
   Não forçar com `safe.directory`, `chmod`, `chown`, reset ou outro worktree. Se houver
   bloqueio, investigar a causa e pedir a decisão necessária.
+  Não inferir o operador apenas pelo dono de `.git`: divergência entre checkout,
+  script e lock exige decisão explícita, não troca automática para `root`.
 - Configuração oficial da VPS: `/etc/controle_de_opcoes/app.env`, carregada pelo helper
   `deploy/scripts/opcoes-compose-vps.sh`. Não criar outra fonte de segredos nem imprimir
   variáveis/`docker inspect` completo. Verificar presença sem mostrar o valor.

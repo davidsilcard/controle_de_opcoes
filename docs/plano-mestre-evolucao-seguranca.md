@@ -925,3 +925,14 @@ Não confundir esse resultado com E2E autenticado completo ou teste de restaura�
 Publicar somente SHA com sua própria CI verde pelo script oficial; confirmar a versão
 em execução na VPS ao vivo. Próximo recorte do plano: Entrega 1, proteção e restauração
 de backup em ambiente descartável, antes de migrações monetárias/ledger.
+
+Publicação bloqueada em 2026-09-08: a [CI 34237993687](https://github.com/davidsilcard/controle_de_opcoes/actions/runs/34237993687)
+aprovou também `e2d632b` (PostgreSQL e Docker). A tentativa de deploy como `david`
+parou na abertura de `/tmp/controle_de_opcoes-deploy.lock`, antes do pull/build.
+Verificação somente leitura: `.git` pertence a `david:david`, mas script e lock
+pertencem a `root:root`; lock modo 644, sem processo utilizando-o. A execução
+proposta como `root` foi rejeitada pela revisão de segurança e não iniciou.
+Não houve mudança de permissões, configuração Git, migração ou alteração financeira.
+A VPS permaneceu em `5ff5ba5`; aprovação explícita do operador de deploy é a próxima
+decisão necessária. Não repetir com `root` nem mudar ownership para contornar o
+bloqueio. Após a decisão, revalidar a CI do SHA atual antes de publicar.
