@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate application
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: opcoes
+          POSTGRES_USER: opcoes
+          POSTGRES_PASSWORD: opcoes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opcoes -d opcoes"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://opcoes:opcoes@localhost:5432/opcoes
+      OPCOES_SKIP_PRODUCTION_CHECKS: "1"
+      TZ: America/Sao_Paulo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q opcoes tests
+
+      - name: Check whitespace and changed Python formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_sha="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$base_sha" ]]; then
+            base_sha="$(git rev-parse HEAD~1)"
+          fi
+          git diff --check "$base_sha" "$GITHUB_SHA"
+          mapfile -t python_files < <(git diff --name-only "$base_sha" "$GITHUB_SHA" -- '*.py')
+          if (( ${#python_files[@]} > 0 )); then
+            uv run black --check "${python_files[@]}"
+          fi
+
+      - name: Run complete test suite against PostgreSQL
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q -ra | tee pytest.out
+          if grep -Fq "Teste requer PostgreSQL configurado" pytest.out; then
+            echo "A suíte PostgreSQL foi ignorada indevidamente." >&2
+            exit 1
+          fi
+
+      - name: Build and smoke-test the Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="opcoes-ci:${GITHUB_SHA}"
+          container="opcoes-ci-${GITHUB_RUN_ID}"
+          docker build --tag "$image" .
+          docker run --detach --rm --name "$container" --network host \
+            --env DATABASE_URL="$DATABASE_URL" \
+            --env OPCOES_SKIP_PRODUCTION_CHECKS=1 \
+            --env OPCOES_SECRET_KEY=ci-only-secret-key-with-32-characters \
+            --env OPCOES_AUTH_ENABLED=0 \
+            --env OPCOES_WEB_WORKERS=1 \
+            --env OPCOES_WEB_THREADS=1 \
+            --env OPCOES_PG_SCHEMA=ci_smoke \
+            --env OPCOES_AUTH_SCHEMA=ci_auth \
+            "$image"
+          cleanup() {
+            docker logs "$container" || true
+            docker rm --force "$container" || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --head http://127.0.0.1:8000/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "A aplicação não respondeu ao smoke test Docker." >&2
+          exit 1

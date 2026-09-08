@@ -1,8 +1,8 @@
 # Plano mestre de evolução, segurança de dados e funcionalidade
 
-Status: plano proposto para revisão; a execução ainda não está autorizada. Nenhuma
-alteração funcional ou migração deste documento deve começar sem autorização e sem
-iniciar a respectiva fase.
+Status: execução autorizada em 2026-09-04. Entrega 0 em andamento: este primeiro
+commit cria a base de CI PostgreSQL, limpeza de schemas temporários, release check e
+contrato funcional; os gates de banco real e E2E continuam pendentes nesta entrega.
 
 Data-base da revisão: 2026-09-04.
 

@@ -1175,6 +1175,14 @@ uv run pytest -q
 Observação: testes marcados com `requires_postgres` são pulados automaticamente quando não há `DATABASE_URL`/`POSTGRES_*` configurado.
 Artefatos locais de apoio, como `.agents/` e diretórios temporários de teste, não fazem parte do versionamento padrão do projeto.
 
+Antes de publicar mudança que toque código, rode o release check com PostgreSQL configurado. Ele falha se a suíte PostgreSQL for ignorada:
+
+```powershell
+deploy\scripts\release-check.ps1
+```
+
+A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e os remove ao final. O contrato atual das telas, partials, CLI e Edge está em [docs/contrato-funcional-atual.md](docs/contrato-funcional-atual.md).
+
 E2E opcional:
 
 ```bash
