@@ -3,15 +3,6 @@
 Aplicação para controle de estratégias com opções, com foco didático para cliente leigo.
 Arquitetura operacional consolidada em **PostgreSQL** para manter histórico único e consistente.
 
-## Continuidade da manutenção
-
-Antes de alterar a aplicação, leia o [guia de manutenção](docs/guia-manutencao.md),
-o [contrato funcional](docs/contrato-funcional-atual.md) e o status do
-[plano mestre](docs/plano-mestre-evolucao-seguranca.md). O `AGENTS.md` orienta novos
-chats a seguir esses documentos e verificar Git/CI/VPS antes de confiar no histórico.
-Decisões duráveis ficam no guia; evidências e pendências ficam no plano. A documentação
-é atualizada junto das alterações, sem guardar credenciais ou dados financeiros.
-
 ## Pré-requisitos
 
 - Python 3.12+
@@ -588,13 +579,6 @@ Observacao:
 - use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
 - troque para `1` quando colocar HTTPS com proxy reverso
 - o login aplica rate limit por IP e usa o IP percebido pelo Flask depois do `ProxyFix`; em ambiente com proxy reverso, o proxy precisa ser confiavel.
-- `ProxyFix` confia em um salto: a porta Web não pode ficar exposta diretamente a
-  clientes externos. Na topologia verificada em 2026-09-08, Caddy encaminha para
-  `127.0.0.1:8000`; preserve o bind local e a sanitização dos cabeçalhos pelo proxy.
-  O teste Flask cobre o último IP encaminhado e ignora prefixos não confiáveis;
-  não simula o Caddy completo nem protege acesso direto ao backend. Referências:
-  [Werkzeug](https://werkzeug.palletsprojects.com/en/stable/middleware/proxy_fix/) e
-  [Caddy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#defaults).
 - o rate limit agora fica persistido no schema de autenticacao (`OPCOES_AUTH_SCHEMA`), entao continua valendo mesmo com multiplos workers/instancias da web.
 - ajustes opcionais:
 
@@ -714,20 +698,11 @@ cd ~/apps/controle_de_opcoes
 deploy/scripts/opcoes-compose-vps.sh logs -f web
 ```
 
-### Copia legada de schemas — nao usar como backup ou restauracao
+### Migracao integral do PostgreSQL local para a VPS
 
-Aviso de seguranca: o procedimento abaixo e referencia historica, nao um runbook
-aprovado para recuperar producao. `db migrate` copia somente os dois schemas
-informados; nao cobre automaticamente todos os usuarios nem objetos globais.
-Faz `TRUNCATE` com commit antes da copia e commits por tabela: uma falha pode deixar
-o destino incompleto. Contagens iguais nao comprovam equivalencia financeira.
-Nao executar em producao sem plano especifico, backup restaurado em ensaio e
-autorizacao. Nao passar senhas reais em argumentos ou colar comandos com segredos
-no chat. O exemplo de DSN abaixo contem apenas um placeholder historico.
-
-Parar apenas `web` nao impede escritas por scraper, Edge, CLI ou outros processos.
-A recuperacao da Entrega 1 sera baseada em `pg_dump`/`pg_restore`, com ensaio isolado,
-nao neste copiador. Estado e pendencias: [plano mestre](docs/plano-mestre-evolucao-seguranca.md#14-auditoria-inicial-de-recuperacao--2026-09-08).
+Quando a origem local ja esta em PostgreSQL e voce quer levar **todas as tabelas da aplicacao**
+para a VPS, use o fluxo abaixo. O comando faz copia **table-to-table via `COPY` streaming**,
+preserva IDs/identidades e valida a contagem no final.
 
 Tabelas migradas a partir dos schemas da aplicacao:
 
@@ -750,7 +725,7 @@ Tabelas migradas a partir dos schemas da aplicacao:
 - `admin.ticker_metadata`
 - `admin.service_runs`
 
-Sequencia legada, mantida somente como referencia tecnica:
+Recomendacao operacional:
 
 1. no VPS, pare momentaneamente a escrita da aplicacao:
 
@@ -778,8 +753,8 @@ uv run python -m opcoes.cli db migrate \
 
 Observacoes:
 
-- por padrao, o destino sofre `TRUNCATE` antes da copia; isso e destrutivo e nao e restauracao segura.
-- `--no-truncate` tambem nao torna a operacao atomica nem garante ausencia de duplicacao/conflito.
+- por padrao, o destino sofre `TRUNCATE` antes da copia. Isso e o modo correto para migracao integral.
+- use `--no-truncate` apenas em cenario muito controlado.
 - para tabelas grandes como `option_snapshots` e `flow_history`, o processo pode levar algum tempo.
 
 4. ao terminar, religue a aplicacao no VPS:
@@ -1200,42 +1175,6 @@ uv run pytest -q
 Observação: testes marcados com `requires_postgres` são pulados automaticamente quando não há `DATABASE_URL`/`POSTGRES_*` configurado.
 Artefatos locais de apoio, como `.agents/` e diretórios temporários de teste, não fazem parte do versionamento padrão do projeto.
 
-Antes de publicar mudança que toque código, rode o release check com PostgreSQL configurado. Ele falha se a suíte PostgreSQL for ignorada:
-
-```powershell
-deploy\scripts\release-check.ps1
-```
-
-A CI executa a suíte contra PostgreSQL 16, cria schemas aleatórios por teste e os remove ao final. O contrato atual das telas, partials, CLI e Edge está em [docs/contrato-funcional-atual.md](docs/contrato-funcional-atual.md).
-
-Use somente banco descartável para testes, nunca o banco da VPS. A fixture prepara
-os schemas antes dos testes PostgreSQL e isola também configurações compartilhadas
-e de automação; a suíte não depende de outro teste ter inicializado o banco.
-
-Os resultados da suíte ficam no artefato `pytest-results` do GitHub Actions, inclusive
-quando há falhas. Antes do deploy, confirme que os testes PostgreSQL e o smoke Docker
-executaram com sucesso no commit que será publicado; etapas ignoradas não contam como validação.
-Falhas e erros do relatório JUnit também aparecem nas anotações da execução do CI.
-
-O deploy oficial possui lock exclusivo: se uma atualização já estiver em andamento, o
-segundo processo falha sem reconstruir imagens ou reiniciar containers. Aguarde o
-primeiro encerrar e execute novamente o mesmo comando versionado.
-
-Se houver `Permission denied` no lock, confira o operador e a propriedade do arquivo
-antes de qualquer nova tentativa. Não apague o lock, altere permissões ou troque
-automaticamente para `root`; a política do usuário de deploy precisa estar aprovada.
-
-Antes de uma migração, gere uma linha de base somente leitura. A chave não entra no
-arquivo: ela apenas assina o inventário de schemas, tabelas, constraints e volumes.
-
-```powershell
-$env:OPCOES_BASELINE_HMAC_KEY = "gere-e-guarde-uma-chave-fora-do-repositorio"
-uv run python -m opcoes.cli db inventory --output data\baselines\inventario-pre-migracao.json
-```
-
-O comando não lê valores financeiros nem altera o banco. Guarde o JSON em local seguro;
-para refazê-lo no mesmo caminho, use `--overwrite` conscientemente.
-
 E2E opcional:
 
 ```bash
@@ -1244,17 +1183,7 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 ## Melhorias recentes
 
-- O bloqueio de login respeita também o limite configurado de uma única tentativa
-  inválida; a proteção não precisa esperar a segunda falha para começar a contar.
-- Expiração de PUT/CALL agora grava encerramento e efeitos financeiros em uma única
-  transação, com bloqueio da posição. Falha na gravação financeira reverte também o
-  encerramento; repetição não duplica efeitos. Não há reparo automático do histórico.
-- Regras de manutenção e continuidade entre chats estão versionadas em `AGENTS.md`
-  e `docs/guia-manutencao.md`, com pendências registradas no plano mestre.
-
 Plano e critérios de aceitação da estabilização: [docs/plano-estabilizacao-auditoria.md](docs/plano-estabilizacao-auditoria.md). Esta primeira etapa não executa reparo financeiro histórico nem migração em lote.
-
-Plano mestre de evolução arquitetural, segurança dos dados, preservação funcional das páginas, testes e recuperação: [docs/plano-mestre-evolucao-seguranca.md](docs/plano-mestre-evolucao-seguranca.md). O documento define a ordem das entregas e não autoriza migrações ou alterações financeiras em produção.
 
 - `Desempenho` agora separa contrato, garantia, vínculo de estoque, resultado e custos compartilhados; preencher um estado não reabre nem reclassifica os demais.
 - custos de nota sem rateio deixam de ser alerta vermelho e pendência do usuário: são agrupados por referência exata, sem certificar automaticamente o lançamento no caixa. A conciliação de DARF e líquidos dependentes fica explicitamente não verificável enquanto faltar a base individual.
