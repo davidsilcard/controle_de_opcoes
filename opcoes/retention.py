@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import calendar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -11,11 +12,9 @@ from .db_health import resolve_postgres_target
 
 @dataclass(frozen=True)
 class RetentionPolicy:
-    option_snapshot_days: int = 120
-    option_expired_grace_days: int = 30
+    option_expired_grace_months: int = 3
     underlying_snapshot_days: int = 400
-    iv_history_days: int = 240
-    iv_expired_grace_days: int = 30
+    iv_expired_grace_months: int = 3
     flow_history_days: int = 60
     ranking_days: int = 60
     fundamentus_days: int = 365
@@ -124,6 +123,19 @@ def _safe_days(value: int) -> int:
     return max(int(value or 0), 0)
 
 
+def _safe_months(value: int) -> int:
+    return max(int(value or 0), 0)
+
+
+def _subtract_calendar_months(value: dt.date, months: int) -> dt.date:
+    """Preserva a data no calendário, ajustando apenas o último dia do mês."""
+
+    total_months = (value.year * 12 + value.month - 1) - _safe_months(months)
+    year, month_zero_based = divmod(total_months, 12)
+    month = month_zero_based + 1
+    return dt.date(year, month, min(value.day, calendar.monthrange(year, month)[1]))
+
+
 def _count_or_delete(
     conn: _DbConn,
     *,
@@ -156,20 +168,14 @@ def apply_retention(
     policy = policy or RetentionPolicy()
     today = today or dt.date.today()
 
-    option_cutoff = (
-        today - dt.timedelta(days=_safe_days(policy.option_snapshot_days))
-    ).isoformat()
-    option_expired_cutoff = (
-        today - dt.timedelta(days=_safe_days(policy.option_expired_grace_days))
+    option_expired_cutoff = _subtract_calendar_months(
+        today, policy.option_expired_grace_months
     ).isoformat()
     underlying_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.underlying_snapshot_days))
     ).isoformat()
-    iv_cutoff = (
-        today - dt.timedelta(days=_safe_days(policy.iv_history_days))
-    ).isoformat()
-    iv_expired_cutoff = (
-        today - dt.timedelta(days=_safe_days(policy.iv_expired_grace_days))
+    iv_expired_cutoff = _subtract_calendar_months(
+        today, policy.iv_expired_grace_months
     ).isoformat()
     flow_cutoff = (
         today - dt.timedelta(days=_safe_days(policy.flow_history_days))
@@ -221,30 +227,19 @@ def apply_retention(
             )
 
         if _table_exists(conn, "option_snapshots"):
-            removed["option_snapshots_age"] = _count_or_delete(
-                conn,
-                table="option_snapshots",
-                where_sql="snapshot_date < ?",
-                params=(option_cutoff,),
-                dry_run=dry_run,
-            )
             removed["option_snapshots_expired"] = _count_or_delete(
                 conn,
                 table="option_snapshots",
                 where_sql="""
-                    snapshot_date >= ?
-                    AND snapshot_date < ?
-                    AND vencimento IS NOT NULL
+                    vencimento IS NOT NULL
                     AND BTRIM(vencimento) <> ''
                     AND vencimento ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
                     AND to_date(vencimento, 'DD/MM/YYYY') < ?
                 """,
-                params=(option_cutoff, today_iso, option_expired_cutoff),
+                params=(option_expired_cutoff,),
                 dry_run=dry_run,
             )
-            removed["option_snapshots"] = (
-                removed["option_snapshots_age"] + removed["option_snapshots_expired"]
-            )
+            removed["option_snapshots"] = removed["option_snapshots_expired"]
 
         if _table_exists(conn, "underlying_snapshots"):
             removed["underlying_snapshots"] = _count_or_delete(
@@ -256,30 +251,19 @@ def apply_retention(
             )
 
         if _table_exists(conn, "iv_history"):
-            removed["iv_history_age"] = _count_or_delete(
-                conn,
-                table="iv_history",
-                where_sql="snapshot_date < ?",
-                params=(iv_cutoff,),
-                dry_run=dry_run,
-            )
             removed["iv_history_expired"] = _count_or_delete(
                 conn,
                 table="iv_history",
                 where_sql="""
-                    snapshot_date >= ?
-                    AND snapshot_date < ?
-                    AND vencimento IS NOT NULL
+                    vencimento IS NOT NULL
                     AND BTRIM(vencimento) <> ''
                     AND vencimento ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
                     AND to_date(vencimento, 'DD/MM/YYYY') < ?
                 """,
-                params=(iv_cutoff, today_iso, iv_expired_cutoff),
+                params=(iv_expired_cutoff,),
                 dry_run=dry_run,
             )
-            removed["iv_history"] = (
-                removed["iv_history_age"] + removed["iv_history_expired"]
-            )
+            removed["iv_history"] = removed["iv_history_expired"]
 
         if _table_exists(conn, "flow_history"):
             removed["flow_history"] = _count_or_delete(
@@ -313,22 +297,20 @@ def apply_retention(
             "dry_run": bool(dry_run),
             "today": today_iso,
             "policy": {
-                "option_snapshot_days": _safe_days(policy.option_snapshot_days),
-                "option_expired_grace_days": _safe_days(
-                    policy.option_expired_grace_days
+                "option_expired_grace_months": _safe_months(
+                    policy.option_expired_grace_months
                 ),
                 "underlying_snapshot_days": _safe_days(policy.underlying_snapshot_days),
-                "iv_history_days": _safe_days(policy.iv_history_days),
-                "iv_expired_grace_days": _safe_days(policy.iv_expired_grace_days),
+                "iv_expired_grace_months": _safe_months(
+                    policy.iv_expired_grace_months
+                ),
                 "flow_history_days": _safe_days(policy.flow_history_days),
                 "ranking_days": _safe_days(policy.ranking_days),
                 "fundamentus_days": _safe_days(policy.fundamentus_days),
             },
             "cutoffs": {
-                "option_snapshot_before": option_cutoff,
                 "option_expired_before": option_expired_cutoff,
                 "underlying_snapshot_before": underlying_cutoff,
-                "iv_history_before": iv_cutoff,
                 "iv_expired_before": iv_expired_cutoff,
                 "flow_history_before": flow_cutoff,
                 "ranking_before": ranking_cutoff,

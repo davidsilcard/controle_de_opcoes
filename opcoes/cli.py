@@ -473,16 +473,10 @@ def parse_args() -> argparse.Namespace:
         help="Aplica retencao automatica dos dados de mercado, preservando dados do usuario e fiscais.",
     )
     rt.add_argument(
-        "--option-days",
+        "--option-expired-grace-months",
         type=int,
-        default=120,
-        help="Dias de retencao dos option_snapshots (default: 120).",
-    )
-    rt.add_argument(
-        "--option-expired-grace-days",
-        type=int,
-        default=30,
-        help="Dias de graca apos o vencimento para option_snapshots recentes (default: 30).",
+        default=3,
+        help="Meses-calendario apos vencimento para option_snapshots (default: 3).",
     )
     rt.add_argument(
         "--underlying-days",
@@ -491,16 +485,10 @@ def parse_args() -> argparse.Namespace:
         help="Dias de retencao dos underlying_snapshots para suportar HV longa (default: 400).",
     )
     rt.add_argument(
-        "--iv-days",
+        "--iv-expired-grace-months",
         type=int,
-        default=240,
-        help="Dias de retencao do iv_history (default: 240).",
-    )
-    rt.add_argument(
-        "--iv-expired-grace-days",
-        type=int,
-        default=30,
-        help="Dias de graca apos o vencimento para iv_history recente (default: 30).",
+        default=3,
+        help="Meses-calendario apos vencimento para iv_history (default: 3).",
     )
     rt.add_argument(
         "--flow-days",
@@ -1233,11 +1221,9 @@ def main() -> None:
     elif args.cmd == "retention":
         ref_today = _parse_trade_date(args.today) if args.today else None
         policy = RetentionPolicy(
-            option_snapshot_days=args.option_days,
-            option_expired_grace_days=args.option_expired_grace_days,
+            option_expired_grace_months=args.option_expired_grace_months,
             underlying_snapshot_days=args.underlying_days,
-            iv_history_days=args.iv_days,
-            iv_expired_grace_days=args.iv_expired_grace_days,
+            iv_expired_grace_months=args.iv_expired_grace_months,
             flow_history_days=args.flow_days,
             ranking_days=args.ranking_days,
             fundamentus_days=args.fundamentus_days,
@@ -1257,8 +1243,7 @@ def main() -> None:
         print("Janela automatica de limpeza:")
         print(
             "  - option_snapshots: "
-            f"{report['policy']['option_snapshot_days']} dias + "
-            f"{report['policy']['option_expired_grace_days']} dias apos vencimento"
+            f"{report['policy']['option_expired_grace_months']} meses-calendario apos vencimento"
         )
         print(
             "  - underlying_snapshots: "
@@ -1266,8 +1251,7 @@ def main() -> None:
         )
         print(
             "  - iv_history: "
-            f"{report['policy']['iv_history_days']} dias + "
-            f"{report['policy']['iv_expired_grace_days']} dias apos vencimento"
+            f"{report['policy']['iv_expired_grace_months']} meses-calendario apos vencimento"
         )
         print(f"  - flow_history: {report['policy']['flow_history_days']} dias")
         print(
@@ -1279,13 +1263,13 @@ def main() -> None:
         print(
             "  - option_snapshots: "
             f"{removed['option_snapshots']} "
-            f"(idade={removed['option_snapshots_age']}, vencidos={removed['option_snapshots_expired']})"
+            f"(vencidos={removed['option_snapshots_expired']})"
         )
         print(f"  - underlying_snapshots: {removed['underlying_snapshots']}")
         print(
             "  - iv_history: "
             f"{removed['iv_history']} "
-            f"(idade={removed['iv_history_age']}, vencidos={removed['iv_history_expired']})"
+            f"(vencidos={removed['iv_history_expired']})"
         )
         print(f"  - flow_history: {removed['flow_history']}")
         print(f"  - ranking_entries: {removed['ranking_entries']}")

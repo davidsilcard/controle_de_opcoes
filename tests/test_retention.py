@@ -111,14 +111,28 @@ def test_apply_retention_dry_run_reports_expected_counts(monkeypatch) -> None:
 
     assert report["dry_run"] is True
     assert report["today"] == "2026-04-01"
-    assert report["cutoffs"]["option_snapshot_before"] == "2025-12-02"
+    assert report["cutoffs"]["option_expired_before"] == "2026-01-01"
     assert report["cutoffs"]["underlying_snapshot_before"] == "2025-02-25"
-    assert report["removed"]["option_snapshots"] == 125
-    assert report["removed"]["iv_history"] == 19
+    assert report["removed"]["option_snapshots"] == 25
+    assert report["removed"]["iv_history"] == 4
     assert report["removed"]["fundamentus_snapshots"] == 7
     assert "positions" in report["preserved_forever"]
     assert fake.committed is False
     assert fake.closed is True
+
+
+def test_retention_uses_calendar_months_at_month_end(monkeypatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("opcoes.retention._connect", lambda db_path=None: fake)
+
+    report = apply_retention(
+        policy=RetentionPolicy(),
+        today=dt.date(2026, 5, 31),
+        dry_run=True,
+    )
+
+    assert report["cutoffs"]["option_expired_before"] == "2026-02-28"
+    assert report["cutoffs"]["iv_expired_before"] == "2026-02-28"
 
 
 def test_apply_retention_executes_commit_when_not_dry_run(monkeypatch) -> None:

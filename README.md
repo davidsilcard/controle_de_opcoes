@@ -843,7 +843,7 @@ O script faz este ciclo:
 3. exporta o snapshot consolidado para `data/opcoes_latest.csv`
 4. executa `fundamentus`
 5. executa `fundamentus-filter`
-6. aplica `retention` para remover market data envelhecida
+6. aplica `retention` para remover somente dados de mercado de opções vencidas há mais de três meses-calendário
 
 ## Runbook Rápido da VPS
 
@@ -1282,17 +1282,18 @@ uv run python -m opcoes.cli retention
 uv run python -m opcoes.cli retention --dry-run
 ```
 
-Politica padrao por tabela:
+Política padrão por tabela:
 
 - `positions`, `ledger`, `darf_months`, `settings`, `web_users`, `decisions`, `ticker_metadata` e `service_runs`: preservados para sempre.
-- `option_snapshots`: 120 dias de historico + 30 dias de graca apos vencimento recente.
+- `option_snapshots`: preservados até três meses-calendário após o vencimento. Sem vencimento válido, não são apagados automaticamente.
 - `underlying_snapshots`: 400 dias para suportar HV longa (ate 252 dias com folga).
-- `iv_history`: 240 dias + 30 dias de graca apos vencimento recente.
+- `iv_history`: preservado até três meses-calendário após o vencimento. Sem vencimento válido, não é apagado automaticamente.
 - `flow_history`: 60 dias.
 - `ranking_entries` e `ranking_runs`: 60 dias.
 - `fundamentus_*`: 365 dias.
 
 Observacoes:
 
-- a retencao limpa apenas dados de mercado e apoio operacional; nao toca nos dados fiscais nem nas operacoes do usuario.
+- a retenção limpa apenas dados de mercado e apoio operacional; não toca nos dados fiscais nem nas operações do usuário.
+- o plano de evolução para registros permanentes, correção rastreável e cadastro seguro está em `docs/plano-registro-permanente.md`.
 - o script `deploy/scripts/run_scrape_cycle.sh` agora aplica essa retencao ao final do ciclo agendado.
