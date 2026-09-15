@@ -1885,7 +1885,14 @@ def create_app() -> Flask:
 
     @app.post("/finance/delete/<int:tx_id>")
     def finance_delete(tx_id: int):
-        finance.delete_transaction(tx_id)
+        try:
+            finance.delete_transaction(
+                tx_id,
+                reason=request.form.get("void_reason") or "",
+                actor=getattr(g, "current_username", None),
+            )
+        except ValueError as exc:
+            return redirect(url_for("cash_covered_put", position_error=str(exc)))
         return redirect(url_for("cash_covered_put"))
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -3313,10 +3320,16 @@ def create_app() -> Flask:
 
     @app.post("/positions/delete/<int:position_id>")
     def delete_position_view(position_id: int):
-        delete_position(position_id=position_id)
-        return redirect(
-            _safe_next_url(request.form.get("next")) or url_for("positions")
-        )
+        next_url = _safe_next_url(request.form.get("next")) or url_for("positions")
+        try:
+            delete_position(
+                position_id=position_id,
+                reason=request.form.get("void_reason") or "",
+                actor=getattr(g, "current_username", None),
+            )
+        except ValueError as exc:
+            return redirect(_url_with_query(next_url, position_error=str(exc)))
+        return redirect(next_url)
 
     def _parse_form_float(value: str | None) -> float:
         if not value:

@@ -27,6 +27,7 @@ from .db_health import is_postgres_ready, run_db_check
 from .db_health import resolve_postgres_target
 from .db_migrate import clone_postgres_schema, migrate_postgres
 from .db_optimize import optimize_postgres_schema
+from .change_history import install_change_history
 from . import finance
 from .fundamentus import (
     FundamentusFilterConfig,
@@ -781,6 +782,10 @@ def parse_args() -> argparse.Namespace:
         "--no-analyze",
         action="store_true",
         help="Não executa ANALYZE após criar índices.",
+    )
+    db_history = dbs.add_parser(
+        "history-install",
+        help="Instala o histórico imutável de posições e razão no schema ativo.",
     )
     db_migrate = dbs.add_parser(
         "migrate",
@@ -1581,6 +1586,12 @@ def main() -> None:
                 for table in analyzed:
                     print(f"  - {table}")
             print("Optimize concluído.")
+        elif args.subcmd == "history-install":
+            try:
+                install_change_history()
+            except Exception as exc:
+                raise SystemExit(f"Falha ao instalar histórico imutável: {exc}") from exc
+            print("Histórico imutável instalado no schema ativo.")
         elif args.subcmd == "migrate":
             source_dsn = args.source_dsn
             if not source_dsn:

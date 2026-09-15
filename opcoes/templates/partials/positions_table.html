@@ -265,14 +265,20 @@
                   {% endif %}
                 </div>
                 <div>
+                  <input
+                    name="void_reason"
+                    class="form-control form-control-sm mb-1"
+                    maxlength="1000"
+                    placeholder="Motivo da anulação"
+                  >
                   <button
                     class="btn btn-outline-danger btn-sm"
                     type="submit"
                     formaction="/positions/delete/{{ pos.id }}"
                     formmethod="post"
-                    onclick="return confirm('Excluir posição {{ pos.ticker }}?');"
+                    onclick="return confirm('Anular posição {{ pos.ticker }}? O registro original continuará no histórico.');"
                   >
-                    Excluir
+                    Anular
                   </button>
                 </div>
               </td>

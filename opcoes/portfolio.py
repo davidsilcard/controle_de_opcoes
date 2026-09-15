@@ -8,6 +8,7 @@ from typing import Any, Iterable, List, Mapping, Optional
 from .config import (
     get_postgres_schema,
 )
+from .change_history import ensure_change_history, set_change_context
 from .db_health import resolve_postgres_target
 from .snapshot_repository import fetch_latest_option_snapshots
 from .utils import infer_option_type, parse_ptbr_number
@@ -186,6 +187,7 @@ def _ensure_tables(conn: _DbConn, *, commit: bool) -> None:
     )
     _migrate_strategy_sides(conn)
     _migrate_stock_underlying_defaults(conn)
+    ensure_change_history(conn)
     if commit:
         conn.commit()
 
@@ -792,12 +794,29 @@ def update_position_performance_metadata(
         raise ValueError(f"Posição {position_id} não encontrada.")
 
 
-def delete_position(*, position_id: int, conn: Optional[Any] = None) -> None:
+def delete_position(
+    *,
+    position_id: int,
+    reason: str,
+    actor: str | None = None,
+    conn: Optional[Any] = None,
+) -> None:
+    """Anula a posição da visão operacional, preservando-a no histórico."""
+
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Informe o motivo para anular a posição.")
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
-    db.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
-    if owns_conn:
-        db.commit()
-        db.close()
+    try:
+        set_change_context(db, actor=actor, reason=normalized_reason)
+        result = db.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
+        if result.rowcount == 0:
+            raise ValueError(f"Posição {position_id} não encontrada.")
+        if owns_conn:
+            db.commit()
+    finally:
+        if owns_conn:
+            db.close()
 
 
 def get_position(

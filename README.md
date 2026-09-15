@@ -1296,4 +1296,6 @@ Observacoes:
 
 - a retenção limpa apenas dados de mercado e apoio operacional; não toca nos dados fiscais nem nas operações do usuário.
 - o plano de evolução para registros permanentes, correção rastreável e cadastro seguro está em `docs/plano-registro-permanente.md`.
+- alterações e anulações de `positions` e `ledger` preservam o estado anterior em `record_history`; a interface exige motivo ao anular um registro.
+- após uma atualização que inclua o histórico, instale-o uma vez no schema ativo: `uv run python -m opcoes.cli db history-install`.
 - o script `deploy/scripts/run_scrape_cycle.sh` agora aplica essa retencao ao final do ciclo agendado.

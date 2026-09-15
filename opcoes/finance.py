@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from .config import (
     get_postgres_schema,
 )
+from .change_history import ensure_change_history, set_change_context
 from .db_health import resolve_postgres_target
 from .utils import infer_option_type
 
@@ -191,6 +192,7 @@ def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_type_position_id ON ledger (type, position_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_position_id ON ledger (position_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger (date DESC)")
+    ensure_change_history(conn)
     if commit:
         conn.commit()
 
@@ -1093,11 +1095,23 @@ def update_transaction(
         conn.close()
 
 
-def delete_transaction(tx_id: int) -> None:
-    """Remove uma transação do ledger."""
+def delete_transaction(
+    tx_id: int,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> None:
+    """Anula uma transação, mantendo a versão anterior no histórico imutável."""
+
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Informe o motivo para anular a movimentação.")
     conn = _get_conn(ensure_schema=True)
     try:
-        conn.execute("DELETE FROM ledger WHERE id = ?", (int(tx_id),))
+        set_change_context(conn, actor=actor, reason=normalized_reason)
+        result = conn.execute("DELETE FROM ledger WHERE id = ?", (int(tx_id),))
+        if result.rowcount == 0:
+            raise ValueError(f"Movimentação {tx_id} não encontrada.")
         conn.commit()
     finally:
         conn.close()

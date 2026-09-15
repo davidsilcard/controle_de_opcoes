@@ -14,6 +14,7 @@ _DEFAULT_TABLE_ORDER = [
     "service_runs",
     "positions",
     "ledger",
+    "record_history",
     "darf_months",
     "option_snapshots",
     "underlying_snapshots",

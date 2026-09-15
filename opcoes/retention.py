@@ -325,6 +325,7 @@ def apply_retention(
                 "decisions",
                 "ticker_metadata",
                 "service_runs",
+                "record_history",
             ],
             "removed": removed,
         }

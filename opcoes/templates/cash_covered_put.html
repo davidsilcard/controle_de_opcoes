@@ -335,14 +335,20 @@
                       </td>
                       <td class="text-end" style="min-width: 150px;">
                         <button class="btn btn-success btn-sm mb-1" type="submit">Salvar</button>
+                        <input
+                          name="void_reason"
+                          class="form-control form-control-sm mb-1"
+                          maxlength="1000"
+                          placeholder="Motivo da anulação"
+                        >
                         <button
                           class="btn btn-outline-danger btn-sm"
                           type="submit"
                           formaction="/finance/delete/{{ tx.id }}"
                           formmethod="post"
-                          onclick="return confirm('Excluir movimentação {{ tx.id }}?');"
+                          onclick="return confirm('Anular movimentação {{ tx.id }}? O registro original continuará no histórico.');"
                         >
-                          Excluir
+                          Anular
                         </button>
                       </td>
                     </form>

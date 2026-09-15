@@ -32,7 +32,7 @@ documental` e `campo pendente`, sem impedir o uso da plataforma.
 `darf_months`, `equity_holdings` ou eventos de estoque; o corte para contratos
 vencidos é calculado por meses-calendário, não por 30 dias.
 
-## Fase 1 — razão permanente e correção rastreável
+## Fase 1 — razão permanente e correção rastreável (em andamento)
 
 1. Criar um diário de alterações imutável com data, usuário, motivo, origem e
    vínculo do evento corrigido.
@@ -41,6 +41,12 @@ vencidos é calculado por meses-calendário, não por 30 dias.
 3. Introduzir vínculos entre posição, razão e eventos de estoque, além de
    chaves de idempotência para evitar duplicidade por reenvio ou clique duplo.
 4. Migrar o histórico existente como `importado_legado`, sem reescrever valores.
+
+Primeira entrega da fase: `record_history` registra a versão anterior de cada
+`UPDATE` e `DELETE` de posições ou razão. A tabela é append-only por trigger
+do PostgreSQL. A interface exige o motivo e atribui a anulação ao usuário
+autenticado. As rotinas de reversão financeira por estratégia continuam sendo
+implementadas antes de qualquer substituição de cálculo automático.
 
 **Aceitação:** uma tentativa repetida não cria novo evento; uma correção deixa
 o original, a reversão e o motivo visíveis; não existe rota operacional de
