@@ -26,6 +26,10 @@ class _FakeConn:
         self.committed = True
 
 
+class _RawFakeConn(_FakeConn):
+    """Simula a conexão psycopg direta usada pelo comando da CLI."""
+
+
 def test_ensure_change_history_creates_append_only_audit_triggers() -> None:
     conn = _FakeConn()
 
@@ -46,3 +50,14 @@ def test_change_context_is_limited_and_stored_in_database_session() -> None:
 
     assert conn.queries[-2][1] == ("david",)
     assert conn.queries[-1][1] == ("cadastro duplicado",)
+
+
+def test_history_supports_direct_psycopg_connection_from_cli() -> None:
+    conn = _RawFakeConn()
+
+    ensure_change_history(conn, commit=True)
+    set_change_context(conn, actor="david", reason="instalação")
+
+    assert any("to_regclass(%s)" in query for query, _params in conn.queries)
+    assert conn.queries[-2][0] == "SELECT set_config('opcoes.audit_actor', %s, true)"
+    assert conn.committed is True
