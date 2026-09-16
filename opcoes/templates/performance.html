@@ -284,7 +284,7 @@
         <h2 class="h5">Ciclos da estratégia</h2>
         <div class="table-responsive border bg-white">
           <table class="table table-sm mb-0 align-middle">
-            <thead class="table-light"><tr><th>Posição</th><th>Estados independentes</th><th class="text-end">Capital</th><th class="text-end">Prêmio</th><th class="text-end">Resultado conhecido</th><th class="text-end">Retorno</th><th>Fonte legada agrupada</th></tr></thead>
+            <thead class="table-light"><tr><th>Posição</th><th>Estados independentes</th><th class="text-end">Capital</th><th class="text-end">Prêmio</th><th>Resultado e origem</th><th class="text-end">Retorno</th><th>Fonte do contrato</th></tr></thead>
             <tbody>
               {% for cycle in performance.cycles %}
                 <tr>
@@ -299,7 +299,7 @@
                   </td>
                   <td class="text-end">{% if cycle.capital is not none %}R$ {{ '%.2f'|format(cycle.capital) }}{% if cycle.capital_is_derived %}<br><span class="small text-muted">automático</span>{% endif %}{% else %}-{% endif %}</td>
                   <td class="text-end">R$ {{ '%.2f'|format(cycle.premium) }}</td>
-                  <td class="text-end">{% if cycle.total_result is not none %}R$ {{ '%.2f'|format(cycle.total_result) }}{% if not cycle.is_result_complete %}<br><span class="small text-muted">parcial — vínculo pendente</span>{% endif %}{% else %}-{% endif %}</td>
+                  <td>{% if cycle.total_result is not none %}<strong>R$ {{ '%.2f'|format(cycle.total_result) }}</strong>{% if not cycle.is_result_complete %}<br><span class="small text-muted">parcial — vínculo pendente</span>{% endif %}{% else %}<strong>-</strong>{% endif %}<div class="mt-1">{% for origin in cycle.result_origin_states %}<span class="badge text-bg-{{ origin.tone }} me-1">{{ origin.label }}</span>{% endfor %}</div><div class="small text-muted mt-1">{% for origin in cycle.result_origin_states %}{{ origin.detail }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div></td>
                   <td class="text-end">{% if cycle.return_pct is not none %}{{ '%.2f'|format(cycle.return_pct) }}%{% else %}-{% endif %}</td>
                   <td class="small">
                     {{ cycle.source_ref or '-' }}

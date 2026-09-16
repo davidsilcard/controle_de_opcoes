@@ -134,6 +134,60 @@ def _capital_for_position(
     return None, position.get("capital_source"), False
 
 
+def _result_origin_states(
+    *,
+    option_result: float | None,
+    capital_source: Any,
+    contract_missing_reasons: Sequence[str],
+    performance_evidence_state: str,
+) -> list[dict[str, str]]:
+    """Explica a procedência sem esconder um resultado financeiro conhecido."""
+
+    states: list[dict[str, str]] = []
+    if option_result is None:
+        states.append(
+            {
+                "label": "Resultado pendente",
+                "tone": "secondary",
+                "detail": "Ainda não existe lançamento realizado no razão financeiro.",
+            }
+        )
+    else:
+        states.append(
+            {
+                "label": "Cálculo conhecido",
+                "tone": "success",
+                "detail": "Resultado calculado a partir do razão financeiro.",
+            }
+        )
+    if str(capital_source or "").strip() == "garantia_declarada_usuario":
+        states.append(
+            {
+                "label": "Declaração manual",
+                "tone": "primary",
+                "detail": "A base de retorno foi declarada pelo usuário.",
+            }
+        )
+    if contract_missing_reasons:
+        if performance_evidence_state == "documents_exhausted":
+            states.append(
+                {
+                    "label": "Auditoria concluída sem prova",
+                    "tone": "info",
+                    "detail": "A busca foi encerrada sem comprovação documental do contrato.",
+                }
+            )
+        else:
+            states.append(
+                {
+                    "label": "Pendência documental",
+                    "tone": "warning",
+                    "detail": "Ainda falta confirmar campo do contrato; isso não apaga o resultado conhecido.",
+                }
+            )
+    return states
+
+
 def build_pending_position_groups(
     cycles: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -283,6 +337,7 @@ def build_strategy_performance(
             stock_positions=stock_positions,
         )
         warning_reasons = _warning_reasons(position)
+        performance_evidence_state = _performance_evidence_state(position)
         reasons = [
             *contract_missing_reasons,
             *return_base_missing_reasons,
@@ -327,7 +382,7 @@ def build_strategy_performance(
             "capital_source": capital_source,
             "capital_is_derived": capital_is_derived,
             "source_ref": position.get("performance_source_ref"),
-            "performance_evidence_state": _performance_evidence_state(position),
+            "performance_evidence_state": performance_evidence_state,
             "performance_evidence_note": position.get("performance_evidence_note"),
             "shared_fee_note_ref": position.get("shared_fee_note_ref"),
             "premium": premium,
@@ -349,6 +404,12 @@ def build_strategy_performance(
             "linkage_missing_reasons": linkage_missing_reasons,
             "missing_reasons": reasons,
             "warning_reasons": warning_reasons,
+            "result_origin_states": _result_origin_states(
+                option_result=option_result,
+                capital_source=capital_source,
+                contract_missing_reasons=contract_missing_reasons,
+                performance_evidence_state=performance_evidence_state,
+            ),
             "stock_position_id": stock_positions[0].get("id") if len(stock_positions) == 1 else None,
         }
         cycles.append(cycle)

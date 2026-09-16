@@ -505,3 +505,34 @@ def test_pending_actions_are_grouped_once_per_position() -> None:
         "contract",
         "guarantee",
     ]
+
+
+def test_result_origin_states_keep_financial_and_documentary_statuses_separate() -> None:
+    position = {
+        "id": 90,
+        "ticker": "PETRD521",
+        "underlying": "PETR4",
+        "strategy_tag": "covered_call",
+        "side": "short",
+        "status": "closed",
+        "trade_date": "2026-04-06",
+        "exit_date": "2026-04-17",
+        "exit_reason": "Expirou",
+        "qty": 100,
+        "contract_expiry": "2026-04-17",
+        "capital_committed": 6600.0,
+        "capital_source": "garantia_declarada_usuario",
+        "performance_evidence_state": "documents_exhausted",
+        "is_simulated": False,
+    }
+
+    cycle = build_strategy_performance(
+        [position],
+        ledger_sums={90: _ledger(realized=52.95)},
+    )["cycles"][0]
+
+    assert [state["label"] for state in cycle["result_origin_states"]] == [
+        "Cálculo conhecido",
+        "Declaração manual",
+        "Auditoria concluída sem prova",
+    ]

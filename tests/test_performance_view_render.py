@@ -71,7 +71,17 @@ def test_performance_view_groups_action_queues_by_position(monkeypatch) -> None:
             capital=3190.0,
             exit_reason="Exercicio",
         ),
+        _option(
+            5,
+            "CAMLD794",
+            strategy="covered_call",
+            strike=None,
+            expiry="2026-04-17",
+            capital=6600.0,
+        ),
     ]
+    positions[1]["capital_source"] = "garantia_declarada_usuario"
+    positions[4]["performance_evidence_state"] = "documents_exhausted"
     monkeypatch.setattr("opcoes.web.list_positions", lambda **_kwargs: positions)
     monkeypatch.setattr(
         "opcoes.web.finance.get_ledger_sums_by_position",
@@ -99,6 +109,10 @@ def test_performance_view_groups_action_queues_by_position(monkeypatch) -> None:
     assert "não verifica a contabilização da despesa no caixa" in html
     assert "Completude cadastral do histórico" in html
     assert "não representam o lucro líquido final" in html
+    assert "Cálculo conhecido" in html
+    assert "Declaração manual" in html
+    assert "Pendência documental" in html
+    assert "Auditoria concluída sem prova" in html
     assert "Aguardando rateio da corretora" not in html
     assert "#1 BBASP226" in html
     assert "R$ 2261.00" in html

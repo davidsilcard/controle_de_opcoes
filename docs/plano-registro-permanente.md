@@ -109,6 +109,11 @@ linha do tempo apresenta data, responsável, motivo e campos antes/depois; ela
 não cria um atalho de correção que poderia separar uma estratégia de seus
 efeitos em caixa, estoque ou resultado.
 
+Terceira entrega da fase: cada ciclo em `/performance` mostra a procedência do
+resultado. O razão financeiro, a declaração manual de garantia, a pendência
+documental e a auditoria concluída sem prova são estados cumulativos; nenhum
+deles oculta um cálculo financeiro já conhecido.
+
 ## Fase 4 — auditoria e publicação
 
 1. Criar relatório de integridade: órfãos, duplicidades candidatas, estados
