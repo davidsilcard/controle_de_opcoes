@@ -137,7 +137,7 @@ def test_performance_separates_shared_fee_and_preserves_confirmed_contract_field
     client = app.test_client()
 
     html = client.get("/performance?mode=real").get_data(as_text=True)
-    assert "Contratos aguardando confirmação documental" in html
+    assert "Pendências de cadastro por posição" in html
     assert "Custos compartilhados sem rateio" in html
     assert f"/performance/contract/{shared_id}" not in html
     assert f"/performance/contract/{partial_id}" in html
@@ -306,8 +306,7 @@ def test_performance_moves_documents_exhausted_out_of_action_queue() -> None:
 
     html = client.get("/performance?mode=real").get_data(as_text=True)
     assert "Auditoria concluída — campos sem comprovação" in html
-    assert "Nenhum contrato aguarda confirmação documental." in html
-    assert "Garantias históricas a declarar" in html
+    assert "Pendências de cadastro por posição" in html
     assert f'action="/performance/contract/{position_id}"' in html
     assert f'action="/performance/contract/{position_id}/reopen-evidence"' in html
 

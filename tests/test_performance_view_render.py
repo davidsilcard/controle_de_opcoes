@@ -35,7 +35,7 @@ def _option(
     }
 
 
-def test_performance_view_renders_independent_action_queues(monkeypatch) -> None:
+def test_performance_view_groups_action_queues_by_position(monkeypatch) -> None:
     positions = [
         _option(
             1,
@@ -91,9 +91,10 @@ def test_performance_view_renders_independent_action_queues(monkeypatch) -> None
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Contratos aguardando confirmação documental" in html
-    assert "Garantias históricas a declarar" in html
-    assert "Vínculos de ações exercidas" in html
+    assert "Pendências de cadastro por posição" in html
+    assert "não representam duplicidade de dados" in html
+    assert "Contratos aguardando confirmação documental" not in html
+    assert "Garantias históricas a declarar" not in html
     assert "Custos compartilhados sem rateio — informativo (1 referências)" in html
     assert "não verifica a contabilização da despesa no caixa" in html
     assert "Completude cadastral do histórico" in html
@@ -155,5 +156,4 @@ def test_shared_fee_groups_do_not_merge_unknown_references(monkeypatch) -> None:
     groups = captured["performance"]["shared_fee_groups"]
     assert sorted(len(group["cycles"]) for group in groups) == [1, 1, 2]
     assert len({group["note_ref"] for group in groups}) == 3
-    assert captured["performance"]["evidence_pending_cycles"] == []
-    assert captured["performance"]["guarantee_pending_cycles"] == []
+    assert captured["performance"]["pending_position_groups"] == []

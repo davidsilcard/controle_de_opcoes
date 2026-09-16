@@ -163,37 +163,58 @@
       </section>
 
       <section class="mb-4">
-        <h2 class="h5">Contratos aguardando confirmação documental</h2>
-        {% if performance.evidence_pending_cycles %}
-          <p class="small text-muted">Esta fila contém somente strike ou vencimento ausentes. Garantia, vínculo de estoque e taxa são tratados separadamente.</p>
+        <h2 class="h5">Pendências de cadastro por posição</h2>
+        {% if performance.pending_position_groups %}
+          <p class="small text-muted">Cada posição aparece uma única vez. Contrato, garantia e vínculo de estoque continuam independentes e não representam duplicidade de dados.</p>
           <div class="table-responsive border bg-white">
             <table class="table table-sm mb-0 align-middle">
-              <thead class="table-light"><tr><th>Posição</th><th>Fechamento</th><th>Contrato</th><th>Confirmar um ou mais campos</th></tr></thead>
+              <thead class="table-light"><tr><th>Posição</th><th>Estados pendentes</th><th>Dados conhecidos</th><th>Ações</th></tr></thead>
               <tbody>
-                {% for cycle in performance.evidence_pending_cycles %}
+                {% for cycle in performance.pending_position_groups %}
                   <tr>
                     <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ 'Cash-Covered Put' if cycle.strategy == 'cash_put' else 'Covered Call' }} · {{ cycle.qty }} ações</span></td>
-                    <td>{{ cycle.exit_date or 'Em aberto' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td class="small">Strike: <strong>{{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else 'pendente' }}</strong><br>Vencimento: <strong>{{ cycle.expiry or 'pendente' }}</strong><br><span class="text-muted">{{ cycle.contract_missing_reasons|join('; ') }}</span></td>
+                    <td class="small">
+                      {% for action in cycle.pending_actions %}<span class="badge text-bg-warning me-1">{{ action.label }}</span>{% endfor %}
+                      <div class="text-muted mt-1">{% for action in cycle.pending_actions %}{{ action.reasons|join('; ') }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
+                    </td>
+                    <td class="small">Strike: <strong>{{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else 'pendente' }}</strong><br>Vencimento: <strong>{{ cycle.expiry or 'pendente' }}</strong><br>Garantia: <strong>{{ 'R$ %.2f'|format(cycle.capital) if cycle.capital is not none else 'pendente' }}</strong></td>
                     <td style="min-width: 34rem;">
-                      <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
-                        {{ csrf_input() }}
-                        <input type="hidden" name="mode" value="{{ mode }}">
-                        {% if cycle.strike is none %}<div class="col-3"><input name="contract_strike" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Strike"></div>{% endif %}
-                        {% if not cycle.expiry %}<div class="col-3"><input name="contract_expiry" type="date" class="form-control form-control-sm"></div>{% endif %}
-                        <div class="col"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Fonte desta confirmação (nota, B3 ou Opções.net)" required></div>
-                        <div class="col-2 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar contrato</button></div>
-                      </form>
-                      <details class="mt-2 small">
-                        <summary class="text-muted">Os documentos disponíveis não comprovam o campo?</summary>
-                        <form method="post" action="/performance/contract/{{ cycle.position_id }}/documents-exhausted" class="row g-1 mt-1">
+                      {% if cycle.needs_contract_confirmation %}
+                        <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1 mb-2">
                           {{ csrf_input() }}
                           <input type="hidden" name="mode" value="{{ mode }}">
-                          {% if not cycle.source_ref %}<div class="col-4"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Documentos consultados" required></div>{% endif %}
-                          <div class="{{ 'col-8' if not cycle.source_ref else 'col-10' }}"><input name="performance_evidence_note" class="form-control form-control-sm" placeholder="Campo não comprovável e motivo" required></div>
-                          <div class="col-2 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Concluir auditoria</button></div>
+                          {% if cycle.strike is none %}<div class="col-3"><input name="contract_strike" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Strike"></div>{% endif %}
+                          {% if not cycle.expiry %}<div class="col-3"><input name="contract_expiry" type="date" class="form-control form-control-sm"></div>{% endif %}
+                          <div class="col"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Fonte da confirmação (nota, B3 ou Opções.net)" required></div>
+                          <div class="col-2 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar contrato</button></div>
                         </form>
-                      </details>
+                        <details class="mb-2 small">
+                          <summary class="text-muted">Os documentos disponíveis não comprovam o campo?</summary>
+                          <form method="post" action="/performance/contract/{{ cycle.position_id }}/documents-exhausted" class="row g-1 mt-1">
+                            {{ csrf_input() }}
+                            <input type="hidden" name="mode" value="{{ mode }}">
+                            {% if not cycle.source_ref %}<div class="col-4"><input name="performance_source_ref" class="form-control form-control-sm" placeholder="Documentos consultados" required></div>{% endif %}
+                            <div class="{{ 'col-8' if not cycle.source_ref else 'col-10' }}"><input name="performance_evidence_note" class="form-control form-control-sm" placeholder="Campo não comprovável e motivo" required></div>
+                            <div class="col-2 d-grid"><button class="btn btn-outline-secondary btn-sm" type="submit">Concluir auditoria</button></div>
+                          </form>
+                        </details>
+                      {% endif %}
+                      {% if cycle.needs_guarantee_declaration %}
+                        <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1 mb-2">
+                          {{ csrf_input() }}
+                          <input type="hidden" name="mode" value="{{ mode }}">
+                          <div class="col"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Garantia histórica declarada pelo usuário" required></div>
+                          <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar garantia</button></div>
+                        </form>
+                      {% endif %}
+                      {% if cycle.needs_stock_linkage %}
+                        <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
+                          {{ csrf_input() }}
+                          <input type="hidden" name="mode" value="{{ mode }}">
+                          <div class="col"><input name="stock_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="ID da venda das ações" required></div>
+                          <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Vincular venda</button></div>
+                        </form>
+                      {% endif %}
                     </td>
                   </tr>
                 {% endfor %}
@@ -201,67 +222,9 @@
             </table>
           </div>
         {% else %}
-          <div class="alert alert-success py-2 mb-0">Nenhum contrato aguarda confirmação documental.</div>
+          <div class="alert alert-success py-2 mb-0">Nenhuma pendência de cadastro neste modo.</div>
         {% endif %}
       </section>
-
-      <section class="mb-4">
-        <h2 class="h5">Garantias históricas a declarar</h2>
-        {% if performance.guarantee_pending_cycles %}
-          <p class="small text-muted">A garantia da Covered Call é uma declaração histórica por operação e não exige nota. Na Cash-Covered Put, o sistema calcula automaticamente strike × quantidade.</p>
-          <div class="table-responsive border bg-white">
-            <table class="table table-sm mb-0 align-middle">
-              <thead class="table-light"><tr><th>Posição</th><th>Contrato</th><th>Garantia declarada</th></tr></thead>
-              <tbody>
-                {% for cycle in performance.guarantee_pending_cycles %}
-                  <tr>
-                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
-                    <td class="small">Strike: {{ 'R$ %.2f'|format(cycle.strike) if cycle.strike is not none else '-' }} · Vencimento: {{ cycle.expiry or '-' }}</td>
-                    <td style="min-width: 24rem;">
-                      <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
-                        {{ csrf_input() }}
-                        <input type="hidden" name="mode" value="{{ mode }}">
-                        <div class="col"><input name="capital_committed" type="number" min="0.01" step="0.01" class="form-control form-control-sm" placeholder="Valor histórico usado como garantia" required></div>
-                        <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Salvar garantia</button></div>
-                      </form>
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="alert alert-success py-2 mb-0">Nenhuma garantia histórica aguarda declaração.</div>
-        {% endif %}
-      </section>
-
-      {% if performance.linkage_pending_cycles %}
-        <section class="mb-4">
-          <h2 class="h5">Vínculos de ações exercidas</h2>
-          <p class="small text-muted">Este vínculo identifica a venda das ações decorrente da CALL exercida. Ele não altera contrato nem garantia.</p>
-          <div class="table-responsive border bg-white">
-            <table class="table table-sm mb-0 align-middle">
-              <thead class="table-light"><tr><th>Posição</th><th>Fechamento</th><th>Histórico da venda das ações</th></tr></thead>
-              <tbody>
-                {% for cycle in performance.linkage_pending_cycles %}
-                  <tr>
-                    <td><strong>#{{ cycle.position_id }} {{ cycle.ticker }}</strong><br><span class="small text-muted">{{ cycle.underlying }} · {{ cycle.qty }} ações</span></td>
-                    <td>{{ cycle.exit_date or '-' }}<br><span class="small text-muted">{{ cycle.exit_reason or '-' }}</span></td>
-                    <td>
-                      <form method="post" action="/performance/contract/{{ cycle.position_id }}" class="row g-1">
-                        {{ csrf_input() }}
-                        <input type="hidden" name="mode" value="{{ mode }}">
-                        <div class="col"><input name="stock_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="ID da venda das ações" required></div>
-                        <div class="col-3 d-grid"><button class="btn btn-primary btn-sm" type="submit">Vincular</button></div>
-                      </form>
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      {% endif %}
 
       <section class="mb-4">
         <h2 class="h5">Auditoria concluída — campos sem comprovação</h2>

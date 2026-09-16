@@ -103,7 +103,11 @@ from .strategy_contracts import (
     validate_position_closure_update,
     validate_position_identity_update,
 )
-from .strategy_performance import STRATEGIES, build_strategy_performance
+from .strategy_performance import (
+    STRATEGIES,
+    build_pending_position_groups,
+    build_strategy_performance,
+)
 from .wheel_cycles import (
     LEG_TYPES as WHEEL_LEG_TYPES,
     WheelCycleError,
@@ -2446,26 +2450,15 @@ def create_app() -> Flask:
             ledger_sums=ledger_sums,
             is_simulated=is_simulated,
         )
-        evidence_pending_cycles = []
         documents_exhausted_cycles = []
-        guarantee_pending_cycles = []
-        linkage_pending_cycles = []
         shared_fee_groups_by_ref: dict[str, dict[str, Any]] = {}
         for cycle in context["cycles"]:
             contract_reasons = list(cycle.get("contract_missing_reasons") or [])
-            return_base_reasons = list(cycle.get("return_base_missing_reasons") or [])
-            linkage_reasons = list(cycle.get("linkage_missing_reasons") or [])
             warning_reasons = list(cycle.get("warning_reasons") or [])
 
             if contract_reasons:
                 if cycle.get("performance_evidence_state") == "documents_exhausted":
                     documents_exhausted_cycles.append(cycle)
-                else:
-                    evidence_pending_cycles.append(cycle)
-            if return_base_reasons and cycle.get("strategy") == "covered_call":
-                guarantee_pending_cycles.append(cycle)
-            if linkage_reasons:
-                linkage_pending_cycles.append(cycle)
             if warning_reasons:
                 note_ref = str(cycle.get("shared_fee_note_ref") or "").strip()
                 group_key = (
@@ -2486,17 +2479,12 @@ def create_app() -> Flask:
                 )
                 group["cycles"].append(cycle)
 
-        for queue in (
-            evidence_pending_cycles,
-            guarantee_pending_cycles,
-            linkage_pending_cycles,
-        ):
-            queue.sort(
-                key=lambda cycle: abs(
-                    float(cycle.get("total_result") or cycle.get("premium") or 0.0)
-                ),
-                reverse=True,
-            )
+        documents_exhausted_cycles.sort(
+            key=lambda cycle: abs(
+                float(cycle.get("total_result") or cycle.get("premium") or 0.0)
+            ),
+            reverse=True,
+        )
         shared_fee_groups = list(shared_fee_groups_by_ref.values())
         shared_fee_groups.sort(
             key=lambda group: max(
@@ -2508,10 +2496,10 @@ def create_app() -> Flask:
             ),
             reverse=True,
         )
-        context["evidence_pending_cycles"] = evidence_pending_cycles
+        context["pending_position_groups"] = build_pending_position_groups(
+            context["cycles"]
+        )
         context["documents_exhausted_cycles"] = documents_exhausted_cycles
-        context["guarantee_pending_cycles"] = guarantee_pending_cycles
-        context["linkage_pending_cycles"] = linkage_pending_cycles
         context["shared_fee_groups"] = shared_fee_groups
         try:
             wheel_cycles = list_wheel_cycles(is_simulated=is_simulated)

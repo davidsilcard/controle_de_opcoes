@@ -134,6 +134,81 @@ def _capital_for_position(
     return None, position.get("capital_source"), False
 
 
+def build_pending_position_groups(
+    cycles: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Agrupa ações pendentes por posição, sem juntar seus estados.
+
+    Contrato, garantia e vínculo de estoque são independentes. A tela, porém,
+    deve mostrar uma posição uma única vez para não sugerir duplicidade de
+    registro quando ela precisa de mais de uma confirmação.
+    """
+
+    groups: dict[int, dict[str, Any]] = {}
+    for cycle_data in cycles:
+        cycle = dict(cycle_data)
+        position_id = _int(cycle.get("position_id"))
+        if position_id <= 0:
+            continue
+
+        needs_contract = bool(cycle.get("contract_missing_reasons")) and (
+            cycle.get("performance_evidence_state") != "documents_exhausted"
+        )
+        needs_guarantee = bool(cycle.get("return_base_missing_reasons")) and (
+            cycle.get("strategy") == "covered_call"
+        )
+        needs_linkage = bool(cycle.get("linkage_missing_reasons"))
+        if not any((needs_contract, needs_guarantee, needs_linkage)):
+            continue
+
+        group = groups.setdefault(
+            position_id,
+            {
+                **cycle,
+                "pending_actions": [],
+                "needs_contract_confirmation": False,
+                "needs_guarantee_declaration": False,
+                "needs_stock_linkage": False,
+            },
+        )
+        if needs_contract and not group["needs_contract_confirmation"]:
+            group["needs_contract_confirmation"] = True
+            group["pending_actions"].append(
+                {
+                    "kind": "contract",
+                    "label": "Confirmar contrato",
+                    "reasons": list(cycle.get("contract_missing_reasons") or []),
+                }
+            )
+        if needs_guarantee and not group["needs_guarantee_declaration"]:
+            group["needs_guarantee_declaration"] = True
+            group["pending_actions"].append(
+                {
+                    "kind": "guarantee",
+                    "label": "Declarar garantia",
+                    "reasons": list(cycle.get("return_base_missing_reasons") or []),
+                }
+            )
+        if needs_linkage and not group["needs_stock_linkage"]:
+            group["needs_stock_linkage"] = True
+            group["pending_actions"].append(
+                {
+                    "kind": "stock_linkage",
+                    "label": "Vincular venda das ações",
+                    "reasons": list(cycle.get("linkage_missing_reasons") or []),
+                }
+            )
+
+    pending_groups = list(groups.values())
+    pending_groups.sort(
+        key=lambda cycle: abs(
+            float(cycle.get("total_result") or cycle.get("premium") or 0.0)
+        ),
+        reverse=True,
+    )
+    return pending_groups
+
+
 def build_strategy_performance(
     positions: Sequence[Mapping[str, Any]],
     *,
@@ -408,4 +483,8 @@ def build_strategy_performance(
     }
 
 
-__all__ = ["STRATEGIES", "build_strategy_performance"]
+__all__ = [
+    "STRATEGIES",
+    "build_pending_position_groups",
+    "build_strategy_performance",
+]

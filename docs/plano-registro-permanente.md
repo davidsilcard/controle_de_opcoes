@@ -85,7 +85,7 @@ o original, a reversão e o motivo visíveis; não existe rota operacional de
 **Aceitação:** falha no meio do cadastro desfaz tudo; o recibo permite localizar
 a operação; declaração manual registra o fato sem exigir nota.
 
-## Fase 3 — telas e projeções didáticas
+## Fase 3 — telas e projeções didáticas (em andamento)
 
 1. Agrupar pendências por posição. Uma posição como `#47` aparecerá uma vez,
    com estados de contrato e garantia identificados separadamente.
@@ -96,6 +96,12 @@ a operação; declaração manual registra o fato sem exigir nota.
 
 **Aceitação:** nenhuma tela dá aparência de duplicidade para a mesma posição;
 campos ausentes não escondem resultado financeiro conhecido.
+
+Primeira entrega da fase: `/performance` agrupa ações pendentes por
+`position_id`. Contrato, garantia e vínculo de estoque continuam ações
+independentes, mas aparecem na mesma linha, com seus motivos e formulários
+próprios. Auditorias documentais concluídas e custos compartilhados continuam
+fora dessa lista porque não são uma ação de cadastro pendente.
 
 ## Fase 4 — auditoria e publicação
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from opcoes.finance import TransactionType
-from opcoes.strategy_performance import build_strategy_performance
+from opcoes.strategy_performance import (
+    build_pending_position_groups,
+    build_strategy_performance,
+)
 
 
 def _ledger(*, premium: float = 0.0, realized: float = 0.0, darf: float = 0.0) -> dict[str, float]:
@@ -477,3 +480,28 @@ def test_explicit_zero_realized_remains_known_and_counts_in_weighted_return() ->
     assert result["totals"]["return_complete_cycles"] == 2
     assert result["totals"]["capital_sum"] == 4000.0
     assert result["totals"]["weighted_return_pct"] == 2.5
+
+
+def test_pending_actions_are_grouped_once_per_position() -> None:
+    cycle = {
+        "position_id": 47,
+        "ticker": "GGBRD221",
+        "strategy": "covered_call",
+        "premium": 80.0,
+        "contract_missing_reasons": ["strike nao preservado"],
+        "return_base_missing_reasons": ["capital de garantia nao declarado"],
+        "linkage_missing_reasons": [],
+        "performance_evidence_state": "pending",
+    }
+
+    groups = build_pending_position_groups([cycle])
+
+    assert len(groups) == 1
+    assert groups[0]["position_id"] == 47
+    assert groups[0]["needs_contract_confirmation"] is True
+    assert groups[0]["needs_guarantee_declaration"] is True
+    assert groups[0]["needs_stock_linkage"] is False
+    assert [action["kind"] for action in groups[0]["pending_actions"]] == [
+        "contract",
+        "guarantee",
+    ]
