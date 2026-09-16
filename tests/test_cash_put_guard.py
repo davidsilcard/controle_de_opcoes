@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from opcoes import finance, portfolio
@@ -135,6 +137,40 @@ def test_cash_put_web_add_records_premium_and_darf_automatically() -> None:
     by_type = {tx.type.value: tx.amount for tx in txs}
     assert round(by_type[finance.TransactionType.PREMIUM.value], 2) == 243.67
     assert round(by_type[finance.TransactionType.DARF.value], 2) == -36.55
+
+
+@pytest.mark.requires_postgres
+def test_cash_put_web_repeated_post_with_same_confirmation_creates_one_operation() -> (
+    None
+):
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "ticker": "PETRN312",
+        "underlying": "PETR4",
+        "trade_date": "2026-01-09",
+        "qty": "400",
+        "entry_price": "0.61",
+        "fees": "0.33",
+        "trade_type": "swing",
+        "side": "short",
+        "strategy_tag": "cash_put",
+        "contract_strike": "19.39",
+        "contract_expiry": "2026-07-17",
+        "performance_source_ref": "nota teste",
+        "is_simulated": "0",
+        "next": "/positions",
+        "_operation_key": str(uuid.uuid4()),
+    }
+
+    first = client.post("/positions/add", data=form)
+    repeated = client.post("/positions/add", data=form)
+
+    assert first.status_code in (302, 303)
+    assert repeated.status_code in (302, 303)
+    assert len(portfolio.list_positions(include_closed=True)) == 1
+    assert len(finance.get_transactions(limit=20)) == 2
 
 
 @pytest.mark.requires_postgres

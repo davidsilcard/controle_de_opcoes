@@ -1298,4 +1298,5 @@ Observacoes:
 - o plano de evolução para registros permanentes, correção rastreável e cadastro seguro está em `docs/plano-registro-permanente.md`.
 - alterações e anulações de `positions` e `ledger` preservam o estado anterior em `record_history`; a interface exige motivo ao anular um registro.
 - após uma atualização que inclua o histórico, instale-o uma vez no schema ativo: `uv run python -m opcoes.cli db history-install`.
+- o cadastro de posição/opção e a movimentação manual de caixa usam um recibo único por envio: repetir o mesmo formulário não cria outro registro. Após uma atualização, instale a estrutura uma vez no schema ativo: `uv run python -m opcoes.cli db receipts-install`.
 - o script `deploy/scripts/run_scrape_cycle.sh` agora aplica essa retencao ao final do ciclo agendado.

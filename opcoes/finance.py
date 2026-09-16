@@ -8,20 +8,21 @@ from .config import (
     get_postgres_schema,
 )
 from .change_history import ensure_change_history, set_change_context
+from .operation_receipts import ensure_operation_receipts
 from .db_health import resolve_postgres_target
 from .utils import infer_option_type
 
 
 class TransactionType(str, Enum):
-    DEPOSIT = "DEPOSIT"      # Aporte novo
+    DEPOSIT = "DEPOSIT"  # Aporte novo
     WITHDRAWAL = "WITHDRAW"  # Retirada
-    PREMIUM = "PREMIUM"      # Prêmio recebido de venda de opção
-    ASSIGNMENT = "ASSIGN"    # Custo de exercício (compra da ação)
-    BUY = "BUY"              # Compra direta de ativo
-    SELL = "SELL"            # Venda direta de ativo
-    DARF = "DARF"            # Provisão/pagamento de IR (DARF)
-    DIVIDEND = "DIVIDEND"    # Dividendos recebidos
-    REALIZED = "REALIZED"    # Resultado realizado da baixa/parcial
+    PREMIUM = "PREMIUM"  # Prêmio recebido de venda de opção
+    ASSIGNMENT = "ASSIGN"  # Custo de exercício (compra da ação)
+    BUY = "BUY"  # Compra direta de ativo
+    SELL = "SELL"  # Venda direta de ativo
+    DARF = "DARF"  # Provisão/pagamento de IR (DARF)
+    DIVIDEND = "DIVIDEND"  # Dividendos recebidos
+    REALIZED = "REALIZED"  # Resultado realizado da baixa/parcial
     SHARED_NOTE_FEE = "SHARED_NOTE_FEE"  # Despesa de nota sem rateio por posição
 
 
@@ -188,11 +189,18 @@ def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
         ).fetchall()
     }
     if "is_simulated" not in existing:
-        conn.execute('ALTER TABLE ledger ADD COLUMN IF NOT EXISTS "is_simulated" INTEGER DEFAULT 0')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_type_position_id ON ledger (type, position_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_position_id ON ledger (position_id)")
+        conn.execute(
+            'ALTER TABLE ledger ADD COLUMN IF NOT EXISTS "is_simulated" INTEGER DEFAULT 0'
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ledger_type_position_id ON ledger (type, position_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ledger_position_id ON ledger (position_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger (date DESC)")
     ensure_change_history(conn)
+    ensure_operation_receipts(conn)
     if commit:
         conn.commit()
 
@@ -220,12 +228,16 @@ def option_tax_rate(trade_type: str) -> float:
     return 0.20 if "day" in (trade_type or "").lower() else 0.15
 
 
-def calculate_option_premium(*, entry_price: float, qty: int, fees: float = 0.0) -> float:
+def calculate_option_premium(
+    *, entry_price: float, qty: int, fees: float = 0.0
+) -> float:
     """Calcula prêmio líquido de taxas para venda de opção."""
     return (float(entry_price) * int(qty)) - float(fees or 0.0)
 
 
-def calculate_option_purchase(*, entry_price: float, qty: int, fees: float = 0.0) -> float:
+def calculate_option_purchase(
+    *, entry_price: float, qty: int, fees: float = 0.0
+) -> float:
     """Calcula desembolso total para compra de opção."""
     return -((float(entry_price) * int(qty)) + float(fees or 0.0))
 
@@ -251,7 +263,14 @@ def add_transaction(
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
         type_value = type.value if isinstance(type, TransactionType) else str(type)
-        params = (date, type_value, amount, description, position_id, 1 if is_simulated else 0)
+        params = (
+            date,
+            type_value,
+            amount,
+            description,
+            position_id,
+            1 if is_simulated else 0,
+        )
         if db.backend == "postgres":
             row = db.execute(
                 """
@@ -298,7 +317,9 @@ def get_balance(mode: str = "all") -> float:
         elif mode == "simulated":
             where_parts.append("is_simulated = 1")
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-        row = conn.execute(f"SELECT SUM(amount) as total FROM ledger {where}", params).fetchone()
+        row = conn.execute(
+            f"SELECT SUM(amount) as total FROM ledger {where}", params
+        ).fetchone()
         if not row:
             return 0.0
         if isinstance(row, Mapping):
@@ -377,7 +398,9 @@ def get_monthly_premiums(
         ordered_months = sorted(monthly_totals.keys())
         if limit_months > 0:
             ordered_months = ordered_months[-int(limit_months) :]
-        return [{"month": month, "total": monthly_totals[month]} for month in ordered_months]
+        return [
+            {"month": month, "total": monthly_totals[month]} for month in ordered_months
+        ]
     finally:
         conn.close()
 
@@ -432,7 +455,9 @@ def get_transactions(
         if strategy:
             if has_positions:
                 if include_unlinked:
-                    where.append("(l.position_id IS NULL OR COALESCE(LOWER(p.strategy_tag), '') = ?)")
+                    where.append(
+                        "(l.position_id IS NULL OR COALESCE(LOWER(p.strategy_tag), '') = ?)"
+                    )
                 else:
                     where.append("COALESCE(LOWER(p.strategy_tag), '') = ?")
                 params.append(strategy)
@@ -468,8 +493,16 @@ def get_transactions(
                 amount=r["amount"],
                 description=r["description"],
                 position_id=r["position_id"],
-                is_simulated=bool(r["is_simulated"] or 0) if "is_simulated" in r.keys() else False,
-                position_strategy_tag=(r["position_strategy_tag"] if "position_strategy_tag" in r.keys() else None),
+                is_simulated=(
+                    bool(r["is_simulated"] or 0)
+                    if "is_simulated" in r.keys()
+                    else False
+                ),
+                position_strategy_tag=(
+                    r["position_strategy_tag"]
+                    if "position_strategy_tag" in r.keys()
+                    else None
+                ),
             )
             for r in rows
         ]
@@ -492,7 +525,9 @@ def get_ledger_sums_by_position(
         if types:
             placeholders = ",".join("?" for _ in types)
             where.append(f"type IN ({placeholders})")
-            params.extend([t.value if isinstance(t, TransactionType) else str(t) for t in types])
+            params.extend(
+                [t.value if isinstance(t, TransactionType) else str(t) for t in types]
+            )
         if is_simulated is not None:
             where.append("COALESCE(is_simulated, 0) = ?")
             params.append(1 if is_simulated else 0)
@@ -537,10 +572,17 @@ def recalc_position_premium_and_darf(
             WHERE position_id = ? AND type IN (?, ?)
             ORDER BY id ASC
             """,
-            (int(position_id), TransactionType.PREMIUM.value, TransactionType.DARF.value),
+            (
+                int(position_id),
+                TransactionType.PREMIUM.value,
+                TransactionType.DARF.value,
+            ),
         )
         rows = cur.fetchall()
-        by_type: Dict[str, List[int]] = {TransactionType.PREMIUM.value: [], TransactionType.DARF.value: []}
+        by_type: Dict[str, List[int]] = {
+            TransactionType.PREMIUM.value: [],
+            TransactionType.DARF.value: [],
+        }
         for r in rows:
             by_type[str(r["type"])].append(int(r["id"]))
 
@@ -679,7 +721,9 @@ def sync_short_option_buyback(
         close_qty = max(int(qty or 0) - int(partial_qty or 0), 0)
         close_date = (exit_date or "").strip()
         close_price = float(exit_price or 0.0)
-        should_have = is_closed and bool(close_date) and close_qty > 0 and close_price > 0.0
+        should_have = (
+            is_closed and bool(close_date) and close_qty > 0 and close_price > 0.0
+        )
 
         if not should_have:
             if existing_ids:
@@ -830,9 +874,10 @@ def long_option_entry_buy_fees(position: Mapping[str, Any]) -> float:
     """Retorna a taxa que pertence ao BUY de entrada de uma opcao comprada."""
 
     status = str(position.get("status") or "").strip().lower()
-    has_close = bool(str(position.get("exit_date") or "").strip()) and position.get(
-        "exit_price"
-    ) is not None
+    has_close = (
+        bool(str(position.get("exit_date") or "").strip())
+        and position.get("exit_price") is not None
+    )
     if status == "closed" and has_close:
         return 0.0
     return float(position.get("fees") or 0.0)
@@ -902,9 +947,7 @@ def sync_position_realized_pnl(
                     )
                 continue
 
-            description = (
-                f"Resultado {phase_label} {ticker} ({int(event.qty)}x, {event.trade_type})"
-            )
+            description = f"Resultado {phase_label} {ticker} ({int(event.qty)}x, {event.trade_type})"
             if current_ids:
                 db.execute(
                     """

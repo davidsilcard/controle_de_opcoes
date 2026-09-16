@@ -154,6 +154,7 @@
             <div class="modal-body">
               <form method="post" action="/positions/add" class="row g-3">
                 {{ csrf_input() }}
+                {{ operation_key_input() }}
                 <input type="hidden" name="next" value="{{ next_url }}">
                 <div class="col-md-3">
                   <label class="form-label small">Ticker</label>

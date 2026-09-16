@@ -9,6 +9,7 @@ from .config import (
     get_postgres_schema,
 )
 from .change_history import ensure_change_history, set_change_context
+from .operation_receipts import ensure_operation_receipts
 from .db_health import resolve_postgres_target
 from .snapshot_repository import fetch_latest_option_snapshots
 from .utils import infer_option_type, parse_ptbr_number
@@ -178,7 +179,9 @@ def _ensure_tables(conn: _DbConn, *, commit: bool) -> None:
     )
 
     _ensure_position_columns(conn)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_positions_status_trade_date ON positions (status, trade_date DESC, id DESC)"
     )
@@ -188,6 +191,7 @@ def _ensure_tables(conn: _DbConn, *, commit: bool) -> None:
     _migrate_strategy_sides(conn)
     _migrate_stock_underlying_defaults(conn)
     ensure_change_history(conn)
+    ensure_operation_receipts(conn)
     if commit:
         conn.commit()
 
@@ -381,9 +385,17 @@ def add_position(
         int(parent_position_id) if parent_position_id is not None else None,
         strategy_tag or None,
         float(contract_strike) if contract_strike is not None else None,
-        float(contract_adjusted_strike) if contract_adjusted_strike is not None else None,
+        (
+            float(contract_adjusted_strike)
+            if contract_adjusted_strike is not None
+            else None
+        ),
         contract_adjustment_date or None,
-        float(contract_exercise_strike) if contract_exercise_strike is not None else None,
+        (
+            float(contract_exercise_strike)
+            if contract_exercise_strike is not None
+            else None
+        ),
         contract_expiry or None,
         float(capital_committed) if capital_committed is not None else None,
         capital_source or None,
@@ -607,7 +619,9 @@ def update_position(
         params.append(1 if is_simulated else 0)
     if parent_position_id is not _UNSET:
         fields.append("parent_position_id = ?")
-        params.append(int(parent_position_id) if parent_position_id is not None else None)
+        params.append(
+            int(parent_position_id) if parent_position_id is not None else None
+        )
     if strategy_tag is not _UNSET:
         fields.append("strategy_tag = ?")
         params.append(strategy_tag)
@@ -636,7 +650,9 @@ def update_position(
         params.append(contract_expiry)
     if capital_committed is not _UNSET:
         fields.append("capital_committed = ?")
-        params.append(float(capital_committed) if capital_committed is not None else None)
+        params.append(
+            float(capital_committed) if capital_committed is not None else None
+        )
     if capital_source is not _UNSET:
         fields.append("capital_source = ?")
         params.append(capital_source)
@@ -699,9 +715,7 @@ def update_position_performance_metadata(
     params: list[object] = []
 
     if contract_strike is not _UNSET:
-        parsed_strike = (
-            float(contract_strike) if contract_strike is not None else None
-        )
+        parsed_strike = float(contract_strike) if contract_strike is not None else None
         if parsed_strike is not None and (
             parsed_strike <= 0 or not math.isfinite(parsed_strike)
         ):
@@ -724,7 +738,9 @@ def update_position_performance_metadata(
         parsed_adjustment_date = str(contract_adjustment_date or "").strip() or None
         if parsed_adjustment_date is not None:
             try:
-                parsed_adjustment_date = dt.date.fromisoformat(parsed_adjustment_date).isoformat()
+                parsed_adjustment_date = dt.date.fromisoformat(
+                    parsed_adjustment_date
+                ).isoformat()
             except ValueError as exc:
                 raise ValueError("Data do ajuste do contrato inválida.") from exc
         fields.append("contract_adjustment_date = ?")
@@ -899,13 +915,11 @@ def list_positions(
             params,
         ).fetchall()
         tickers = [
-            (_row_as_dict(row).get("ticker") or "").strip().upper()
-            for row in rows
+            (_row_as_dict(row).get("ticker") or "").strip().upper() for row in rows
         ]
         snapshot_map = fetch_latest_option_snapshots(tickers)
         return [
-            _row_to_dict(_attach_snapshot_fields(row, snapshot_map))
-            for row in rows
+            _row_to_dict(_attach_snapshot_fields(row, snapshot_map)) for row in rows
         ]
     finally:
         if owns_conn:
@@ -946,7 +960,12 @@ def summarize_realized_positions(
             continue
         gross_value = round(float(realized_pl), 2)
         fees_value = round(float(pos.get("fees") or 0.0), 2)
-        net_value = round(float(pos.get("pl") if pos.get("pl") is not None else gross_value - fees_value), 2)
+        net_value = round(
+            float(
+                pos.get("pl") if pos.get("pl") is not None else gross_value - fees_value
+            ),
+            2,
+        )
         closed_rows.append(
             {
                 "id": pos.get("id"),
@@ -969,31 +988,47 @@ def summarize_realized_positions(
             }
         )
 
-    closed_rows.sort(key=lambda item: (item["exit_date"], int(item["id"] or 0)), reverse=True)
+    closed_rows.sort(
+        key=lambda item: (item["exit_date"], int(item["id"] or 0)), reverse=True
+    )
     available_years = sorted({int(item["year"]) for item in closed_rows}, reverse=True)
 
     normalized_year = selected_year if selected_year in available_years else None
     if normalized_year is None and available_years:
         normalized_year = available_years[0]
 
-    available_months = sorted(
-        {int(item["month"]) for item in closed_rows if item["year"] == normalized_year}
-    ) if normalized_year is not None else []
-
-    normalized_month = (
-        selected_month if selected_month in available_months else None
+    available_months = (
+        sorted(
+            {
+                int(item["month"])
+                for item in closed_rows
+                if item["year"] == normalized_year
+            }
+        )
+        if normalized_year is not None
+        else []
     )
+
+    normalized_month = selected_month if selected_month in available_months else None
 
     def _build_totals(rows: list[dict]) -> dict:
         total_gross = round(sum(float(item["gross_result"]) for item in rows), 2)
         total_fees = round(sum(float(item["fees"]) for item in rows), 2)
         total_net = round(sum(float(item["net_result"]) for item in rows), 2)
         total_profit = round(
-            sum(float(item["net_result"]) for item in rows if float(item["net_result"]) > 0),
+            sum(
+                float(item["net_result"])
+                for item in rows
+                if float(item["net_result"]) > 0
+            ),
             2,
         )
         total_loss = round(
-            sum(float(item["net_result"]) for item in rows if float(item["net_result"]) < 0),
+            sum(
+                float(item["net_result"])
+                for item in rows
+                if float(item["net_result"]) < 0
+            ),
             2,
         )
         return {
@@ -1005,7 +1040,9 @@ def summarize_realized_positions(
             "total_loss": total_loss,
             "profit_count": sum(1 for item in rows if float(item["net_result"]) > 0),
             "loss_count": sum(1 for item in rows if float(item["net_result"]) < 0),
-            "breakeven_count": sum(1 for item in rows if float(item["net_result"]) == 0),
+            "breakeven_count": sum(
+                1 for item in rows if float(item["net_result"]) == 0
+            ),
         }
 
     monthly_index: dict[tuple[int, int], list[dict]] = {}
@@ -1034,9 +1071,13 @@ def summarize_realized_positions(
 
     filtered_rows = closed_rows
     if normalized_year is not None:
-        filtered_rows = [row for row in filtered_rows if int(row["year"]) == normalized_year]
+        filtered_rows = [
+            row for row in filtered_rows if int(row["year"]) == normalized_year
+        ]
     if normalized_month is not None:
-        filtered_rows = [row for row in filtered_rows if int(row["month"]) == normalized_month]
+        filtered_rows = [
+            row for row in filtered_rows if int(row["month"]) == normalized_month
+        ]
 
     return {
         "available_years": available_years,
@@ -1073,7 +1114,9 @@ def _row_to_dict(row: Any) -> dict:
     qty = int(row["qty"])
     fees = float(row["fees"] or 0.0)
     partial_qty = int(row["partial_qty"] or 0) if "partial_qty" in row.keys() else 0
-    partial_price = parse_decimal(row["partial_price"]) if "partial_price" in row.keys() else None
+    partial_price = (
+        parse_decimal(row["partial_price"]) if "partial_price" in row.keys() else None
+    )
     partial_date = row["partial_date"] if "partial_date" in row.keys() else None
     exit_reason = row["exit_reason"] if "exit_reason" in row.keys() else None
     last_price = parse_decimal(row["last_price_raw"])
@@ -1081,7 +1124,9 @@ def _row_to_dict(row: Any) -> dict:
     is_closed = status == "closed"
     open_qty_raw = max(qty - partial_qty, 0)
     open_qty = 0 if is_closed else open_qty_raw
-    exit_price = parse_decimal(row["exit_price"]) if "exit_price" in row.keys() else None
+    exit_price = (
+        parse_decimal(row["exit_price"]) if "exit_price" in row.keys() else None
+    )
 
     is_sim_raw = 0
     if "is_simulated" in row.keys():
@@ -1092,12 +1137,17 @@ def _row_to_dict(row: Any) -> dict:
 
     raw_side = row["side"] if "side" in row.keys() else None
     side = _normalize_side(raw_side)
-    if (raw_side is None or str(raw_side).strip() == ""):
+    if raw_side is None or str(raw_side).strip() == "":
         try:
             strat = (row["strategy_tag"] or "").strip().lower()
             ticker = (row["ticker"] or "").strip().upper()
             underlying = (row["underlying"] or "").strip().upper()
-            if strat in {"cash_put", "covered_call"} and ticker and underlying and ticker != underlying:
+            if (
+                strat in {"cash_put", "covered_call"}
+                and ticker
+                and underlying
+                and ticker != underlying
+            ):
                 side = "short"
         except Exception:
             pass
@@ -1135,7 +1185,11 @@ def _row_to_dict(row: Any) -> dict:
     extrinsic_pct_spot = None
     pct_2x = None
     last_strike = None
-    contract_strike = parse_decimal(row["contract_strike"]) if "contract_strike" in row.keys() else None
+    contract_strike = (
+        parse_decimal(row["contract_strike"])
+        if "contract_strike" in row.keys()
+        else None
+    )
     contract_adjusted_strike = (
         parse_decimal(row["contract_adjusted_strike"])
         if "contract_adjusted_strike" in row.keys()
@@ -1191,7 +1245,9 @@ def _row_to_dict(row: Any) -> dict:
         "trade_type": row["trade_type"],
         "irrf": row["irrf"] if "irrf" in row.keys() else None,
         "is_simulated": bool(is_sim_raw),
-        "parent_position_id": row["parent_position_id"] if "parent_position_id" in row.keys() else None,
+        "parent_position_id": (
+            row["parent_position_id"] if "parent_position_id" in row.keys() else None
+        ),
         "underlying_price": underlying_price,
         "extrinsic_pct_spot": extrinsic_pct_spot,
         "pct_2x": pct_2x,
@@ -1205,15 +1261,21 @@ def _row_to_dict(row: Any) -> dict:
             else None
         ),
         "contract_exercise_strike": contract_exercise_strike,
-        "contract_expiry": row["contract_expiry"] if "contract_expiry" in row.keys() else None,
+        "contract_expiry": (
+            row["contract_expiry"] if "contract_expiry" in row.keys() else None
+        ),
         "capital_committed": (
             parse_decimal(row["capital_committed"])
             if "capital_committed" in row.keys()
             else None
         ),
-        "capital_source": row["capital_source"] if "capital_source" in row.keys() else None,
+        "capital_source": (
+            row["capital_source"] if "capital_source" in row.keys() else None
+        ),
         "performance_source_ref": (
-            row["performance_source_ref"] if "performance_source_ref" in row.keys() else None
+            row["performance_source_ref"]
+            if "performance_source_ref" in row.keys()
+            else None
         ),
         "performance_evidence_state": _normalize_performance_evidence_state(
             row["performance_evidence_state"]
@@ -1225,9 +1287,11 @@ def _row_to_dict(row: Any) -> dict:
             if "performance_evidence_note" in row.keys()
             else None
         ),
-        "shared_fee_pending": bool(row["shared_fee_pending"] or 0)
-        if "shared_fee_pending" in row.keys()
-        else False,
+        "shared_fee_pending": (
+            bool(row["shared_fee_pending"] or 0)
+            if "shared_fee_pending" in row.keys()
+            else False
+        ),
         "shared_fee_note_ref": (
             row["shared_fee_note_ref"] if "shared_fee_note_ref" in row.keys() else None
         ),

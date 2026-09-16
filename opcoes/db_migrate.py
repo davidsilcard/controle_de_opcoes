@@ -15,6 +15,7 @@ _DEFAULT_TABLE_ORDER = [
     "positions",
     "ledger",
     "record_history",
+    "operation_receipts",
     "darf_months",
     "option_snapshots",
     "underlying_snapshots",
@@ -186,7 +187,9 @@ def _fetch_columns(conn, schema: str, table: str) -> List[ColumnDef]:
             type_sql=str(row["type_sql"]),
             not_null=bool(row["not_null"]),
             default_expr=(
-                str(row["default_expr"]) if row["default_expr"] not in (None, "") else None
+                str(row["default_expr"])
+                if row["default_expr"] not in (None, "")
+                else None
             ),
             identity_kind=str(row["identity_kind"] or ""),
         )
@@ -301,7 +304,7 @@ def _build_create_table_sql(blueprint: TableBlueprint, *, target_schema: str) ->
             source_schema=blueprint.schema,
             target_schema=target_schema,
         )
-        pieces.append(f'CONSTRAINT {_quote_ident(constraint.name)} {definition}')
+        pieces.append(f"CONSTRAINT {_quote_ident(constraint.name)} {definition}")
     inner = ",\n    ".join(pieces)
     return (
         f"CREATE TABLE IF NOT EXISTS {_qualify(target_schema, blueprint.table)} (\n"
@@ -357,16 +360,25 @@ def _existing_index_names(conn, schema: str, table: str) -> set[str]:
     return {str(row["name"]) for row in rows}
 
 
-def _index_sql_for_target(index: IndexDef, *, source_schema: str, target_schema: str) -> str:
+def _index_sql_for_target(
+    index: IndexDef, *, source_schema: str, target_schema: str
+) -> str:
     sql = _rewrite_schema_refs(
         index.definition,
         source_schema=source_schema,
         target_schema=target_schema,
     )
-    return re.sub(r"^CREATE\s+(UNIQUE\s+)?INDEX\s+", r"CREATE \1INDEX IF NOT EXISTS ", sql, count=1)
+    return re.sub(
+        r"^CREATE\s+(UNIQUE\s+)?INDEX\s+",
+        r"CREATE \1INDEX IF NOT EXISTS ",
+        sql,
+        count=1,
+    )
 
 
-def _ensure_schema_and_table(conn, blueprint: TableBlueprint, *, target_schema: str) -> None:
+def _ensure_schema_and_table(
+    conn, blueprint: TableBlueprint, *, target_schema: str
+) -> None:
     with conn.cursor() as cur:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(target_schema)}")
         cur.execute(_build_create_table_sql(blueprint, target_schema=target_schema))
@@ -382,7 +394,9 @@ def _ensure_schema_and_table(conn, blueprint: TableBlueprint, *, target_schema: 
                 f"{_build_column_sql(column, source_schema=blueprint.schema, target_schema=target_schema)}"
             )
 
-    current_constraints = _existing_constraint_names(conn, target_schema, blueprint.table)
+    current_constraints = _existing_constraint_names(
+        conn, target_schema, blueprint.table
+    )
     with conn.cursor() as cur:
         for constraint in blueprint.constraints:
             if constraint.name in current_constraints:
@@ -492,12 +506,20 @@ def migrate_postgres(
     source_conn = _connect(source_dsn)
     target_conn = _connect(target_dsn)
     try:
-        source_tables = _list_tables(source_conn, [source_app_schema, source_auth_schema])
+        source_tables = _list_tables(
+            source_conn, [source_app_schema, source_auth_schema]
+        )
         if not source_tables:
-            raise RuntimeError("Nenhuma tabela encontrada nos schemas de origem informados.")
+            raise RuntimeError(
+                "Nenhuma tabela encontrada nos schemas de origem informados."
+            )
 
         table_map = {
-            (schema, table): (target_auth_schema if schema == source_auth_schema else target_app_schema)
+            (schema, table): (
+                target_auth_schema
+                if schema == source_auth_schema
+                else target_app_schema
+            )
             for schema, table in source_tables
         }
         blueprints = {
@@ -514,7 +536,9 @@ def migrate_postgres(
 
         if truncate_target:
             for source_schema, table_name in reversed(source_tables):
-                _truncate_table(target_conn, table_map[(source_schema, table_name)], table_name)
+                _truncate_table(
+                    target_conn, table_map[(source_schema, table_name)], table_name
+                )
             target_conn.commit()
 
         report_tables: List[Dict[str, Any]] = []
@@ -574,7 +598,9 @@ def clone_postgres_schema(
     try:
         source_tables = _list_tables(source_conn, [source_schema])
         if not source_tables:
-            raise RuntimeError("Nenhuma tabela encontrada no schema de origem informado.")
+            raise RuntimeError(
+                "Nenhuma tabela encontrada no schema de origem informado."
+            )
 
         allowed_tables = _normalize_table_names(include_tables)
         if allowed_tables:
@@ -584,7 +610,9 @@ def clone_postgres_schema(
                 if table in allowed_tables
             ]
         if not source_tables:
-            raise RuntimeError("Nenhuma tabela selecionada para copiar no bootstrap do usuario.")
+            raise RuntimeError(
+                "Nenhuma tabela selecionada para copiar no bootstrap do usuario."
+            )
 
         blueprints = {
             (schema, table): _fetch_blueprint(source_conn, schema, table)

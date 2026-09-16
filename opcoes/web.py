@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import math
 import os
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from secrets import compare_digest, token_urlsafe
 from typing import Any, Optional
@@ -40,6 +43,11 @@ from .config import (
     set_pg_schema_override,
 )
 from .db import db_transaction, open_db
+from .operation_receipts import (
+    OperationReceiptError,
+    claim_operation_receipt,
+    complete_operation_receipt,
+)
 from .runtime_env import load_dotenv_once
 from .portfolio import (
     add_position,
@@ -139,6 +147,7 @@ from .tax import (
 
 DEFAULT_SECRET_KEY = "troque-esta-chave-em-producao"
 CSRF_FIELD_NAME = "_csrf_token"
+OPERATION_KEY_FIELD_NAME = "_operation_key"
 LOCAL_DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 
 
@@ -155,13 +164,29 @@ def _position_exit_reason_key(value: Any) -> str:
     }.get(reason, reason)
 
 
-def _position_closure_financial_signature(position: Mapping[str, Any]) -> tuple[Any, ...]:
+def _position_closure_financial_signature(
+    position: Mapping[str, Any],
+) -> tuple[Any, ...]:
     """Dados que podem alterar os lançamentos sincronizados pela edição de posições."""
 
     fields = (
-        "ticker", "trade_date", "qty", "entry_price", "fees", "trade_type",
-        "side", "irrf", "status", "exit_date", "exit_price", "partial_date",
-        "partial_price", "partial_qty", "exit_reason", "is_simulated", "strategy_tag",
+        "ticker",
+        "trade_date",
+        "qty",
+        "entry_price",
+        "fees",
+        "trade_type",
+        "side",
+        "irrf",
+        "status",
+        "exit_date",
+        "exit_price",
+        "partial_date",
+        "partial_price",
+        "partial_qty",
+        "exit_reason",
+        "is_simulated",
+        "strategy_tag",
     )
     zero_equivalent = {"fees", "irrf", "partial_qty"}
     numeric_fields = {"qty", "entry_price", "exit_price", "partial_price"}
@@ -174,7 +199,13 @@ def _position_closure_financial_signature(position: Mapping[str, Any]) -> tuple[
         elif field in numeric_fields:
             value = float(value) if value is not None and value != "" else None
         elif field == "is_simulated":
-            value = str(value or "").strip().lower() in {"1", "true", "sim", "yes", "on"}
+            value = str(value or "").strip().lower() in {
+                "1",
+                "true",
+                "sim",
+                "yes",
+                "on",
+            }
         elif field == "exit_reason":
             value = _position_exit_reason_key(value)
         else:
@@ -868,6 +899,41 @@ def create_app() -> Flask:
         token = _csrf_token_value()
         return Markup(f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">')
 
+    def _operation_key_input() -> Markup:
+        """Gera uma chave exclusiva por formulário para impedir clique duplo."""
+
+        key = str(uuid.uuid4())
+        return Markup(
+            f'<input type="hidden" name="{OPERATION_KEY_FIELD_NAME}" value="{key}">'
+        )
+
+    def _operation_payload_hash(form: Any) -> str:
+        """Resume os dados econômicos sem guardar seu conteúdo no recibo."""
+
+        payload: dict[str, list[str]] = {}
+        for key in sorted(form.keys()):
+            if key in {CSRF_FIELD_NAME, OPERATION_KEY_FIELD_NAME, "next"}:
+                continue
+            payload[str(key)] = [str(value) for value in form.getlist(key)]
+        encoded = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _claim_form_operation_receipt(conn: Any, *, command_name: str, form: Any):
+        key = (form.get(OPERATION_KEY_FIELD_NAME) or "").strip()
+        # Os testes legados fazem POSTs diretos sem renderizar o formulário.
+        # Em produção a chave é obrigatória e nunca há esse atalho.
+        if app.testing and not key:
+            return None
+        return claim_operation_receipt(
+            conn,
+            command_name=command_name,
+            idempotency_key=key,
+            payload_hash=_operation_payload_hash(form),
+            actor=getattr(g, "current_username", None),
+        )
+
     def _client_ip() -> str:
         # Com ProxyFix ativo, remote_addr já reflete o IP do cliente quando o
         # proxy frontal é confiável. Evitamos confiar em X-Forwarded-For cru.
@@ -1099,6 +1165,7 @@ def create_app() -> Flask:
             ),
             "csrf_token": _csrf_token_value,
             "csrf_input": _csrf_input,
+            "operation_key_input": _operation_key_input,
             "static_asset_version": static_asset_version,
         }
 
@@ -1645,13 +1712,31 @@ def create_app() -> Flask:
         if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
             amount = -amount
 
-        finance.add_transaction(
-            date=date,
-            type=tx_type,
-            amount=amount,
-            description=desc,
-            is_simulated=is_simulated,
-        )
+        try:
+            with db_transaction() as conn:
+                receipt = _claim_form_operation_receipt(
+                    conn,
+                    command_name="finance.manual_add",
+                    form=form,
+                )
+                if receipt is None or not receipt.replayed:
+                    tx_id = finance.add_transaction(
+                        date=date,
+                        type=tx_type,
+                        amount=amount,
+                        description=desc,
+                        is_simulated=is_simulated,
+                        conn=conn,
+                    )
+                    if receipt is not None:
+                        complete_operation_receipt(
+                            conn,
+                            receipt_id=receipt.id,
+                            result_entity_type="ledger",
+                            result_entity_id=tx_id,
+                        )
+        except OperationReceiptError as exc:
+            return redirect(url_for("cash_covered_put", position_error=str(exc)))
         return redirect(url_for("cash_covered_put"))
 
     @app.post("/finance/assign")
@@ -1703,7 +1788,9 @@ def create_app() -> Flask:
         except (HoldingValidationError, FlowError) as exc:
             message = str(exc) or "Nao foi possivel registrar o exercicio da PUT."
             return redirect(
-                url_for("cash_covered_put", underlying=underlying, position_error=message)
+                url_for(
+                    "cash_covered_put", underlying=underlying, position_error=message
+                )
                 if underlying
                 else url_for("cash_covered_put")
             )
@@ -2279,8 +2366,15 @@ def create_app() -> Flask:
                 linkage_pending_cycles.append(cycle)
             if warning_reasons:
                 note_ref = str(cycle.get("shared_fee_note_ref") or "").strip()
-                group_key = f"reference:{note_ref}" if note_ref else f"position:{cycle['position_id']}"
-                note_ref = note_ref or f"Referência não informada — posição #{cycle['position_id']}"
+                group_key = (
+                    f"reference:{note_ref}"
+                    if note_ref
+                    else f"position:{cycle['position_id']}"
+                )
+                note_ref = (
+                    note_ref
+                    or f"Referência não informada — posição #{cycle['position_id']}"
+                )
                 group = shared_fee_groups_by_ref.setdefault(
                     group_key,
                     {
@@ -2290,9 +2384,15 @@ def create_app() -> Flask:
                 )
                 group["cycles"].append(cycle)
 
-        for queue in (evidence_pending_cycles, guarantee_pending_cycles, linkage_pending_cycles):
+        for queue in (
+            evidence_pending_cycles,
+            guarantee_pending_cycles,
+            linkage_pending_cycles,
+        ):
             queue.sort(
-                key=lambda cycle: abs(float(cycle.get("total_result") or cycle.get("premium") or 0.0)),
+                key=lambda cycle: abs(
+                    float(cycle.get("total_result") or cycle.get("premium") or 0.0)
+                ),
                 reverse=True,
             )
         shared_fee_groups = list(shared_fee_groups_by_ref.values())
@@ -2338,7 +2438,9 @@ def create_app() -> Flask:
         submitted_strike = (request.form.get("contract_strike") or "").strip()
         submitted_capital = (request.form.get("capital_committed") or "").strip()
         submitted_expiry = (request.form.get("contract_expiry") or "").strip()
-        submitted_source_ref = (request.form.get("performance_source_ref") or "").strip()
+        submitted_source_ref = (
+            request.form.get("performance_source_ref") or ""
+        ).strip()
         parent_position_id = _parse_optional_positive_int(
             request.form.get("stock_position_id")
         )
@@ -2436,7 +2538,9 @@ def create_app() -> Flask:
                     )
 
                 stock_position = None
-                if parent_position_id is not None and _is_call_exercise_position(position):
+                if parent_position_id is not None and _is_call_exercise_position(
+                    position
+                ):
                     stock_position = get_position(
                         parent_position_id,
                         conn=conn,
@@ -2533,9 +2637,7 @@ def create_app() -> Flask:
 
                 def is_missing_positive_value(value: Any) -> bool:
                     try:
-                        return not (
-                            float(value) > 0 and math.isfinite(float(value))
-                        )
+                        return not (float(value) > 0 and math.isfinite(float(value)))
                     except (TypeError, ValueError):
                         return True
 
@@ -2612,7 +2714,9 @@ def create_app() -> Flask:
                 notes=(request.form.get("notes") or ""),
             )
         except WheelCycleError as exc:
-            return redirect(url_for("performance_view", mode=mode, wheel_error=str(exc)))
+            return redirect(
+                url_for("performance_view", mode=mode, wheel_error=str(exc))
+            )
         return redirect(
             url_for(
                 "performance_view",
@@ -2637,14 +2741,18 @@ def create_app() -> Flask:
                 cycle_id=cycle_id,
                 leg_type=leg_type,
                 position_id=int(raw_position_id) if raw_position_id else None,
-                holding_event_id=int(raw_holding_event_id) if raw_holding_event_id else None,
+                holding_event_id=(
+                    int(raw_holding_event_id) if raw_holding_event_id else None
+                ),
                 quantity=int(raw_quantity) if raw_quantity else None,
                 amount_override=amount_override,
                 source_ref=(request.form.get("source_ref") or ""),
                 notes=(request.form.get("notes") or ""),
             )
         except (ValueError, WheelCycleError) as exc:
-            return redirect(url_for("performance_view", mode=mode, wheel_error=str(exc)))
+            return redirect(
+                url_for("performance_view", mode=mode, wheel_error=str(exc))
+            )
         return redirect(
             url_for(
                 "performance_view",
@@ -2656,6 +2764,7 @@ def create_app() -> Flask:
     @app.post("/positions/add")
     def add_position_view():
         form = request.form
+        next_url = _safe_next_url(form.get("next")) or url_for("positions")
         ticker = form.get("ticker", "").strip()
         underlying_input = form.get("underlying", "").strip()
         is_simulated = form.get("is_simulated") == "1"
@@ -2860,13 +2969,26 @@ def create_app() -> Flask:
                 )
             return pos_id_inner
 
-        if strategy_norm in {"cash_put", "covered_call", "ranking"}:
+        try:
             with db_transaction() as conn:
-                _insert_position_and_optional_premium(conn)
-        else:
-            _insert_position_and_optional_premium()
+                receipt = _claim_form_operation_receipt(
+                    conn,
+                    command_name="positions.add",
+                    form=form,
+                )
+                if receipt is None or not receipt.replayed:
+                    pos_id = _insert_position_and_optional_premium(conn)
+                    if receipt is not None:
+                        complete_operation_receipt(
+                            conn,
+                            receipt_id=receipt.id,
+                            result_entity_type="position",
+                            result_entity_id=pos_id,
+                        )
+        except OperationReceiptError as exc:
+            return redirect(_url_with_query(next_url, position_error=str(exc)))
 
-        return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
+        return redirect(next_url)
 
     @app.post("/positions/register-premium/<int:position_id>")
     def register_position_premium(position_id: int):
@@ -3001,7 +3123,9 @@ def create_app() -> Flask:
         with db_transaction() as conn:
             return _update_position_from_form(position_id, request.form, conn)
 
-    def _update_position_from_form(position_id: int, form: Mapping[str, Any], conn: Any):
+    def _update_position_from_form(
+        position_id: int, form: Mapping[str, Any], conn: Any
+    ):
         persisted_pos = get_position(position_id, conn=conn, for_update=True)
         if not persisted_pos:
             return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
@@ -3047,7 +3171,9 @@ def create_app() -> Flask:
         partial_qty = int(form["partial_qty"]) if form.get("partial_qty") else None
         exit_reason = (form.get("exit_reason") or "").strip() or None
         persisted_reason = persisted_pos.get("exit_reason")
-        if _position_exit_reason_key(exit_reason) == _position_exit_reason_key(persisted_reason):
+        if _position_exit_reason_key(exit_reason) == _position_exit_reason_key(
+            persisted_reason
+        ):
             exit_reason = persisted_reason
 
         # Páginas abertas antes da correção do formulário enviavam zero como vazio.
@@ -3058,14 +3184,16 @@ def create_app() -> Flask:
             and status == "closed"
             and str(persisted_pos.get("status") or "").strip().lower() == "closed"
             and exit_date == (str(persisted_pos.get("exit_date") or "").strip() or None)
-            and _position_exit_reason_key(exit_reason) == _position_exit_reason_key(persisted_reason)
+            and _position_exit_reason_key(exit_reason)
+            == _position_exit_reason_key(persisted_reason)
         ):
             exit_price = 0.0
         if (
             partial_price is None
             and persisted_pos.get("partial_price") == 0
             and int(partial_qty or 0) == int(persisted_pos.get("partial_qty") or 0)
-            and partial_date == (str(persisted_pos.get("partial_date") or "").strip() or None)
+            and partial_date
+            == (str(persisted_pos.get("partial_date") or "").strip() or None)
         ):
             partial_price = 0.0
         if status == "open":
@@ -3379,15 +3507,15 @@ def create_app() -> Flask:
         current_ref = str(current or "").strip()
         submitted_ref = str(submitted or "").strip()
         existing_refs = {
-            item.strip()
-            for item in current_ref.split(" | ")
-            if item.strip()
+            item.strip() for item in current_ref.split(" | ") if item.strip()
         }
         if submitted_ref and submitted_ref not in existing_refs:
             return f"{current_ref} | {submitted_ref}" if current_ref else submitted_ref
         return current_ref or submitted_ref
 
-    def _is_short_strategy_performance_position(position: dict[str, Any] | None) -> bool:
+    def _is_short_strategy_performance_position(
+        position: dict[str, Any] | None,
+    ) -> bool:
         if not position:
             return False
         return (

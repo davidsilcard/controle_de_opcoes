@@ -28,6 +28,7 @@ from .db_health import resolve_postgres_target
 from .db_migrate import clone_postgres_schema, migrate_postgres
 from .db_optimize import optimize_postgres_schema
 from .change_history import install_change_history
+from .operation_receipts import install_operation_receipts
 from . import finance
 from .fundamentus import (
     FundamentusFilterConfig,
@@ -787,6 +788,10 @@ def parse_args() -> argparse.Namespace:
         "history-install",
         help="Instala o histórico imutável de posições e razão no schema ativo.",
     )
+    db_receipts = dbs.add_parser(
+        "receipts-install",
+        help="Instala recibos idempotentes de cadastros no schema ativo.",
+    )
     db_migrate = dbs.add_parser(
         "migrate",
         help="Migra todas as tabelas dos schemas da aplicação entre dois PostgreSQLs via COPY streaming.",
@@ -975,16 +980,27 @@ def parse_args() -> argparse.Namespace:
         "--put-position-id", type=int, required=True, help="ID da PUT exercida."
     )
     put_exercise_repair.add_argument(
-        "--exercise-date", required=True, help="Data documental do exercício (YYYY-MM-DD)."
+        "--exercise-date",
+        required=True,
+        help="Data documental do exercício (YYYY-MM-DD).",
     )
     put_exercise_repair.add_argument(
-        "--original-strike", type=float, required=True, help="Strike da nota de abertura."
+        "--original-strike",
+        type=float,
+        required=True,
+        help="Strike da nota de abertura.",
     )
     put_exercise_repair.add_argument(
-        "--exercise-strike", type=float, required=True, help="Strike efetivamente aplicado no exercício."
+        "--exercise-strike",
+        type=float,
+        required=True,
+        help="Strike efetivamente aplicado no exercício.",
     )
     put_exercise_repair.add_argument(
-        "--purchase-fees", type=float, required=True, help="Despesas individuais da nota de exercício."
+        "--purchase-fees",
+        type=float,
+        required=True,
+        help="Despesas individuais da nota de exercício.",
     )
     put_exercise_repair.add_argument(
         "--source-ref", required=True, help="Referência documental da auditoria."
@@ -998,11 +1014,21 @@ def parse_args() -> argparse.Namespace:
         "contract-adjustment",
         help="Simula ou registra strikes original e ajustado comprovados para uma opção vendida.",
     )
-    contract_adjustment.add_argument("--position-id", type=int, required=True, help="ID da opção vendida.")
-    contract_adjustment.add_argument("--original-strike", type=float, required=True, help="Strike na abertura.")
-    contract_adjustment.add_argument("--adjusted-strike", type=float, required=True, help="Strike após o ajuste.")
-    contract_adjustment.add_argument("--adjustment-date", required=True, help="Data do ajuste (YYYY-MM-DD).")
-    contract_adjustment.add_argument("--source-ref", required=True, help="Referência documental da auditoria.")
+    contract_adjustment.add_argument(
+        "--position-id", type=int, required=True, help="ID da opção vendida."
+    )
+    contract_adjustment.add_argument(
+        "--original-strike", type=float, required=True, help="Strike na abertura."
+    )
+    contract_adjustment.add_argument(
+        "--adjusted-strike", type=float, required=True, help="Strike após o ajuste."
+    )
+    contract_adjustment.add_argument(
+        "--adjustment-date", required=True, help="Data do ajuste (YYYY-MM-DD)."
+    )
+    contract_adjustment.add_argument(
+        "--source-ref", required=True, help="Referência documental da auditoria."
+    )
     contract_adjustment.add_argument(
         "--apply",
         action="store_true",
@@ -1590,8 +1616,18 @@ def main() -> None:
             try:
                 install_change_history()
             except Exception as exc:
-                raise SystemExit(f"Falha ao instalar histórico imutável: {exc}") from exc
+                raise SystemExit(
+                    f"Falha ao instalar histórico imutável: {exc}"
+                ) from exc
             print("Histórico imutável instalado no schema ativo.")
+        elif args.subcmd == "receipts-install":
+            try:
+                install_operation_receipts()
+            except Exception as exc:
+                raise SystemExit(
+                    f"Falha ao instalar recibos idempotentes: {exc}"
+                ) from exc
+            print("Recibos idempotentes instalados no schema ativo.")
         elif args.subcmd == "migrate":
             source_dsn = args.source_dsn
             if not source_dsn:
@@ -1777,7 +1813,12 @@ def main() -> None:
             print(
                 f"  Despesas: R$ {report['purchase_fees']:.2f} | débito ASSIGN: R$ {report['assignment_amount']:.2f} | "
                 "referências posteriores refeitas: "
-                + (", ".join(f"#{event_id}" for event_id in report["holding_events_rebased"]) or "nenhuma")
+                + (
+                    ", ".join(
+                        f"#{event_id}" for event_id in report["holding_events_rebased"]
+                    )
+                    or "nenhuma"
+                )
             )
         elif args.subcmd == "contract-adjustment":
             try:
@@ -1808,15 +1849,27 @@ def main() -> None:
             print(f"Backfill de ciclos Wheel: {mode}")
             for item in report["ready"]:
                 legs = item.get("position_legs") or []
-                ids = ", ".join(f"#{position['id']} ({leg_type})" for position, leg_type in legs)
+                ids = ", ".join(
+                    f"#{position['id']} ({leg_type})" for position, leg_type in legs
+                )
                 event_legs = item.get("holding_event_legs") or []
-                event_ids = ", ".join(f"evento #{event['id']} ({leg_type})" for event, leg_type in event_legs)
+                event_ids = ", ".join(
+                    f"evento #{event['id']} ({leg_type})"
+                    for event, leg_type in event_legs
+                )
                 ids = ", ".join(part for part in (ids, event_ids) if part)
                 print(f"  PUT #{item['put_position_id']}: {item['status']} | {ids}")
             for item in report["requires_review"]:
-                print(f"  PUT #{item['put_position_id']}: requer conferencia | {item['reason']}")
+                print(
+                    f"  PUT #{item['put_position_id']}: requer conferencia | {item['reason']}"
+                )
             if report["created_cycle_ids"]:
-                print("  Ciclos criados: " + ", ".join(f"#{cycle_id}" for cycle_id in report["created_cycle_ids"]))
+                print(
+                    "  Ciclos criados: "
+                    + ", ".join(
+                        f"#{cycle_id}" for cycle_id in report["created_cycle_ids"]
+                    )
+                )
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 

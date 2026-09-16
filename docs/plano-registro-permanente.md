@@ -48,6 +48,13 @@ do PostgreSQL. A interface exige o motivo e atribui a anulação ao usuário
 autenticado. As rotinas de reversão financeira por estratégia continuam sendo
 implementadas antes de qualquer substituição de cálculo automático.
 
+Segunda entrega da fase: `operation_receipts` associa cada envio de cadastro a
+uma chave única e a uma impressão criptográfica dos campos. Posição/opção e
+movimentação manual de caixa são gravadas junto do recibo, na mesma transação.
+Reenviar o mesmo formulário reaproveita o recibo; usar sua chave com dados
+distintos é bloqueado. Exercício, expiração, encerramento e edição serão
+migrados em recortes próprios, pois cada um tem regras financeiras diferentes.
+
 **Aceitação:** uma tentativa repetida não cria novo evento; uma correção deixa
 o original, a reversão e o motivo visíveis; não existe rota operacional de
 `DELETE` para dados publicados.
