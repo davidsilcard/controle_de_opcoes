@@ -12,6 +12,20 @@ function Require-Command {
     }
 }
 
+function Get-GitHubCli {
+    $command = Get-Command gh -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $installedPath = Join-Path $env:ProgramFiles "GitHub CLI\\gh.exe"
+    if (Test-Path $installedPath) {
+        return $installedPath
+    }
+
+    throw "GitHub CLI nao encontrado. Instale-o com: winget install --id GitHub.cli --exact --source winget"
+}
+
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
 
@@ -25,7 +39,7 @@ function Invoke-Git {
 function Get-WorkflowRun {
     param([Parameter(Mandatory = $true)][string]$CommitSha)
 
-    $json = & gh run list --workflow tests.yml --commit $CommitSha --limit 1 --json databaseId,status,conclusion,headSha,url
+    $json = & $githubCli run list --workflow tests.yml --commit $CommitSha --limit 1 --json databaseId,status,conclusion,headSha,url
     if ($LASTEXITCODE -ne 0) {
         throw "Nao foi possivel consultar o GitHub Actions. Execute 'gh auth status' e conclua a autenticacao, se necessario."
     }
@@ -42,7 +56,7 @@ Push-Location $repositoryRoot
 
 try {
     Require-Command git
-    Require-Command gh
+    $githubCli = Get-GitHubCli
 
     $sshExecutable = Join-Path $env:WINDIR "System32\\OpenSSH\\ssh.exe"
     if (-not (Test-Path $sshExecutable)) {
@@ -73,7 +87,7 @@ try {
     $run = Get-WorkflowRun -CommitSha $localSha
     if ($run.status -ne "completed") {
         Write-Host "O CI ainda esta em execucao; aguardando a conclusao: $($run.url)"
-        & gh run watch $run.databaseId --exit-status
+        & $githubCli run watch $run.databaseId --exit-status
         if ($LASTEXITCODE -ne 0) {
             throw "O workflow Testes PostgreSQL falhou ou foi cancelado. A VPS nao foi alterada."
         }

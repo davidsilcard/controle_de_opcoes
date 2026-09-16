@@ -13,8 +13,8 @@ def test_release_script_requires_clean_main_ci_and_official_vps_deploy() -> None
     assert 'branch -ne "main"' in script
     assert "Invoke-Git fetch origin main" in script
     assert "Invoke-Git rev-parse origin/main" in script
-    assert "gh run list --workflow tests.yml" in script
-    assert "gh run watch $run.databaseId --exit-status" in script
+    assert "$githubCli run list --workflow tests.yml" in script
+    assert "$githubCli run watch $run.databaseId --exit-status" in script
     assert "bash deploy/scripts/update-vps.sh" in script
     assert "curl -fsSI --max-time 10 http://127.0.0.1:8000/login" in script
     assert "curl -fsS --max-time 10 http://127.0.0.1:8011/health" in script
