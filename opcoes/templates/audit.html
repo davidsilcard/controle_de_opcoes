@@ -72,6 +72,33 @@
         </div>
       </form>
 
+      {% set integrity = integrity_report|default({'total': 0, 'counts': {'orphan': 0, 'duplicate': 0, 'state': 0, 'divergence': 0}, 'findings': [], 'unverifiable_darf_count': 0}) %}
+      <section class="card mb-4 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1">Relatório de integridade</h2>
+              <p class="small text-muted mb-0">Somente leitura: aponta evidências para conferência, sem corrigir ou excluir registros.</p>
+            </div>
+            <span class="badge text-bg-{{ 'success' if integrity.total == 0 else 'warning' }}">{{ integrity.total }} alerta(s)</span>
+          </div>
+          <div class="row g-2 small mb-3">
+            <div class="col-md-3"><div class="border rounded p-2"><strong>{{ integrity.counts.orphan }}</strong><br><span class="text-muted">lançamento órfão</span></div></div>
+            <div class="col-md-3"><div class="border rounded p-2"><strong>{{ integrity.counts.duplicate }}</strong><br><span class="text-muted">possível duplicidade</span></div></div>
+            <div class="col-md-3"><div class="border rounded p-2"><strong>{{ integrity.counts.state }}</strong><br><span class="text-muted">estado incompatível</span></div></div>
+            <div class="col-md-3"><div class="border rounded p-2"><strong>{{ integrity.counts.divergence }}</strong><br><span class="text-muted">divergência financeira</span></div></div>
+          </div>
+          {% if integrity.unverifiable_darf_count %}<p class="small text-muted">{{ integrity.unverifiable_darf_count }} caso(s) de DARF sem rateio documental não entram como divergência.</p>{% endif %}
+          {% if integrity.findings %}
+            <div class="table-responsive"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Categoria</th><th>Referência</th><th>Diagnóstico</th><th>Próximo passo</th></tr></thead><tbody>
+              {% for finding in integrity.findings %}<tr><td><span class="badge text-bg-{{ 'danger' if finding.category in ['orphan', 'divergence'] else 'warning' }}">{{ finding.category_label }}</span></td><td>{% if finding.position_id %}#{{ finding.position_id }} {% endif %}{{ finding.ticker }}<br><span class="small text-muted">{{ finding.code }}</span></td><td>{{ finding.message }}</td><td class="small">{{ finding.action }}</td></tr>{% endfor %}
+            </tbody></table></div>
+          {% else %}
+            <div class="alert alert-success py-2 mb-0">Nenhuma inconsistência detectada pelas regras atuais.</div>
+          {% endif %}
+        </div>
+      </section>
+
       {% if audit_issues %}
         <div class="alert alert-danger mb-4" role="alert">
           <div class="fw-semibold mb-2">A Auditoria encontrou regras quebradas.</div>

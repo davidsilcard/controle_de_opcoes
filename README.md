@@ -305,6 +305,8 @@ Na grade genérica de `Posições`, alterações financeiras continuam disponív
 
 O botão `Histórico` de cada posição abre uma consulta somente leitura das revisões preservadas, com data, responsável, motivo e valores antes/depois. Ele não é um atalho para corrigir operações de estratégia: Cash-Covered Put, Covered Call e Wheel continuam exigindo seus fluxos próprios para não separar caixa, estoque e resultado.
 
+Em `/audit`, o `Relatório de integridade` reúne os diagnósticos existentes em quatro grupos: lançamento órfão, possível duplicidade, estado incompatível e divergência financeira. Ele é somente leitura e orienta a conferência por posição; totais não devem ser ajustados diretamente. DARF sem rateio documental fica marcada como não verificável, não como divergência confirmada.
+
 Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
 
 ```bash

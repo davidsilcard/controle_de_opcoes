@@ -34,6 +34,7 @@ def test_audit_route_renders_realized_section(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
+    monkeypatch.setattr("opcoes.web.list_holding_snapshots", lambda **_kwargs: [])
 
     app = create_app()
     app.testing = True
@@ -45,3 +46,5 @@ def test_audit_route_renders_realized_section(monkeypatch) -> None:
     html = response.get_data(as_text=True)
     assert "Resultado realizado (nao caixa)" in html
     assert "Realizado ledger" in html
+    assert "Relatório de integridade" in html
+    assert "Somente leitura" in html

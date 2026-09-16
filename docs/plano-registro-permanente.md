@@ -114,7 +114,7 @@ resultado. O razão financeiro, a declaração manual de garantia, a pendência
 documental e a auditoria concluída sem prova são estados cumulativos; nenhum
 deles oculta um cálculo financeiro já conhecido.
 
-## Fase 4 — auditoria e publicação
+## Fase 4 — auditoria e publicação (em andamento)
 
 1. Criar relatório de integridade: órfãos, duplicidades candidatas, estados
    incompatíveis e totais divergentes por estratégia.
@@ -122,6 +122,13 @@ deles oculta um cálculo financeiro já conhecido.
    anulação, expiração, exercício e DARF.
 3. Publicar somente após backup restaurável verificado, testes verdes, commit e
    push na `main`; usar exclusivamente `deploy/scripts/update-vps.sh`.
+
+Primeira entrega da fase: `/audit` consolida as regras de caixa, posições,
+Cash-Covered Put e Covered Call em um relatório somente leitura. Cada achado é
+classificado como lançamento órfão, possível duplicidade, estado incompatível
+ou divergência financeira; alertas equivalentes não são repetidos. Totais sem
+rateio documental de DARF continuam explicitamente não verificáveis, em vez de
+serem apresentados como erro ou como cálculo certificado.
 
 ## Ordem de entrega
 

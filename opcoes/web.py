@@ -117,6 +117,7 @@ from .wheel_cycles import (
     list_wheel_cycles,
 )
 from .audit_reconciliation import build_audit_reconciliation
+from .integrity_report import build_integrity_report
 from .holdings import (
     HoldingValidationError,
     get_holding_snapshot,
@@ -2426,6 +2427,19 @@ def create_app() -> Flask:
             ]
 
         inventory_summary = _build_inventory_overview_global(positions_all)
+        audit_open_positions = [
+            position
+            for position in positions_all
+            if str(position.get("status") or "").strip().lower() == "open"
+        ]
+        holding_events = list_holding_events(
+            limit=1000,
+            is_simulated=is_simulated,
+        )
+        holding_snapshots = list_holding_snapshots(
+            is_simulated=is_simulated,
+            positions_open=audit_open_positions,
+        )
 
         ledger_sums = finance.get_ledger_sums_by_position(
             types=[
@@ -2442,7 +2456,17 @@ def create_app() -> Flask:
             positions_all,
             ledger_sums=ledger_sums,
             include_closed=include_closed,
-            holding_events=list_holding_events(limit=1000),
+            holding_events=holding_events,
+        )
+        integrity_report = build_integrity_report(
+            reconciliation_issues=audit_context["audit_issues"],
+            position_issues=audit_positions_page(
+                positions_all,
+                ledger_sums=ledger_sums,
+                holding_snapshots=holding_snapshots,
+                holding_events=holding_events,
+            ),
+            totals=audit_context["totals"],
         )
 
         return render_template(
@@ -2454,6 +2478,7 @@ def create_app() -> Flask:
             orphan_rows=audit_context["orphan_rows"],
             audit_issues=audit_context["audit_issues"],
             inventory_summary=inventory_summary,
+            integrity_report=integrity_report,
         )
 
     @app.route("/performance")
