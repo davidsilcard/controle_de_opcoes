@@ -57,9 +57,12 @@ if [[ -n "$dirty_files" ]]; then
   exit 1
 fi
 
-echo "[1/9] Atualizando codigo do Git..."
+echo "[1/10] Atualizando codigo do Git..."
 git fetch "$REMOTE"
 git pull --ff-only "$REMOTE" "$BRANCH"
+
+echo "[2/10] Validando configuracao operacional do proxy..."
+/bin/bash "$APP_DIR/deploy/scripts/ensure-vps-runtime-env.sh"
 
 SCRIPT_DIGEST_AFTER="$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')"
 if [[ "$SCRIPT_DIGEST_BEFORE" != "$SCRIPT_DIGEST_AFTER" && "${OPCOES_DEPLOY_REEXECED:-0}" != "1" ]]; then
@@ -67,7 +70,7 @@ if [[ "$SCRIPT_DIGEST_BEFORE" != "$SCRIPT_DIGEST_AFTER" && "${OPCOES_DEPLOY_REEX
   OPCOES_DEPLOY_REEXECED=1 exec /bin/bash "$SCRIPT_PATH" "$@"
 fi
 
-echo "[2/9] Validando espaco livre para o build..."
+echo "[3/10] Validando espaco livre para o build..."
 if [[ ! "$DOCKER_MIN_FREE_KB" =~ ^[0-9]+$ ]]; then
   echo "DOCKER_MIN_FREE_KB precisa ser um numero inteiro positivo." >&2
   exit 1
@@ -86,30 +89,30 @@ if (( available_kb < DOCKER_MIN_FREE_KB )); then
 fi
 echo "Espaco livre validado: ${available_kb} KB em $docker_root_dir."
 
-echo "[3/9] Rebuild das imagens..."
+echo "[4/10] Rebuild das imagens..."
 /bin/bash "$COMPOSE_HELPER" build
 
-echo "[4/9] Trocando containers da stack..."
+echo "[5/10] Trocando containers da stack..."
 # O Compose da VPS recria containers em modo start-first. Como os nomes sao
 # fixos por servico, remover a stack somente apos o build evita conflito de nome
 # sem derrubar a versao em execucao caso o build falhe.
 /bin/bash "$COMPOSE_HELPER" down --remove-orphans
 /bin/bash "$COMPOSE_HELPER" up -d --no-build --remove-orphans
 
-echo "[5/9] Validando containers..."
+echo "[6/10] Validando containers..."
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-echo "[6/9] Smoke test web..."
+echo "[7/10] Smoke test web..."
 wait_for_url "web" "$WEB_CHECK_URL" "head"
 
-echo "[7/9] Smoke test edge..."
+echo "[8/10] Smoke test edge..."
 wait_for_url "edge" "$EDGE_CHECK_URL" "body"
 curl -fsS "$EDGE_CHECK_URL"
 
-echo "[8/9] Removendo imagens antigas e sem uso deste projeto..."
+echo "[9/10] Removendo imagens antigas e sem uso deste projeto..."
 docker image prune -f --filter "label=${DOCKER_IMAGE_PRUNE_LABEL}"
 
-echo "[9/9] Reservando ${DOCKER_BUILD_CACHE_RESERVED_SPACE} para cache Docker..."
+echo "[10/10] Reservando ${DOCKER_BUILD_CACHE_RESERVED_SPACE} para cache Docker..."
 docker builder prune -af --reserved-space "$DOCKER_BUILD_CACHE_RESERVED_SPACE"
 docker system df
 echo "Deploy concluido com sucesso."

@@ -335,7 +335,10 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
     assert len(stock_rows) == 1
     stock = stock_rows[0]
     assert stock["fees"] == 1.25
-    assert stock["realized_pl"] == pytest.approx(1470.75)
+    # A posição preserva o resultado bruto; `pl` e o ledger REALIZED expõem o
+    # resultado fiscal líquido das despesas documentadas da venda.
+    assert stock["realized_pl"] == pytest.approx(1472.0)
+    assert stock["pl"] == pytest.approx(1470.75)
     ledger = finance.get_ledger_sums_by_position()
     assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
     assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
@@ -414,7 +417,9 @@ def test_covered_call_fee_repair_updates_legacy_cash_and_event_without_changing_
     assert list_holding_events(related_position_id=call_id)[0]["fees"] == 1.25
     ledger = finance.get_ledger_sums_by_position()
     assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
-    assert portfolio.get_position(stock["id"])["realized_pl"] == pytest.approx(1470.75)
+    repaired_stock = portfolio.get_position(stock["id"])
+    assert repaired_stock["realized_pl"] == pytest.approx(1472.0)
+    assert repaired_stock["pl"] == pytest.approx(1470.75)
 
 
 def test_covered_call_exercise_rejects_missing_sale_fees() -> None:

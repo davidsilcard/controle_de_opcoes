@@ -23,8 +23,8 @@ def test_index_uses_ranking_cache(monkeypatch) -> None:
     app.testing = True
     client = app.test_client()
 
-    first = client.get("/")
-    second = client.get("/")
+    first = client.get("/partial/ranking")
+    second = client.get("/partial/ranking")
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -50,14 +50,14 @@ def test_index_cache_is_invalidated_after_write_post(monkeypatch) -> None:
     app.testing = True
     client = app.test_client()
 
-    client.get("/")
+    client.get("/partial/ranking")
     assert calls["count"] == 1
 
     # Endpoint de escrita; deve invalidar o cache da home para o usuário atual.
     resp = client.post("/finance/delete/999")
     assert resp.status_code in {302, 303}
 
-    client.get("/")
+    client.get("/partial/ranking")
     assert calls["count"] == 2
 
 
@@ -81,15 +81,15 @@ def test_index_cache_is_isolated_by_user(monkeypatch) -> None:
 
     with client.session_transaction() as sess:
         sess["username"] = "alice"
-    client.get("/")
+    client.get("/partial/ranking")
 
     with client.session_transaction() as sess:
         sess["username"] = "bob"
-    client.get("/")
+    client.get("/partial/ranking")
 
     with client.session_transaction() as sess:
         sess["username"] = "alice"
-    client.get("/")
+    client.get("/partial/ranking")
 
     # alice = 1 chamada, bob = 1 chamada, alice novamente usa cache.
     assert calls["count"] == 2
@@ -112,7 +112,7 @@ def test_index_uses_persisted_ranking_cache_across_app_instances(monkeypatch) ->
     app_one.testing = True
     client_one = app_one.test_client()
 
-    first = client_one.get("/")
+    first = client_one.get("/partial/ranking")
     assert first.status_code == 200
     assert first.data.decode() == "v=1"
     assert calls["count"] == 1
@@ -121,7 +121,7 @@ def test_index_uses_persisted_ranking_cache_across_app_instances(monkeypatch) ->
     app_two.testing = True
     client_two = app_two.test_client()
 
-    second = client_two.get("/")
+    second = client_two.get("/partial/ranking")
     assert second.status_code == 200
     assert second.data.decode() == "v=1"
     assert calls["count"] == 1

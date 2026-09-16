@@ -84,6 +84,7 @@ def _connect_postgres(*, ensure_table: bool = False):
     schema = get_postgres_shared_schema()
     conn = psycopg.connect(target.dsn)
     with conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
         cur.execute(f"SET search_path TO {_quote_ident(schema)}")
     if ensure_table:
         _ensure_table_postgres(conn)

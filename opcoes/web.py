@@ -582,7 +582,6 @@ def _build_fundamentus_shell_page_context(*, args: Any) -> dict[str, Any]:
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     def _env_bool(name: str, default: bool = False) -> bool:
         raw = os.getenv(name, "1" if default else "0").strip().lower()
@@ -595,6 +594,17 @@ def create_app() -> Flask:
         except ValueError:
             value = default
         return max(value, minimum)
+
+    # O container web fica publicado somente em loopback na VPS. Mesmo assim,
+    # cabeçalhos encaminhados só podem ser aceitos quando a configuração de
+    # produção declara explicitamente a quantidade de proxies confiáveis.
+    trusted_proxy_hops = _env_int("OPCOES_TRUST_PROXY_HOPS", 0, 0)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=trusted_proxy_hops,
+        x_proto=trusted_proxy_hops,
+        x_host=trusted_proxy_hops,
+    )
 
     def _skip_production_checks() -> bool:
         return _env_bool("OPCOES_SKIP_PRODUCTION_CHECKS", False)
@@ -694,9 +704,9 @@ def create_app() -> Flask:
             for key in sorted(request.args.keys())
         )
 
-    def _ranking_cache_key() -> str:
+    def _ranking_cache_key(*, route_name: str = "index") -> str:
         return build_persisted_page_cache_key(
-            route_name="index",
+            route_name=route_name,
             namespace=_current_ranking_cache_namespace(),
             args_signature=_ranking_args_signature(),
         )
@@ -744,7 +754,9 @@ def create_app() -> Flask:
                 for key in stale_keys:
                     ranking_cache.pop(key, None)
 
-    def _set_ranking_cache(cache_key: str, payload: dict) -> None:
+    def _set_ranking_cache(
+        cache_key: str, payload: dict, *, route_name: str = "index"
+    ) -> None:
         ttl = _ranking_cache_ttl_seconds()
         if ttl <= 0:
             return
@@ -753,7 +765,7 @@ def create_app() -> Flask:
             set_persisted_page_cache(
                 cache_key=cache_key,
                 namespace=_current_ranking_cache_namespace(),
-                route_name="index",
+                route_name=route_name,
                 args_signature=_ranking_args_signature(),
                 ctx=payload,
                 ttl_seconds=ttl,
@@ -1310,8 +1322,15 @@ def create_app() -> Flask:
 
     @app.route("/partial/ranking")
     def ranking_partial() -> str:
-        with timed_stage("route.index_partial.context"):
-            ctx = get_ranking_context(request.args)
+        with timed_stage("route.index_partial.cache_key"):
+            cache_key = _ranking_cache_key(route_name="ranking_partial")
+        with timed_stage("route.index_partial.cache_lookup"):
+            ctx = _get_ranking_cache(cache_key)
+        if ctx is None:
+            with timed_stage("route.index_partial.context"):
+                ctx = get_ranking_context(request.args)
+            with timed_stage("route.index_partial.cache_store"):
+                _set_ranking_cache(cache_key, ctx, route_name="ranking_partial")
         with timed_stage("route.index_partial.render"):
             return render_template("partials/ranking_dashboard.html", **ctx)
 

@@ -18,7 +18,7 @@ def test_closing_position_syncs_realized_result_and_surfaces_in_audit() -> None:
         fees=2.0,
         trade_type="swing",
         side="long",
-        strategy_tag="ranking",
+        strategy_tag="",
     )
 
     app = create_app()
@@ -33,7 +33,7 @@ def test_closing_position_syncs_realized_result_and_surfaces_in_audit() -> None:
             "status": "closed",
             "trade_type": "swing",
             "side": "long",
-            "strategy_tag": "ranking",
+            "strategy_tag": "",
             "parent_position_id": "",
             "is_simulated": "0",
             "trade_date": "2026-03-01",
@@ -82,7 +82,7 @@ def test_reopening_position_clears_exit_fields_and_realized_effects() -> None:
         fees=2.0,
         trade_type="swing",
         side="long",
-        strategy_tag="ranking",
+        strategy_tag="",
     )
 
     app = create_app()
@@ -97,7 +97,7 @@ def test_reopening_position_clears_exit_fields_and_realized_effects() -> None:
             "status": "closed",
             "trade_type": "swing",
             "side": "long",
-            "strategy_tag": "ranking",
+            "strategy_tag": "",
             "parent_position_id": "",
             "is_simulated": "0",
             "trade_date": "2026-03-01",
@@ -125,7 +125,7 @@ def test_reopening_position_clears_exit_fields_and_realized_effects() -> None:
             "status": "open",
             "trade_type": "swing",
             "side": "long",
-            "strategy_tag": "ranking",
+            "strategy_tag": "",
             "parent_position_id": "",
             "is_simulated": "0",
             "trade_date": "2026-03-01",

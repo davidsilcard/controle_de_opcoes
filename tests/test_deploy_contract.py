@@ -37,6 +37,8 @@ def test_deploy_checks_space_and_only_prunes_project_dangling_images() -> None:
     assert "docker system prune" not in script
     assert "docker volume prune" not in script
     assert "docker container prune" not in script
+    assert 'ensure-vps-runtime-env.sh' in script
+    assert 'configuracao operacional do proxy' in script
 
     build = script.index('/bin/bash "$COMPOSE_HELPER" build')
     down = script.index('/bin/bash "$COMPOSE_HELPER" down --remove-orphans')

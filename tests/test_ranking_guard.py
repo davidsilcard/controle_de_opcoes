@@ -110,7 +110,7 @@ def test_ranking_web_add_records_buy_automatically() -> None:
 
 
 @pytest.mark.requires_postgres
-def test_ranking_update_keeps_buy_idempotent() -> None:
+def test_ranking_update_blocks_structural_change_without_creating_ledger() -> None:
     _ensure_snapshot_tables()
     pos_id = portfolio.add_position(
         ticker="KLBNK171",
@@ -153,10 +153,7 @@ def test_ranking_update_keeps_buy_idempotent() -> None:
 
     res = client.post(f"/positions/update/{pos_id}", data=payload)
     assert res.status_code in (302, 303)
-    res = client.post(f"/positions/update/{pos_id}", data=payload)
-    assert res.status_code in (302, 303)
+    assert "position_error=" in (res.headers.get("Location") or "")
 
     txs = [tx for tx in finance.get_transactions(limit=50) if tx.position_id == pos_id]
-    assert len(txs) == 1
-    assert txs[0].type == finance.TransactionType.BUY
-    assert txs[0].amount == -300.50
+    assert txs == []

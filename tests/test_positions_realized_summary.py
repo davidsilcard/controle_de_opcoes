@@ -61,7 +61,9 @@ def test_positions_page_shows_realized_results_by_month_and_year() -> None:
     app.testing = True
     client = app.test_client()
 
-    resp = client.get("/positions?result_year=2026&result_month=3")
+    # O navegador carrega este painel pelo endpoint parcial; a verificação usa
+    # o mesmo caminho que o usuário realmente vê após o carregamento da página.
+    resp = client.get("/positions/partial/live?result_year=2026&result_month=3")
     assert resp.status_code == 200
 
     html = resp.get_data(as_text=True)
@@ -69,9 +71,9 @@ def test_positions_page_shows_realized_results_by_month_and_year() -> None:
     assert "Operações encerradas no período" in html
     assert "03/2026" in html
     assert "2026" in html
-    assert "R$ 150.00" in html
-    assert "R$ 200.00" in html
-    assert "R$ -50.00" in html
+    assert "150.00" in html
+    assert "200.00" in html
+    assert "-50.00" in html
     assert "PETR4" in html
     assert "VALE3" in html
 

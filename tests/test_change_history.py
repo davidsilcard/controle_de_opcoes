@@ -42,8 +42,8 @@ def test_history_preserves_prior_position_and_ledger_versions() -> None:
         )
         assert position_history[-1]["change_kind"] == "UPDATE"
         assert position_history[-1]["prior_values"]["notes"] == "registro inicial"
-        original = conn.execute("SELECT * FROM ledger WHERE id = ?", (tx_id,)).fetchone()
-        reversal = conn.execute("SELECT * FROM ledger WHERE id = ?", (reversal_id,)).fetchone()
+        original = conn.execute("SELECT * FROM ledger WHERE id = %s", (tx_id,)).fetchone()
+        reversal = conn.execute("SELECT * FROM ledger WHERE id = %s", (reversal_id,)).fetchone()
         assert original is not None
         assert reversal is not None
         assert reversal["reversal_of_id"] == tx_id
@@ -52,7 +52,7 @@ def test_history_preserves_prior_position_and_ledger_versions() -> None:
         history_id = position_history[-1]["id"]
         with pytest.raises(Exception, match="imutável"):
             conn.execute(
-                "UPDATE record_history SET actor = ? WHERE id = ?",
+                "UPDATE record_history SET actor = %s WHERE id = %s",
                 ("alterado", history_id),
             )
         conn.rollback()
@@ -68,7 +68,7 @@ def test_anulation_requires_a_reason() -> None:
     with pytest.raises(ValueError, match="motivo"):
         finance.delete_transaction(tx_id, reason="", reversal_date="2026-09-16")
 
-    assert any(item.id == tx_id for item in finance.list_transactions(limit=20))
+    assert any(item.id == tx_id for item in finance.get_transactions(limit=20))
 
 
 def test_manual_transaction_can_be_reversed_once_but_linked_transaction_is_blocked() -> None:

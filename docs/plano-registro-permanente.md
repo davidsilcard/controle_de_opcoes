@@ -142,6 +142,14 @@ o mesmo SHA; então chama exclusivamente `update-vps.sh` e confirma SHA, login e
 health da VPS. Não há opção de pular CI, usar Docker manualmente ou corrigir
 dados durante o deploy.
 
+Quarta entrega da fase: a execução PostgreSQL revelou testes legados que não
+representavam mais a operação publicada. A correção mantém separado o
+resultado bruto da posição e o resultado fiscal líquido no ledger/DARF, move a
+verificação de painéis para os endpoints parciais que o navegador carrega e
+bloqueia edição estrutural de estratégias pela tabela genérica. A publicação
+também torna explícita a confiança no proxy reverso da VPS, sem registrar
+segredos no Git.
+
 ## Ordem de entrega
 
 1. Fase 0 (iniciada nesta alteração).

@@ -604,7 +604,7 @@ Observacao:
 
 - use `OPCOES_SESSION_COOKIE_SECURE=0` enquanto estiver acessando por IP/HTTP
 - troque para `1` quando colocar HTTPS com proxy reverso
-- o login aplica rate limit por IP e usa o IP percebido pelo Flask depois do `ProxyFix`; em ambiente com proxy reverso, o proxy precisa ser confiavel.
+- o login aplica rate limit por IP. Por padrão, cabeçalhos como `X-Forwarded-For` são ignorados; na VPS, `OPCOES_TRUST_PROXY_HOPS=1` declara o Caddy local como o único proxy confiável. Isso evita que um visitante escolha um IP falso para escapar do bloqueio.
 - o rate limit agora fica persistido no schema de autenticacao (`OPCOES_AUTH_SCHEMA`), entao continua valendo mesmo com multiplos workers/instancias da web.
 - ajustes opcionais:
 
@@ -612,6 +612,8 @@ Observacao:
 OPCOES_LOGIN_MAX_ATTEMPTS=5
 OPCOES_LOGIN_WINDOW_SECONDS=900
 OPCOES_LOGIN_BLOCK_SECONDS=900
+# Somente na VPS atrás do Caddy local:
+OPCOES_TRUST_PROXY_HOPS=1
 ```
 
 - formularios `POST` agora validam token CSRF. Se aparecer mensagem de formulario expirado, recarregue a pagina e envie novamente.
@@ -852,6 +854,7 @@ Observacao:
 - antes de chamar o Compose, ele le `OPCOES_WEB_BIND` e `OPCOES_EDGE_BIND` do arquivo apontado por `OPCOES_APP_ENV_FILE`
 - isso permite fixar portas diferentes para `web` e `edge` diretamente no `/etc/controle_de_opcoes/app.env`
 - em VPS com outra aplicacao ocupando `127.0.0.1:8001`, use por exemplo `OPCOES_EDGE_BIND=127.0.0.1:8011:8001`
+- `update-vps.sh` também garante `OPCOES_TRUST_PROXY_HOPS=1` nesse arquivo sem mostrar, substituir ou versionar segredos; essa regra é necessária porque a web é publicada apenas via Caddy em `127.0.0.1:8000`.
 
 ### Agendamento do scraper na VPS com systemd
 
