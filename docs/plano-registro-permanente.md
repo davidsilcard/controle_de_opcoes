@@ -61,6 +61,13 @@ próprios (`ASSIGN` e entrada no estoque para PUT; venda e baixa do estoque para
 CALL); expiração apenas encerra a opção e recalcula suas projeções. A autoria e
 o motivo aparecem no histórico de alterações.
 
+Quarta entrega da fase: uma movimentação manual é estornada por lançamento de
+sinal contrário, datado e vinculado ao original; o original não é removido.
+Uma posição sem lançamento financeiro é anulada logicamente e deixa de aparecer
+na visão operacional. Posições ou lançamentos ligados a uma estratégia são
+bloqueados para anulação isolada, pois sua correção precisa preservar também
+caixa, estoque e resultado.
+
 **Aceitação:** uma tentativa repetida não cria novo evento; uma correção deixa
 o original, a reversão e o motivo visíveis; não existe rota operacional de
 `DELETE` para dados publicados.

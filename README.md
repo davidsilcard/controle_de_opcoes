@@ -1299,4 +1299,6 @@ Observacoes:
 - alterações e anulações de `positions` e `ledger` preservam o estado anterior em `record_history`; a interface exige motivo ao anular um registro.
 - após uma atualização que inclua o histórico, instale-o uma vez no schema ativo: `uv run python -m opcoes.cli db history-install`.
 - o cadastro de posição/opção, movimentação manual de caixa, exercício e expiração usam um recibo único por envio: repetir o mesmo formulário não cria outro registro. Após uma atualização, instale a estrutura uma vez no schema ativo: `uv run python -m opcoes.cli db receipts-install`.
+- estorno de movimentação manual preserva o lançamento original e cria outro, de sinal contrário, vinculado a ele. Lançamentos de estratégia e posições com efeitos financeiros não podem ser anulados isoladamente.
+- a edição direta também é limitada a movimentação manual sem estorno e exige motivo; a versão anterior fica no histórico imutável.
 - o script `deploy/scripts/run_scrape_cycle.sh` agora aplica essa retencao ao final do ciclo agendado.

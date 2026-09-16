@@ -2056,14 +2056,19 @@ def create_app() -> Flask:
         if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
             amount = -amount
 
-        finance.update_transaction(
-            tx_id,
-            date=date,
-            type=tx_type,
-            amount=amount,
-            description=desc,
-            is_simulated=is_simulated,
-        )
+        try:
+            finance.update_transaction(
+                tx_id,
+                date=date,
+                type=tx_type,
+                amount=amount,
+                description=desc,
+                is_simulated=is_simulated,
+                reason=form.get("correction_reason") or "",
+                actor=getattr(g, "current_username", None),
+            )
+        except ValueError as exc:
+            return redirect(url_for("cash_covered_put", position_error=str(exc)))
         return redirect(url_for("cash_covered_put"))
 
     @app.post("/finance/delete/<int:tx_id>")
@@ -2073,6 +2078,7 @@ def create_app() -> Flask:
                 tx_id,
                 reason=request.form.get("void_reason") or "",
                 actor=getattr(g, "current_username", None),
+                reversal_date=request.form.get("reversal_date") or "",
             )
         except ValueError as exc:
             return redirect(url_for("cash_covered_put", position_error=str(exc)))

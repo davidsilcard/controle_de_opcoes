@@ -36,6 +36,8 @@ class Transaction:
     position_id: Optional[int] = None  # Link opcional com uma posição específica
     is_simulated: bool = False
     position_strategy_tag: Optional[str] = None
+    reversal_of_id: Optional[int] = None
+    reversal_id: Optional[int] = None
 
 
 class _PgResult:
@@ -172,7 +174,8 @@ def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
             type TEXT NOT NULL,
             amount DOUBLE PRECISION NOT NULL,
             description TEXT,
-            position_id BIGINT
+            position_id BIGINT,
+            reversal_of_id BIGINT
         )
         """
     )
@@ -192,6 +195,8 @@ def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
         conn.execute(
             'ALTER TABLE ledger ADD COLUMN IF NOT EXISTS "is_simulated" INTEGER DEFAULT 0'
         )
+    if "reversal_of_id" not in existing:
+        conn.execute('ALTER TABLE ledger ADD COLUMN IF NOT EXISTS "reversal_of_id" BIGINT')
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ledger_type_position_id ON ledger (type, position_id)"
     )
@@ -199,6 +204,10 @@ def _ensure_table(conn: _DbConn, *, commit: bool) -> None:
         "CREATE INDEX IF NOT EXISTS idx_ledger_position_id ON ledger (position_id)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger (date DESC)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_reversal_once "
+        "ON ledger (reversal_of_id) WHERE reversal_of_id IS NOT NULL"
+    )
     ensure_change_history(conn)
     ensure_operation_receipts(conn)
     if commit:
@@ -257,6 +266,7 @@ def add_transaction(
     description: str = None,
     position_id: int = None,
     is_simulated: bool = False,
+    reversal_of_id: int = None,
     conn: Optional[Any] = None,
 ) -> int:
     """Registra uma transação financeira."""
@@ -270,12 +280,15 @@ def add_transaction(
             description,
             position_id,
             1 if is_simulated else 0,
+            int(reversal_of_id) if reversal_of_id is not None else None,
         )
         if db.backend == "postgres":
             row = db.execute(
                 """
-                INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO ledger (
+                    date, type, amount, description, position_id, is_simulated, reversal_of_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -284,8 +297,10 @@ def add_transaction(
         else:
             cur = db.execute(
                 """
-                INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO ledger (
+                    date, type, amount, description, position_id, is_simulated, reversal_of_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -439,7 +454,7 @@ def get_transactions(
     strategy_tag: Optional[str] = None,
     include_unlinked: bool = True,
 ) -> List[Transaction]:
-    conn = _get_conn()
+    conn = _get_conn(ensure_schema=True)
     try:
         if not _has_ledger_table(conn):
             return []
@@ -469,17 +484,20 @@ def get_transactions(
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         if has_positions:
             query = f"""
-                SELECT l.*, p.strategy_tag AS position_strategy_tag
+                SELECT l.*, p.strategy_tag AS position_strategy_tag,
+                       reversal.id AS reversal_id
                 FROM ledger l
                 LEFT JOIN positions p ON p.id = l.position_id
+                LEFT JOIN ledger reversal ON reversal.reversal_of_id = l.id
                 {where_clause}
                 ORDER BY l.date DESC, l.id DESC
                 LIMIT ?
             """
         else:
             query = f"""
-                SELECT l.*
+                SELECT l.*, reversal.id AS reversal_id
                 FROM ledger l
+                LEFT JOIN ledger reversal ON reversal.reversal_of_id = l.id
                 {where_clause}
                 ORDER BY l.date DESC, l.id DESC
                 LIMIT ?
@@ -501,6 +519,16 @@ def get_transactions(
                 position_strategy_tag=(
                     r["position_strategy_tag"]
                     if "position_strategy_tag" in r.keys()
+                    else None
+                ),
+                reversal_of_id=(
+                    int(r["reversal_of_id"])
+                    if "reversal_of_id" in r.keys() and r["reversal_of_id"] is not None
+                    else None
+                ),
+                reversal_id=(
+                    int(r["reversal_id"])
+                    if "reversal_id" in r.keys() and r["reversal_id"] is not None
                     else None
                 ),
             )
@@ -1098,8 +1126,13 @@ def update_transaction(
     amount: Optional[float] = None,
     description: Optional[str] = None,
     is_simulated: Optional[bool] = None,
+    reason: str = "",
+    actor: str | None = None,
 ) -> None:
-    """Atualiza campos básicos de uma transação existente."""
+    """Corrige uma movimentação manual, preservando a versão anterior."""
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Informe o motivo da correção da movimentação.")
     fields = []
     params: list[object] = []
     if date is not None:
@@ -1127,6 +1160,28 @@ def update_transaction(
     params.append(int(tx_id))
     conn = _get_conn(ensure_schema=True)
     try:
+        existing = conn.execute(
+            "SELECT * FROM ledger WHERE id = ? FOR UPDATE",
+            (int(tx_id),),
+        ).fetchone()
+        if not existing:
+            raise ValueError(f"Transação {tx_id} não encontrada.")
+        if existing["position_id"] is not None:
+            raise ValueError(
+                "Movimentação vinculada a uma posição não pode ser corrigida isoladamente. "
+                "Use a correção da estratégia."
+            )
+        if existing.get("reversal_of_id") is not None:
+            raise ValueError("Um estorno não pode ser corrigido por esta tela.")
+        reversal = conn.execute(
+            "SELECT id FROM ledger WHERE reversal_of_id = ? LIMIT 1",
+            (int(tx_id),),
+        ).fetchone()
+        if reversal:
+            raise ValueError(
+                "Movimentação já estornada não pode ser corrigida por esta tela."
+            )
+        set_change_context(conn, actor=actor, reason=normalized_reason)
         cur = conn.execute(
             f"UPDATE ledger SET {', '.join(fields)} WHERE id = ?",
             params,
@@ -1143,18 +1198,58 @@ def delete_transaction(
     *,
     reason: str,
     actor: str | None = None,
-) -> None:
-    """Anula uma transação, mantendo a versão anterior no histórico imutável."""
+    reversal_date: str,
+    conn: Optional[Any] = None,
+) -> int:
+    """Estorna uma movimentação manual sem apagar o lançamento original."""
 
     normalized_reason = (reason or "").strip()
     if not normalized_reason:
         raise ValueError("Informe o motivo para anular a movimentação.")
-    conn = _get_conn(ensure_schema=True)
     try:
-        set_change_context(conn, actor=actor, reason=normalized_reason)
-        result = conn.execute("DELETE FROM ledger WHERE id = ?", (int(tx_id),))
-        if result.rowcount == 0:
+        normalized_date = dt.date.fromisoformat(str(reversal_date or "").strip()).isoformat()
+    except ValueError as exc:
+        raise ValueError("Informe a data do estorno no formato YYYY-MM-DD.") from exc
+
+    db, owns_conn = _resolve_conn(conn, ensure_schema=True)
+    try:
+        original = db.execute(
+            "SELECT * FROM ledger WHERE id = ? FOR UPDATE",
+            (int(tx_id),),
+        ).fetchone()
+        if not original:
             raise ValueError(f"Movimentação {tx_id} não encontrada.")
-        conn.commit()
+        if original["position_id"] is not None:
+            raise ValueError(
+                "Movimentação vinculada a uma posição não pode ser anulada isoladamente. "
+                "Use a correção da estratégia para preservar caixa, estoque e resultado."
+            )
+        if original.get("reversal_of_id") is not None:
+            raise ValueError("Um estorno não pode ser anulado novamente por esta tela.")
+        existing_reversal = db.execute(
+            "SELECT id FROM ledger WHERE reversal_of_id = ? LIMIT 1",
+            (int(tx_id),),
+        ).fetchone()
+        if existing_reversal:
+            raise ValueError(
+                f"A movimentação {tx_id} já possui o estorno #{_first_col(existing_reversal)}."
+            )
+        set_change_context(db, actor=actor, reason=normalized_reason)
+        original_type = TransactionType(str(original["type"]))
+        reversal_id = add_transaction(
+            date=normalized_date,
+            type=original_type,
+            amount=-float(original["amount"]),
+            description=(
+                f"Estorno da movimentação #{int(tx_id)}: {normalized_reason}"
+            ),
+            is_simulated=bool(original.get("is_simulated") or 0),
+            reversal_of_id=int(tx_id),
+            conn=db,
+        )
+        if owns_conn:
+            db.commit()
+        return reversal_id
     finally:
-        conn.close()
+        if owns_conn:
+            db.close()

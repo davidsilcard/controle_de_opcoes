@@ -229,6 +229,9 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "performance_evidence_note": "TEXT",
         "shared_fee_pending": "INTEGER DEFAULT 0",
         "shared_fee_note_ref": "TEXT",
+        "voided_at": "TIMESTAMPTZ",
+        "voided_by": "TEXT",
+        "void_reason": "TEXT",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -817,15 +820,43 @@ def delete_position(
     actor: str | None = None,
     conn: Optional[Any] = None,
 ) -> None:
-    """Anula a posição da visão operacional, preservando-a no histórico."""
+    """Anula logicamente uma posição sem efeitos financeiros vinculados."""
 
     normalized_reason = (reason or "").strip()
     if not normalized_reason:
         raise ValueError("Informe o motivo para anular a posição.")
     db, owns_conn = _resolve_conn(conn, ensure_schema=True)
     try:
+        position = db.execute(
+            "SELECT id, status FROM positions WHERE id = ? FOR UPDATE",
+            (int(position_id),),
+        ).fetchone()
+        if not position:
+            raise ValueError(f"Posição {position_id} não encontrada.")
+        if str(position["status"] or "").strip().lower() == "voided":
+            raise ValueError(f"Posição {position_id} já foi anulada.")
+        if _table_exists(db, "ledger"):
+            linked = db.execute(
+                "SELECT id FROM ledger WHERE position_id = ? LIMIT 1",
+                (int(position_id),),
+            ).fetchone()
+            if linked:
+                raise ValueError(
+                    "Posição com lançamentos financeiros não pode ser anulada isoladamente. "
+                    "Use a correção da estratégia para preservar caixa, estoque e resultado."
+                )
         set_change_context(db, actor=actor, reason=normalized_reason)
-        result = db.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
+        result = db.execute(
+            """
+            UPDATE positions
+            SET status = 'voided',
+                voided_at = CURRENT_TIMESTAMP,
+                voided_by = ?,
+                void_reason = ?
+            WHERE id = ?
+            """,
+            ((actor or "").strip() or "system", normalized_reason, int(position_id)),
+        )
         if result.rowcount == 0:
             raise ValueError(f"Posição {position_id} não encontrada.")
         if owns_conn:
@@ -879,6 +910,7 @@ def list_positions(
             return []
         where: List[str] = []
         params: List[object] = []
+        where.append("COALESCE(p.status, 'open') <> 'voided'")
         if only_closed:
             where.append("p.status = 'closed'")
         elif not include_closed:

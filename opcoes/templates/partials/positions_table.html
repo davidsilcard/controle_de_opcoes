@@ -276,9 +276,9 @@
                     type="submit"
                     formaction="/positions/delete/{{ pos.id }}"
                     formmethod="post"
-                    onclick="return confirm('Anular posição {{ pos.ticker }}? O registro original continuará no histórico.');"
+                    onclick="return confirm('Anular posição {{ pos.ticker }} sem lançamentos financeiros? O registro original será preservado.');"
                   >
-                    Anular
+                    Anular sem efeitos financeiros
                   </button>
                 </div>
               </td>
