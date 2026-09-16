@@ -307,6 +307,10 @@ O botão `Histórico` de cada posição abre uma consulta somente leitura das re
 
 Em `/audit`, o `Relatório de integridade` reúne os diagnósticos existentes em quatro grupos: lançamento órfão, possível duplicidade, estado incompatível e divergência financeira. Ele é somente leitura e orienta a conferência por posição; totais não devem ser ajustados diretamente. DARF sem rateio documental fica marcada como não verificável, não como divergência confirmada.
 
+## Testes de integração PostgreSQL
+
+O GitHub Actions executa a suíte completa em PostgreSQL descartável a cada envio para `main` e em pull requests. Assim, os testes marcados como `requires_postgres` deixam de ser ignorados na validação publicada. Antes de um deploy, confira que o workflow **Testes PostgreSQL** do mesmo commit está verde; o deploy continua sendo feito exclusivamente por `deploy/scripts/update-vps.sh`.
+
 Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
 
 ```bash

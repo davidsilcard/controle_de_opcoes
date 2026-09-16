@@ -1,0 +1,40 @@
+name: Testes PostgreSQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: opcoes_test
+          POSTGRES_USER: opcoes_test
+          POSTGRES_PASSWORD: opcoes_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opcoes_test -d opcoes_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://opcoes_test:opcoes_test@localhost:5432/opcoes_test
+      OPCOES_SKIP_PRODUCTION_CHECKS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Instalar dependências bloqueadas
+        run: uv sync --locked --dev
+      - name: Executar testes, incluindo PostgreSQL descartável
+        run: uv run pytest -q

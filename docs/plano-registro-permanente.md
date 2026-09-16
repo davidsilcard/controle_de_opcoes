@@ -130,6 +130,11 @@ ou divergência financeira; alertas equivalentes não são repetidos. Totais sem
 rateio documental de DARF continuam explicitamente não verificáveis, em vez de
 serem apresentados como erro ou como cálculo certificado.
 
+Segunda entrega da fase: GitHub Actions executa a suíte completa contra
+PostgreSQL descartável em cada `push` para `main` e em pull request. Os schemas
+de teste continuam isolados por caso e o banco desaparece ao fim do job; nenhum
+teste de integração usa a base da VPS.
+
 ## Ordem de entrega
 
 1. Fase 0 (iniciada nesta alteração).
