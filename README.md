@@ -309,7 +309,24 @@ Em `/audit`, o `Relatório de integridade` reúne os diagnósticos existentes em
 
 ## Testes de integração PostgreSQL
 
-O GitHub Actions executa a suíte completa em PostgreSQL descartável a cada envio para `main` e em pull requests. Assim, os testes marcados como `requires_postgres` deixam de ser ignorados na validação publicada. Antes de um deploy, confira que o workflow **Testes PostgreSQL** do mesmo commit está verde; o deploy continua sendo feito exclusivamente por `deploy/scripts/update-vps.sh`.
+O GitHub Actions executa a suíte completa em PostgreSQL descartável a cada envio para `main` e em pull requests. Assim, os testes marcados como `requires_postgres` deixam de ser ignorados na validação publicada. O comando de release abaixo consulta esse workflow no mesmo commit e bloqueia a VPS se ele não estiver verde.
+
+### Publicação a partir do computador pessoal
+
+Uma única vez neste computador, instale e autentique o GitHub CLI. A autenticação abre o navegador e não deve ter token copiado para o chat:
+
+```powershell
+winget install --id GitHub.cli
+gh auth login --web --git-protocol https
+```
+
+Para cada publicação, depois de revisar, testar, fazer `commit` e `push` na `main`, execute somente:
+
+```powershell
+.\deploy\scripts\release.ps1
+```
+
+Esse comando recusa alterações locais, branch diferente de `main`, commit ainda não enviado ou CI não aprovado. Em seguida ele chama exclusivamente `deploy/scripts/update-vps.sh` na VPS e confirma SHA, `/login` e `/health`. Não há opção para pular o CI ou substituir o deploy por comandos Docker manuais.
 
 Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
 
@@ -695,6 +712,8 @@ curl http://127.0.0.1:8000/login
 
 ### Atualizar a aplicacao no VPS
 
+Use preferencialmente o comando local `.\deploy\scripts\release.ps1` documentado em [Publicação a partir do computador pessoal](#publicação-a-partir-do-computador-pessoal). Ele valida Git e CI antes de chamar este script da VPS. O comando abaixo fica reservado para diagnóstico orientado, nunca como atalho de publicação:
+
 ```bash
 cd ~/apps/controle_de_opcoes
 bash deploy/scripts/update-vps.sh
@@ -858,7 +877,13 @@ O script faz este ciclo:
 
 ### Atualizar a aplicação
 
-A forma recomendada agora é um comando unico:
+A forma recomendada é um comando único no computador pessoal:
+
+```powershell
+.\deploy\scripts\release.ps1
+```
+
+Ele só chama o atualizador oficial da VPS após a validação local e do CI. O atualizador remoto continua sendo:
 
 ```bash
 cd ~/apps/controle_de_opcoes
@@ -882,6 +907,7 @@ O script:
 Importante:
 
 - `git pull` sozinho nao e suficiente, porque ele nao rebuilda os containers nem faz smoke test
+- `release.ps1` deve ser usado no computador pessoal para impedir que um commit sem CI verde chegue à VPS; ele não usa `docker compose` localmente
 - usamos `bash deploy/scripts/update-vps.sh` em vez de executar o arquivo diretamente para nao depender do bit de execucao preservado apos `git pull` feito a partir de ambientes Windows
 
 Se a VPS estiver com arquivos locais divergentes, o script deve parar. Consulte primeiro:

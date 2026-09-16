@@ -135,6 +135,13 @@ PostgreSQL descartável em cada `push` para `main` e em pull request. Os schemas
 de teste continuam isolados por caso e o banco desaparece ao fim do job; nenhum
 teste de integração usa a base da VPS.
 
+Terceira entrega da fase: `deploy/scripts/release.ps1` transforma a publicação
+em um caminho único no computador pessoal. Ele exige worktree limpo, `main`
+sincronizada com `origin/main` e o workflow **Testes PostgreSQL** aprovado para
+o mesmo SHA; então chama exclusivamente `update-vps.sh` e confirma SHA, login e
+health da VPS. Não há opção de pular CI, usar Docker manualmente ou corrigir
+dados durante o deploy.
+
 ## Ordem de entrega
 
 1. Fase 0 (iniciada nesta alteração).
