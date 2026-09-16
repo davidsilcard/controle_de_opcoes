@@ -43,7 +43,7 @@ from .config import (
     set_pg_schema_override,
 )
 from .db import db_transaction, open_db
-from .change_history import set_change_context
+from .change_history import list_change_history, set_change_context
 from .operation_receipts import (
     OperationReceiptError,
     claim_operation_receipt,
@@ -108,6 +108,7 @@ from .strategy_performance import (
     build_pending_position_groups,
     build_strategy_performance,
 )
+from .record_timeline import build_position_history_timeline
 from .wheel_cycles import (
     LEG_TYPES as WHEEL_LEG_TYPES,
     WheelCycleError,
@@ -2378,6 +2379,31 @@ def create_app() -> Flask:
         ctx["next_url"] = next_url
         with timed_stage("route.positions_partial.render"):
             return render_template("partials/positions_live.html", **ctx)
+
+    @app.route("/positions/<int:position_id>/history")
+    def position_history(position_id: int) -> str:
+        position = get_position(position_id)
+        if position is None:
+            return redirect(
+                url_for(
+                    "positions",
+                    position_error=f"Posição #{position_id} não foi encontrada.",
+                )
+            )
+        db = open_db()
+        try:
+            history_rows = list_change_history(
+                db,
+                source_table="positions",
+                source_id=position_id,
+            )
+        finally:
+            db.close()
+        return render_template(
+            "position_history.html",
+            position=position,
+            timeline=build_position_history_timeline(position, history_rows),
+        )
 
     @app.route("/audit")
     def audit_view() -> str:

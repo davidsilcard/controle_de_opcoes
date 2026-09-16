@@ -103,6 +103,12 @@ independentes, mas aparecem na mesma linha, com seus motivos e formulários
 próprios. Auditorias documentais concluídas e custos compartilhados continuam
 fora dessa lista porque não são uma ação de cadastro pendente.
 
+Segunda entrega da fase: cada linha de `Posições` oferece `Histórico`, uma
+consulta somente leitura da posição atual e de suas revisões preservadas. A
+linha do tempo apresenta data, responsável, motivo e campos antes/depois; ela
+não cria um atalho de correção que poderia separar uma estratégia de seus
+efeitos em caixa, estoque ou resultado.
+
 ## Fase 4 — auditoria e publicação
 
 1. Criar relatório de integridade: órfãos, duplicidades candidatas, estados

@@ -302,6 +302,8 @@ uv run python -m opcoes.cli repair wheel-cycle-backfill --put-position-id <id-pu
 
 Na grade genérica de `Posições`, alterações financeiras continuam disponíveis por compatibilidade com o fluxo histórico de recompra, mas aparecem como `Salvar operação` com confirmação explícita. Alterar somente a observação não ressincroniza mais o ledger. Quando houver mudança financeira, posição e efeitos no ledger são gravados na mesma transação: em caso de falha, nenhuma metade fica persistida.
 
+O botão `Histórico` de cada posição abre uma consulta somente leitura das revisões preservadas, com data, responsável, motivo e valores antes/depois. Ele não é um atalho para corrigir operações de estratégia: Cash-Covered Put, Covered Call e Wheel continuam exigindo seus fluxos próprios para não separar caixa, estoque e resultado.
+
 Em uma PUT exercida sobre estoque já existente, o PM passa a ser recalculado pelo custo ponderado do estoque anterior, valor do exercício e despesas de compra. Para corrigir um caso legado confirmado, use primeiro a simulação:
 
 ```bash

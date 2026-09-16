@@ -216,6 +216,7 @@
               </td>
               <td style="min-width: 200px;">
                 <div class="d-flex flex-wrap gap-1 mb-1">
+                  <a class="btn btn-outline-secondary btn-sm" href="/positions/{{ pos.id }}/history">Histórico</a>
                   {% if pos.strategy_tag in ['cash_put', 'covered_call'] %}
                     <button
                       class="btn btn-warning btn-sm"
