@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from opcoes import finance, portfolio
+from opcoes import flows
+from opcoes.db import db_transaction
 from opcoes.holdings import (
     apply_put_assignment_to_holding,
     get_holding_snapshot,
@@ -51,17 +55,18 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
     app.testing = True
     client = app.test_client()
 
-    response = client.post(
-        "/finance/assign",
-        data={
-            "position_id": str(pos_id),
-            "qty": "800",
-            "strike": "21.46",
-            "date": "2026-03-20",
-            "purchase_fees": "3.20",
-        },
-    )
+    form = {
+        "position_id": str(pos_id),
+        "qty": "800",
+        "strike": "21.46",
+        "date": "2026-03-20",
+        "purchase_fees": "3.20",
+        "_operation_key": str(uuid.uuid4()),
+    }
+    response = client.post("/finance/assign", data=form)
+    repeated_response = client.post("/finance/assign", data=form)
     assert response.status_code in (302, 303)
+    assert repeated_response.status_code in (302, 303)
 
     put_pos = portfolio.get_position(pos_id)
     assert put_pos is not None
@@ -166,6 +171,52 @@ def test_put_assignment_without_confirmed_date_is_blocked() -> None:
         if tx.position_id == pos_id and tx.type == finance.TransactionType.ASSIGNMENT
     ]
     assert assignment_txs == []
+
+
+def test_put_assignment_rolls_back_position_cash_stock_and_receipt_on_failure(monkeypatch) -> None:
+    _ensure_snapshot_tables()
+    pos_id = portfolio.add_position(
+        ticker="GGBRO215",
+        underlying="GGBR4",
+        trade_date="2026-03-17",
+        qty=800,
+        entry_price=0.76,
+        fees=0.0,
+        trade_type="swing",
+        side="short",
+        strategy_tag="cash_put",
+    )
+
+    def _fail_holding(**_kwargs):
+        raise RuntimeError("falha simulada no estoque")
+
+    monkeypatch.setattr(flows, "apply_put_assignment_to_holding", _fail_holding)
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    with pytest.raises(RuntimeError, match="falha simulada"):
+        client.post(
+            "/finance/assign",
+            data={
+                "position_id": str(pos_id),
+                "qty": "800",
+                "strike": "21.46",
+                "date": "2026-03-20",
+                "purchase_fees": "3.20",
+                "_operation_key": str(uuid.uuid4()),
+            },
+        )
+
+    assert portfolio.get_position(pos_id)["status"] == "open"
+    assert [
+        tx
+        for tx in finance.get_transactions(limit=20)
+        if tx.position_id == pos_id
+    ] == []
+    with db_transaction() as conn:
+        row = conn.execute("SELECT count(*) AS total FROM operation_receipts").fetchone()
+    assert int(row["total"]) == 0
 
 
 def test_cash_put_page_uses_confirmation_modals_for_expiration_and_assignment() -> None:

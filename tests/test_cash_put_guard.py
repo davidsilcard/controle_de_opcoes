@@ -241,3 +241,37 @@ def test_cash_put_expiration_without_confirmed_date_is_blocked() -> None:
     pos = portfolio.get_position(pos_id)
     assert pos is not None
     assert pos["status"] == "open"
+
+
+@pytest.mark.requires_postgres
+def test_cash_put_expiration_repeated_post_closes_once() -> None:
+    pos_id = portfolio.add_position(
+        ticker="PETRN312",
+        underlying="PETR4",
+        trade_date="2026-01-09",
+        qty=400,
+        entry_price=0.61,
+        fees=0.33,
+        trade_type="swing",
+        side="short",
+        strategy_tag="cash_put",
+    )
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "position_id": str(pos_id),
+        "date": "2026-07-17",
+        "_operation_key": str(uuid.uuid4()),
+    }
+
+    first = client.post("/finance/expire", data=form)
+    repeated = client.post("/finance/expire", data=form)
+
+    assert first.status_code in (302, 303)
+    assert repeated.status_code in (302, 303)
+    pos = portfolio.get_position(pos_id)
+    assert pos is not None
+    assert pos["status"] == "closed"
+    assert pos["exit_date"] == "2026-07-17"

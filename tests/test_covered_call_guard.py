@@ -319,7 +319,13 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
         strategy_tag="covered_call",
     )
 
-    callaway(position_id=call_id, date="2026-05-15", sale_fees="1.25")
+    with db_transaction() as conn:
+        callaway(
+            position_id=call_id,
+            date="2026-05-15",
+            sale_fees="1.25",
+            conn=conn,
+        )
 
     stock_rows = [
         pos

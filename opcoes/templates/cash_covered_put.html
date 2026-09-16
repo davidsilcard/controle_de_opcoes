@@ -768,6 +768,7 @@
       <div class="modal-dialog">
         <form class="modal-content" action="/finance/expire" method="post">
           {{ csrf_input() }}
+          {{ operation_key_input() }}
           <input type="hidden" name="position_id" value="">
           <div class="modal-header">
             <h5 class="modal-title">Confirmar expiração da PUT</h5>
@@ -800,6 +801,7 @@
       <div class="modal-dialog">
         <form class="modal-content" action="/finance/assign" method="post">
           {{ csrf_input() }}
+          {{ operation_key_input() }}
           <input type="hidden" name="position_id" value="">
           <div class="modal-header">
             <h5 class="modal-title">Confirmar exercício da PUT</h5>

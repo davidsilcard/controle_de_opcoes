@@ -55,6 +55,12 @@ Reenviar o mesmo formulário reaproveita o recibo; usar sua chave com dados
 distintos é bloqueado. Exercício, expiração, encerramento e edição serão
 migrados em recortes próprios, pois cada um tem regras financeiras diferentes.
 
+Terceira entrega da fase: exercício de PUT, exercício de CALL e expiração
+usam o mesmo recibo e uma única transação. Cada exercício mantém seus eventos
+próprios (`ASSIGN` e entrada no estoque para PUT; venda e baixa do estoque para
+CALL); expiração apenas encerra a opção e recalcula suas projeções. A autoria e
+o motivo aparecem no histórico de alterações.
+
 **Aceitação:** uma tentativa repetida não cria novo evento; uma correção deixa
 o original, a reversão e o motivo visíveis; não existe rota operacional de
 `DELETE` para dados publicados.

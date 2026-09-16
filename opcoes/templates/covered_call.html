@@ -380,6 +380,7 @@
       <div class="modal-dialog">
         <form class="modal-content" action="/finance/expire" method="post">
           {{ csrf_input() }}
+          {{ operation_key_input() }}
           <input type="hidden" name="position_id" value="">
           <div class="modal-header">
             <h5 class="modal-title">Confirmar expiração da CALL</h5>
@@ -412,6 +413,7 @@
       <div class="modal-dialog">
         <form class="modal-content" action="/finance/callaway" method="post">
           {{ csrf_input() }}
+          {{ operation_key_input() }}
           <input type="hidden" name="position_id" value="">
           <div class="modal-header">
             <h5 class="modal-title">Confirmar exercício da CALL</h5>

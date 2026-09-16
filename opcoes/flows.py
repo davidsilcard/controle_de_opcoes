@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 import math
-from typing import Optional
+from contextlib import nullcontext
+from typing import Any, Optional
 
 from .db import db_transaction
 from .finance import TransactionType, add_transaction, sync_position_closure_effects
@@ -66,14 +67,15 @@ def assign_put(
     qty: Optional[int] = None,
     date: str,
     purchase_fees: object,
+    conn: Optional[Any] = None,
 ) -> None:
     confirmed_date = _require_iso_date(date, label="Exercicio da PUT")
     resolved_purchase_fees = _nonnegative_currency(
         purchase_fees,
         label="Despesas da compra no exercicio",
     )
-    with db_transaction() as conn:
-        pos = get_position(position_id, conn=conn)
+    with (db_transaction() if conn is None else nullcontext(conn)) as active_conn:
+        pos = get_position(position_id, conn=active_conn, for_update=True)
         if not pos:
             raise FlowError("Posição não encontrada.")
         is_simulated = bool(pos["is_simulated"]) if pos else False
@@ -101,7 +103,7 @@ def assign_put(
             exit_date=confirmed_date,
             exit_price=0.0,
             exit_reason="Exercício",
-            conn=conn,
+            conn=active_conn,
         )
 
         cost = float(resolved_strike) * int(resolved_qty)
@@ -120,9 +122,9 @@ def assign_put(
             ),
             position_id=position_id,
             is_simulated=is_simulated,
-            conn=conn,
+            conn=active_conn,
         )
-        sync_position_closure_effects(position_id=position_id, conn=conn)
+        sync_position_closure_effects(position_id=position_id, conn=active_conn)
 
         if pos:
             apply_put_assignment_to_holding(
@@ -133,7 +135,7 @@ def assign_put(
                 date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
-                conn=conn,
+                conn=active_conn,
             )
 
 
@@ -142,14 +144,15 @@ def callaway(
     position_id: int,
     date: str,
     sale_fees: object = "0",
+    conn: Optional[Any] = None,
 ) -> str:
     confirmed_date = _require_iso_date(date, label="Exercicio da CALL")
     resolved_sale_fees = _nonnegative_currency(
         sale_fees,
         label="Despesas da venda no exercicio",
     )
-    with db_transaction() as conn:
-        call_pos = get_position(position_id, conn=conn)
+    with (db_transaction() if conn is None else nullcontext(conn)) as active_conn:
+        call_pos = get_position(position_id, conn=active_conn, for_update=True)
         if not call_pos:
             raise FlowError("Posição não encontrada.")
 
@@ -190,7 +193,7 @@ def callaway(
                 date=confirmed_date,
                 is_simulated=is_simulated,
                 related_position_id=position_id,
-                conn=conn,
+                conn=active_conn,
             )
         except HoldingValidationError as exc:
             raise FlowError(str(exc), underlying=underlying) from exc
@@ -217,23 +220,23 @@ def callaway(
             is_simulated=is_simulated,
             strategy_tag="covered_call",
             parent_position_id=position_id,
-            conn=conn,
+            conn=active_conn,
         )
         close_position(
             position_id=stock_history_id,
             exit_date=confirmed_date,
             exit_price=strike_val,
             exit_reason="Exercício",
-            conn=conn,
+            conn=active_conn,
         )
-        sync_position_closure_effects(position_id=stock_history_id, conn=conn)
+        sync_position_closure_effects(position_id=stock_history_id, conn=active_conn)
 
         close_position(
             position_id=position_id,
             exit_date=confirmed_date,
             exit_price=0.0,
             exit_reason="Exercício",
-            conn=conn,
+            conn=active_conn,
         )
 
         add_transaction(
@@ -246,9 +249,9 @@ def callaway(
             ),
             position_id=position_id,
             is_simulated=is_simulated,
-            conn=conn,
+            conn=active_conn,
         )
-        sync_position_closure_effects(position_id=position_id, conn=conn)
+        sync_position_closure_effects(position_id=position_id, conn=active_conn)
 
     return underlying
 

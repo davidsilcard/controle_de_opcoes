@@ -43,6 +43,7 @@ from .config import (
     set_pg_schema_override,
 )
 from .db import db_transaction, open_db
+from .change_history import set_change_context
 from .operation_receipts import (
     OperationReceiptError,
     claim_operation_receipt,
@@ -1778,14 +1779,34 @@ def create_app() -> Flask:
         except (TypeError, ValueError):
             qty = None
         try:
-            assign_put(
-                position_id=position_id,
-                strike=strike,
-                qty=qty,
-                date=date,
-                purchase_fees=purchase_fees,
-            )
-        except (HoldingValidationError, FlowError) as exc:
+            with db_transaction() as conn:
+                receipt = _claim_form_operation_receipt(
+                    conn,
+                    command_name="finance.assign_put",
+                    form=form,
+                )
+                if receipt is None or not receipt.replayed:
+                    set_change_context(
+                        conn,
+                        actor=getattr(g, "current_username", None),
+                        reason="Exercício de PUT confirmado pelo usuário.",
+                    )
+                    assign_put(
+                        position_id=position_id,
+                        strike=strike,
+                        qty=qty,
+                        date=date,
+                        purchase_fees=purchase_fees,
+                        conn=conn,
+                    )
+                    if receipt is not None:
+                        complete_operation_receipt(
+                            conn,
+                            receipt_id=receipt.id,
+                            result_entity_type="put_assignment",
+                            result_entity_id=position_id,
+                        )
+        except (HoldingValidationError, FlowError, OperationReceiptError) as exc:
             message = str(exc) or "Nao foi possivel registrar o exercicio da PUT."
             return redirect(
                 url_for(
@@ -1830,17 +1851,37 @@ def create_app() -> Flask:
                 )
             )
         try:
-            underlying = callaway(
-                position_id=position_id,
-                date=date,
-                sale_fees=sale_fees,
-            )
-        except FlowError as exc:
-            if exc.underlying:
+            with db_transaction() as conn:
+                receipt = _claim_form_operation_receipt(
+                    conn,
+                    command_name="finance.callaway",
+                    form=form,
+                )
+                if receipt is None or not receipt.replayed:
+                    set_change_context(
+                        conn,
+                        actor=getattr(g, "current_username", None),
+                        reason="Exercício de CALL confirmado pelo usuário.",
+                    )
+                    underlying = callaway(
+                        position_id=position_id,
+                        date=date,
+                        sale_fees=sale_fees,
+                        conn=conn,
+                    )
+                    if receipt is not None:
+                        complete_operation_receipt(
+                            conn,
+                            receipt_id=receipt.id,
+                            result_entity_type="call_exercise",
+                            result_entity_id=position_id,
+                        )
+        except (FlowError, OperationReceiptError) as exc:
+            if getattr(exc, "underlying", None):
                 return redirect(
                     url_for(
                         "covered_call",
-                        underlying=exc.underlying,
+                        underlying=getattr(exc, "underlying"),
                         holding_error=str(exc),
                     )
                 )
@@ -1920,13 +1961,68 @@ def create_app() -> Flask:
                 )
             )
 
-        close_position(
-            position_id=position_id,
-            exit_date=date,
-            exit_price=0.0,
-            exit_reason="Expiração",
-        )
-        finance.sync_position_closure_effects(position_id=position_id)
+        try:
+            with db_transaction() as conn:
+                # Releitura com bloqueio impede que dois cliques fechem ou
+                # calculem a mesma opção ao mesmo tempo.
+                locked_pos = get_position(position_id, conn=conn, for_update=True)
+                if not locked_pos or (locked_pos.get("status") or "").strip().lower() != "open":
+                    if opt_type == "PUT":
+                        return redirect(
+                            url_for("cash_covered_put", underlying=underlying)
+                            if underlying
+                            else url_for("cash_covered_put")
+                        )
+                    return redirect(
+                        url_for("covered_call", underlying=underlying)
+                        if underlying
+                        else url_for("covered_call")
+                    )
+                receipt = _claim_form_operation_receipt(
+                    conn,
+                    command_name="finance.expire_option",
+                    form=form,
+                )
+                if receipt is None or not receipt.replayed:
+                    set_change_context(
+                        conn,
+                        actor=getattr(g, "current_username", None),
+                        reason="Expiração de opção confirmada pelo usuário.",
+                    )
+                    close_position(
+                        position_id=position_id,
+                        exit_date=date,
+                        exit_price=0.0,
+                        exit_reason="Expiração",
+                        conn=conn,
+                    )
+                    finance.sync_position_closure_effects(
+                        position_id=position_id,
+                        conn=conn,
+                    )
+                    if receipt is not None:
+                        complete_operation_receipt(
+                            conn,
+                            receipt_id=receipt.id,
+                            result_entity_type="option_expiration",
+                            result_entity_id=position_id,
+                        )
+        except OperationReceiptError as exc:
+            if opt_type == "PUT":
+                return redirect(
+                    url_for(
+                        "cash_covered_put",
+                        underlying=underlying,
+                        position_error=str(exc),
+                    )
+                )
+            return redirect(
+                url_for(
+                    "covered_call",
+                    underlying=underlying,
+                    holding_error=str(exc),
+                )
+            )
 
         if opt_type == "PUT":
             return redirect(
