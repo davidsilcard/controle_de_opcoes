@@ -1226,6 +1226,8 @@ RUN_E2E_TESTS=1 uv run pytest tests/test_scraper_e2e.py
 
 Plano e critérios de aceitação da estabilização: [docs/plano-estabilizacao-auditoria.md](docs/plano-estabilizacao-auditoria.md). Esta primeira etapa não executa reparo financeiro histórico nem migração em lote.
 
+Diagnóstico funcional da operação, linha de base da produção e ordem das próximas entregas: [docs/diagnostico-funcional-operacao.md](docs/diagnostico-funcional-operacao.md). Ele separa lacunas históricas sem evidência de falhas de cadastro novas e proíbe recriação por estimativa.
+
 - `Desempenho` agora separa contrato, garantia, vínculo de estoque, resultado e custos compartilhados; preencher um estado não reabre nem reclassifica os demais.
 - custos de nota sem rateio deixam de ser alerta vermelho e pendência do usuário: são agrupados por referência exata, sem certificar automaticamente o lançamento no caixa. A conciliação de DARF e líquidos dependentes fica explicitamente não verificável enquanto faltar a base individual.
 - `Cash-Covered Put` deriva automaticamente o capital de garantia como `strike × quantidade`, inclusive no histórico quando o capital persistido estiver ausente ou inválido.
