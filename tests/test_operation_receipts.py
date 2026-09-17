@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 
+from opcoes import finance
 from opcoes.db import db_transaction
 from opcoes.operation_receipts import (
     OperationReceiptError,
@@ -12,6 +13,7 @@ from opcoes.operation_receipts import (
     complete_operation_receipt,
     ensure_operation_receipts,
 )
+from opcoes.web import create_app
 
 
 class _Result:
@@ -124,3 +126,37 @@ def test_repeated_receipt_returns_original_result_and_rejects_changed_payload() 
                 payload_hash=_fingerprint("dados alterados"),
                 actor="david",
             )
+
+
+@pytest.mark.requires_postgres
+def test_manual_finance_repeated_post_creates_one_ledger_entry_and_receipt() -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "date": "2026-09-17",
+        "type": finance.TransactionType.DEPOSIT.value,
+        "amount": "100.00",
+        "description": "Aporte de teste idempotente",
+        "is_simulated": "0",
+        "_operation_key": str(uuid.uuid4()),
+    }
+
+    first = client.post("/finance/add", data=form)
+    repeated = client.post("/finance/add", data=form)
+
+    assert first.status_code in (302, 303)
+    assert repeated.status_code in (302, 303)
+    entries = [
+        tx
+        for tx in finance.get_transactions(limit=20)
+        if tx.description == "Aporte de teste idempotente"
+    ]
+    assert len(entries) == 1
+    with db_transaction() as conn:
+        receipts = conn.execute(
+            "SELECT command_name, result_entity_type FROM operation_receipts"
+        ).fetchall()
+    assert [dict(row) for row in receipts] == [
+        {"command_name": "finance.manual_add", "result_entity_type": "ledger"}
+    ]

@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from opcoes import finance, portfolio
+from opcoes.db import db_transaction
 from opcoes.cash_put_guard import (
     CashPutValidationError,
     audit_cash_put_positions,
@@ -171,6 +172,13 @@ def test_cash_put_web_repeated_post_with_same_confirmation_creates_one_operation
     assert repeated.status_code in (302, 303)
     assert len(portfolio.list_positions(include_closed=True)) == 1
     assert len(finance.get_transactions(limit=20)) == 2
+    with db_transaction() as conn:
+        receipts = conn.execute(
+            "SELECT command_name, result_entity_type FROM operation_receipts"
+        ).fetchall()
+    assert [dict(row) for row in receipts] == [
+        {"command_name": "positions.add", "result_entity_type": "position"}
+    ]
 
 
 @pytest.mark.requires_postgres
@@ -275,3 +283,13 @@ def test_cash_put_expiration_repeated_post_closes_once() -> None:
     assert pos is not None
     assert pos["status"] == "closed"
     assert pos["exit_date"] == "2026-07-17"
+    with db_transaction() as conn:
+        receipts = conn.execute(
+            "SELECT command_name, result_entity_type FROM operation_receipts"
+        ).fetchall()
+    assert [dict(row) for row in receipts] == [
+        {
+            "command_name": "finance.expire_option",
+            "result_entity_type": "option_expiration",
+        }
+    ]

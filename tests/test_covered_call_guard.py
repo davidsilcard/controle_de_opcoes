@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from opcoes import finance, portfolio
@@ -342,6 +344,74 @@ def test_covered_call_exercise_records_sale_fees_in_stock_result() -> None:
     ledger = finance.get_ledger_sums_by_position()
     assert ledger[stock["id"]][finance.TransactionType.REALIZED.value] == pytest.approx(1470.75)
     assert ledger[call_id][finance.TransactionType.SELL.value] == pytest.approx(18054.75)
+
+
+@pytest.mark.requires_postgres
+def test_covered_call_exercise_repeated_post_creates_one_sale_and_receipt() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="GGBR4",
+        quantity=800,
+        avg_price=20.73,
+        is_simulated=False,
+        notes="Estoque para teste de repetição do exercício",
+    )
+    snapshots = SnapshotDB()
+    try:
+        snapshots.record_options(
+            "2026-05-14",
+            [
+                {
+                    "underlying": "GGBR4",
+                    "ticker": "GGBRE228",
+                    "option_type": "CALL",
+                    "vencimento": "15/05/2026",
+                    "strike": "22.57",
+                }
+            ],
+        )
+    finally:
+        snapshots.close()
+    call_id = portfolio.add_position(
+        ticker="GGBRE228",
+        underlying="GGBR4",
+        trade_date="2026-04-22",
+        qty=800,
+        entry_price=0.36,
+        fees=0.37,
+        trade_type="swing",
+        side="short",
+        strategy_tag="covered_call",
+    )
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "position_id": str(call_id),
+        "date": "2026-05-15",
+        "sale_fees": "1.25",
+        "_operation_key": str(uuid.uuid4()),
+    }
+
+    first = client.post("/finance/callaway", data=form)
+    repeated = client.post("/finance/callaway", data=form)
+
+    assert first.status_code in (302, 303)
+    assert repeated.status_code in (302, 303)
+    assert portfolio.get_position(call_id)["status"] == "closed"
+    sells = [
+        tx
+        for tx in finance.get_transactions(limit=20)
+        if tx.position_id == call_id and tx.type == finance.TransactionType.SELL
+    ]
+    assert len(sells) == 1
+    with db_transaction() as conn:
+        receipts = conn.execute(
+            "SELECT command_name, result_entity_type FROM operation_receipts"
+        ).fetchall()
+    assert [dict(row) for row in receipts] == [
+        {"command_name": "finance.callaway", "result_entity_type": "call_exercise"}
+    ]
 
 
 @pytest.mark.requires_postgres

@@ -87,6 +87,16 @@ def test_put_assignment_updates_consolidated_stock_and_surfaces_audit_summary() 
     assert assignment_txs[0].date == "2026-03-20"
     assert assignment_txs[0].amount == pytest.approx(-17171.20)
     assert "despesas da compra: R$ 3.20" in assignment_txs[0].description
+    with db_transaction() as conn:
+        receipts = conn.execute(
+            "SELECT command_name, result_entity_type FROM operation_receipts"
+        ).fetchall()
+    assert [dict(row) for row in receipts] == [
+        {
+            "command_name": "finance.assign_put",
+            "result_entity_type": "put_assignment",
+        }
+    ]
 
     audit_response = client.get("/audit?mode=real&include_closed=1")
     assert audit_response.status_code == 200
