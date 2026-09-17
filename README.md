@@ -1228,6 +1228,8 @@ Plano e critérios de aceitação da estabilização: [docs/plano-estabilizacao-
 
 Diagnóstico funcional da operação, linha de base da produção e ordem das próximas entregas: [docs/diagnostico-funcional-operacao.md](docs/diagnostico-funcional-operacao.md). Ele separa lacunas históricas sem evidência de falhas de cadastro novas e proíbe recriação por estimativa.
 
+A suíte PostgreSQL exige agora que a repetição de cadastro de opção, movimentação manual, expiração, exercício de PUT e exercício de CALL gere apenas um efeito financeiro e um recibo de operação. Esses testes usam banco descartável; nunca criam registro de teste na base real.
+
 - `Desempenho` agora separa contrato, garantia, vínculo de estoque, resultado e custos compartilhados; preencher um estado não reabre nem reclassifica os demais.
 - custos de nota sem rateio deixam de ser alerta vermelho e pendência do usuário: são agrupados por referência exata, sem certificar automaticamente o lançamento no caixa. A conciliação de DARF e líquidos dependentes fica explicitamente não verificável enquanto faltar a base individual.
 - `Cash-Covered Put` deriva automaticamente o capital de garantia como `strike × quantidade`, inclusive no histórico quando o capital persistido estiver ausente ou inválido.
