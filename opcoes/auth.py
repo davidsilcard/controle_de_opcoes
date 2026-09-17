@@ -746,10 +746,15 @@ def record_failed_login_attempt(
             blocked_until = None
         else:
             failed_count += 1
-            if failed_count >= max_attempts:
-                failed_count = 0
-                first_failure_at = now
-                blocked_until = now + dt.timedelta(seconds=max(int(block_seconds or 0), 60))
+
+        # O primeiro erro já deve bloquear quando o limite configurado é 1.
+        # Para qualquer outro limite, mantém o bloqueio no enésimo erro dentro
+        # da mesma janela, independentemente de o contador ter sido iniciado
+        # agora ou em uma tentativa anterior.
+        if failed_count >= max_attempts:
+            failed_count = 0
+            first_failure_at = now
+            blocked_until = now + dt.timedelta(seconds=max(int(block_seconds or 0), 60))
 
         conn.execute(
             f"""

@@ -616,6 +616,9 @@ OPCOES_LOGIN_BLOCK_SECONDS=900
 OPCOES_TRUST_PROXY_HOPS=1
 ```
 
+`OPCOES_LOGIN_MAX_ATTEMPTS=1` bloqueia já no primeiro erro; use esse valor
+somente se esse comportamento mais rígido for desejado.
+
 - formularios `POST` agora validam token CSRF. Se aparecer mensagem de formulario expirado, recarregue a pagina e envie novamente.
 - snapshots, ranking, Fundamentus e configuracoes didaticas agora sao lidos da base compartilhada; posicoes, ledger, DARF e dados fiscais continuam isolados por usuario autenticado.
 

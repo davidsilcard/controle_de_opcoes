@@ -150,6 +150,10 @@ bloqueia edição estrutural de estratégias pela tabela genérica. A publicaç�
 também torna explícita a confiança no proxy reverso da VPS, sem registrar
 segredos no Git.
 
+Quinta entrega da fase: o limite configurado de tentativas de login passa a
+valer também quando definido como `1`; o primeiro erro é bloqueado e registrado
+no schema de autenticação, sem depender de cabeçalho encaminhado pelo cliente.
+
 ## Ordem de entrega
 
 1. Fase 0 (iniciada nesta alteração).
