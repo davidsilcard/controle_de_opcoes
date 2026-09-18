@@ -536,3 +536,33 @@ def test_result_origin_states_keep_financial_and_documentary_statuses_separate()
         "Declaração manual",
         "Auditoria concluída sem prova",
     ]
+
+
+def test_result_origin_states_explain_documented_guarantee_source() -> None:
+    position = {
+        "id": 91,
+        "ticker": "CAMLD794",
+        "underlying": "CAML3",
+        "strategy_tag": "covered_call",
+        "side": "short",
+        "status": "closed",
+        "trade_date": "2026-04-15",
+        "exit_date": "2026-04-17",
+        "exit_reason": "Expirou",
+        "qty": 1000,
+        "contract_strike": 7.94,
+        "contract_expiry": "2026-04-17",
+        "capital_committed": 6603.0,
+        "capital_source": "garantia_documentada",
+        "capital_source_ref": "Histórico B3 CAML3 apresentado pelo usuário.",
+        "performance_evidence_state": "pending",
+        "is_simulated": False,
+    }
+
+    cycle = build_strategy_performance(
+        [position], ledger_sums={91: _ledger(realized=49.95)}
+    )["cycles"][0]
+
+    documented = cycle["result_origin_states"][1]
+    assert documented["label"] == "Garantia documentada"
+    assert "Histórico B3 CAML3" in documented["detail"]

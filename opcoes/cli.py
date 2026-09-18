@@ -73,6 +73,10 @@ from .contract_adjustment_repair import (
     ContractAdjustmentRepairError,
     repair_contract_adjustment,
 )
+from .performance_evidence_repair import (
+    PerformanceEvidenceRepairError,
+    repair_performance_evidence,
+)
 from .wheel_cycles import WheelCycleError, backfill_wheel_cycles
 from .config import reset_pg_schema_override, set_pg_schema_override
 from .ranking_page_cache import (
@@ -1034,6 +1038,37 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Aplica apenas os metadados documentais após validar a posição. Sem esta flag, apenas simula.",
     )
+    performance_evidence = repairs.add_parser(
+        "performance-evidence",
+        help="Simula ou registra strike e garantia histórica comprovados, sem alterar efeitos financeiros.",
+    )
+    performance_evidence.add_argument(
+        "--position-id", type=int, required=True, help="ID da opção vendida."
+    )
+    performance_evidence.add_argument(
+        "--expected-ticker", required=True, help="Ticker esperado para evitar alvo incorreto."
+    )
+    performance_evidence.add_argument(
+        "--contract-strike", type=float, help="Strike comprovado da opção."
+    )
+    performance_evidence.add_argument(
+        "--expected-expiry",
+        help="Vencimento já registrado que deve coincidir com a evidência (YYYY-MM-DD).",
+    )
+    performance_evidence.add_argument(
+        "--contract-source-ref", help="Fonte documental do strike."
+    )
+    performance_evidence.add_argument(
+        "--capital-committed", type=float, help="Capital histórico comprovado da garantia."
+    )
+    performance_evidence.add_argument(
+        "--capital-source-ref", help="Fonte documental do capital histórico."
+    )
+    performance_evidence.add_argument(
+        "--apply",
+        action="store_true",
+        help="Aplica somente metadados após validar a posição. Sem esta flag, apenas simula.",
+    )
     wheel_backfill = repairs.add_parser(
         "wheel-cycle-backfill",
         help="Simula ou cria ciclos Wheel somente para cadeias historicas inequivocas.",
@@ -1837,6 +1872,33 @@ def main() -> None:
             print(
                 f"  Posição #{report['position_id']} {report['ticker']} | strike original: R$ {report['original_strike']:.2f} | "
                 f"strike ajustado: R$ {report['adjusted_strike']:.2f} em {report['adjustment_date']}"
+            )
+        elif args.subcmd == "performance-evidence":
+            try:
+                report = repair_performance_evidence(
+                    position_id=args.position_id,
+                    expected_ticker=args.expected_ticker,
+                    contract_strike=args.contract_strike,
+                    expected_expiry=args.expected_expiry,
+                    contract_source_ref=args.contract_source_ref,
+                    capital_committed=args.capital_committed,
+                    capital_source_ref=args.capital_source_ref,
+                    apply=bool(args.apply),
+                )
+            except PerformanceEvidenceRepairError as exc:
+                raise SystemExit(f"Correção não aplicada: {exc}") from exc
+            mode = "APLICADA" if report["applied"] else "SIMULAÇÃO"
+            print(f"Evidência de desempenho: {mode}")
+            print(
+                f"  Posição #{report['position_id']} {report['ticker']} | "
+                f"strike: {('R$ %.2f' % report['contract_strike']) if report['contract_strike'] is not None else 'sem alteração'} | "
+                f"garantia: {('R$ %.2f' % report['capital_committed']) if report['capital_committed'] is not None else 'sem alteração'}"
+            )
+            print(
+                "  Alteração necessária: "
+                f"contrato={'sim' if report['contract_update_required'] else 'não'}, "
+                f"garantia={'sim' if report['capital_update_required'] else 'não'}, "
+                f"fontes={'sim' if report['source_update_required'] else 'não'}"
             )
         elif args.subcmd == "wheel-cycle-backfill":
             try:

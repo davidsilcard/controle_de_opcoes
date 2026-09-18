@@ -138,6 +138,7 @@ def _result_origin_states(
     *,
     option_result: float | None,
     capital_source: Any,
+    capital_source_ref: Any,
     contract_missing_reasons: Sequence[str],
     performance_evidence_state: str,
 ) -> list[dict[str, str]]:
@@ -166,6 +167,17 @@ def _result_origin_states(
                 "label": "Declaração manual",
                 "tone": "primary",
                 "detail": "A base de retorno foi declarada pelo usuário.",
+            }
+        )
+    if str(capital_source or "").strip() == "garantia_documentada":
+        detail = "A base de retorno foi comprovada por documento histórico."
+        if str(capital_source_ref or "").strip():
+            detail = f"A base de retorno foi comprovada: {capital_source_ref}."
+        states.append(
+            {
+                "label": "Garantia documentada",
+                "tone": "primary",
+                "detail": detail,
             }
         )
     if contract_missing_reasons:
@@ -380,6 +392,7 @@ def build_strategy_performance(
             "expiry": position.get("contract_expiry"),
             "capital": capital,
             "capital_source": capital_source,
+            "capital_source_ref": position.get("capital_source_ref"),
             "capital_is_derived": capital_is_derived,
             "source_ref": position.get("performance_source_ref"),
             "performance_evidence_state": performance_evidence_state,
@@ -407,6 +420,7 @@ def build_strategy_performance(
             "result_origin_states": _result_origin_states(
                 option_result=option_result,
                 capital_source=capital_source,
+                capital_source_ref=position.get("capital_source_ref"),
                 contract_missing_reasons=contract_missing_reasons,
                 performance_evidence_state=performance_evidence_state,
             ),

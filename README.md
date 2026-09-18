@@ -351,6 +351,25 @@ uv run python -m opcoes.cli repair covered-call-exercise-fee \
 
 O comando acima é apenas simulação. Ele só aceita uma CALL exercida e confere o histórico fechado da ação, o evento `CALL_EXERCISE` e o único `SELL` correspondente. Depois de revisar os valores, repita a mesma linha com `--apply`. O reparo altera exclusivamente o caixa líquido do `SELL` e a taxa do evento de estoque; não altera quantidade, prêmio, DARF ou resultado fiscal da ação.
 
+Reparo documental de contrato e garantia histórica:
+
+```bash
+uv run python -m opcoes.cli repair performance-evidence \
+  --position-id <id> \
+  --expected-ticker <ticker> \
+  --contract-strike <strike> \
+  --expected-expiry <YYYY-MM-DD> \
+  --contract-source-ref "<fonte do strike>" \
+  --capital-committed <valor> \
+  --capital-source-ref "<fonte da garantia>"
+```
+
+Sem `--apply`, o comando só mostra a simulação. Ele confere ID, ticker, estratégia,
+vencimento e valores já gravados; recusa substituir um strike ou garantia diferente.
+Ao aplicar, grava somente metadados documentais e suas fontes — nunca caixa, estoque,
+prêmio, DARF, quantidade ou datas. Use somente os campos que a evidência comprovar e
+adicione `--apply` apenas depois de revisar a simulação.
+
 Baixa e conferencia visual do resultado realizado:
 
 - na tela `/positions`, preencha `Data saida`, `Preco saida` e `Motivo`, depois clique em `Salvar`.

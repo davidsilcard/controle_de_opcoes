@@ -224,6 +224,7 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "contract_expiry": "TEXT",
         "capital_committed": "DOUBLE PRECISION",
         "capital_source": "TEXT",
+        "capital_source_ref": "TEXT",
         "performance_source_ref": "TEXT",
         "performance_evidence_state": "TEXT DEFAULT 'pending'",
         "performance_evidence_note": "TEXT",
@@ -357,6 +358,7 @@ def add_position(
     contract_expiry: Optional[str] = None,
     capital_committed: Optional[float] = None,
     capital_source: Optional[str] = None,
+    capital_source_ref: Optional[str] = None,
     performance_source_ref: Optional[str] = None,
     performance_evidence_state: str = "pending",
     performance_evidence_note: Optional[str] = None,
@@ -402,6 +404,7 @@ def add_position(
         contract_expiry or None,
         float(capital_committed) if capital_committed is not None else None,
         capital_source or None,
+        capital_source_ref or None,
         performance_source_ref or None,
         _normalize_performance_evidence_state(performance_evidence_state),
         performance_evidence_note or None,
@@ -437,13 +440,14 @@ def add_position(
                     contract_expiry,
                     capital_committed,
                     capital_source,
+                    capital_source_ref,
                     performance_source_ref,
                     performance_evidence_state,
                     performance_evidence_note,
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params,
@@ -477,13 +481,14 @@ def add_position(
                     contract_expiry,
                     capital_committed,
                     capital_source,
+                    capital_source_ref,
                     performance_source_ref,
                     performance_evidence_state,
                     performance_evidence_note,
                     shared_fee_pending,
                     shared_fee_note_ref
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -700,6 +705,7 @@ def update_position_performance_metadata(
     contract_expiry: Any = _UNSET,
     capital_committed: Any = _UNSET,
     capital_source: Any = _UNSET,
+    capital_source_ref: Any = _UNSET,
     performance_source_ref: Any = _UNSET,
     performance_evidence_state: Any = _UNSET,
     performance_evidence_note: Any = _UNSET,
@@ -782,6 +788,9 @@ def update_position_performance_metadata(
     if capital_source is not _UNSET:
         fields.append("capital_source = ?")
         params.append(str(capital_source or "").strip() or None)
+    if capital_source_ref is not _UNSET:
+        fields.append("capital_source_ref = ?")
+        params.append(str(capital_source_ref or "").strip() or None)
     if performance_source_ref is not _UNSET:
         fields.append("performance_source_ref = ?")
         params.append(str(performance_source_ref or "").strip() or None)
@@ -1303,6 +1312,11 @@ def _row_to_dict(row: Any) -> dict:
         ),
         "capital_source": (
             row["capital_source"] if "capital_source" in row.keys() else None
+        ),
+        "capital_source_ref": (
+            row["capital_source_ref"]
+            if "capital_source_ref" in row.keys()
+            else None
         ),
         "performance_source_ref": (
             row["performance_source_ref"]
