@@ -240,6 +240,11 @@ Na interface web, a aba `Ranking diario` continua usando carregamento progressiv
 
 ### Posições
 
+O filtro da grade de posições não altera o quadro de estoque consolidado: total,
+reservado e livre são calculados com todas as posições abertas, inclusive as
+que não correspondem ao ticker pesquisado. Para uma nova Covered Call, confirme
+também a cobertura na aba da estratégia antes de cadastrar.
+
 ```bash
 uv run python -m opcoes.cli position add --ticker PETR4 --underlying PETR4 --trade-date 2026-03-02 --qty 100 --price 34.10 --fees 2.5 --side long
 uv run python -m opcoes.cli position list

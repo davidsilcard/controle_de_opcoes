@@ -523,7 +523,9 @@ def _build_positions_page_context(
         selected_year=result_year,
         selected_month=result_month,
     )
-    inventory_summary = _build_inventory_overview_global(positions)
+    # O filtro limita a grade de posicoes, nao a cobertura do estoque.
+    # A auditoria acima ja carregou todas as posicoes abertas sem filtros.
+    inventory_summary = _build_inventory_overview_global(audit_open_positions)
     ctx = {
         "positions": positions_view,
         "filter_ticker": ticker_contains,

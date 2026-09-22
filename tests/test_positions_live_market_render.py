@@ -1,7 +1,65 @@
 from __future__ import annotations
 
 from opcoes.holdings import HoldingValidationError
-from opcoes.web import create_app
+from opcoes.web import _build_positions_page_context, create_app
+
+
+def test_positions_inventory_ignores_ticker_filter(monkeypatch) -> None:
+    open_call = {
+        "id": 70,
+        "ticker": "BBASJ252",
+        "underlying": "BBAS3",
+        "status": "open",
+        "strategy_tag": "covered_call",
+        "side": "short",
+        "qty": 2300,
+        "is_simulated": False,
+    }
+
+    def fake_list_positions(**kwargs):
+        if kwargs.get("ticker_contains") == "CMIGJ124":
+            return []
+        return [open_call]
+
+    def fake_holding_snapshots(**kwargs):
+        positions_open = kwargs.get("positions_open") or []
+        reserved = sum(p["qty"] for p in positions_open if p["ticker"] == "BBASJ252")
+        return [
+            {
+                "ticker": "BBAS3",
+                "shares_total": 2300,
+                "shares_reserved": reserved,
+                "shares_free": 2300 - reserved,
+            }
+        ]
+
+    monkeypatch.setattr("opcoes.web.list_positions", fake_list_positions)
+    monkeypatch.setattr("opcoes.web.list_holding_snapshots", fake_holding_snapshots)
+    monkeypatch.setattr("opcoes.web.list_holding_events", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "opcoes.web.finance.get_premium_position_ids", lambda _ids: set()
+    )
+    monkeypatch.setattr(
+        "opcoes.web.finance.get_ledger_sums_by_position", lambda **_kwargs: {}
+    )
+    monkeypatch.setattr("opcoes.web.audit_positions_page", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("opcoes.web.summarize_realized_positions", lambda **_kwargs: {})
+
+    ctx = _build_positions_page_context(
+        ticker_contains="CMIGJ124",
+        underlying_contains="",
+        strategy_tag="",
+        trade_type="",
+        status="all",
+        is_simulated_raw="",
+        result_year_raw="",
+        result_month_raw="",
+        market_data_client=None,
+    )
+
+    assert ctx["positions"] == []
+    assert ctx["inventory_summary"][0]["shares_reserved"] == 2300
+    assert ctx["inventory_summary"][0]["shares_free"] == 0
 
 
 def test_positions_route_renders_live_market_status(monkeypatch) -> None:
