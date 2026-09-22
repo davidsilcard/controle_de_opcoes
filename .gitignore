@@ -7,6 +7,7 @@ pytest_tmp_run/
 pytest-cache-files-*/
 .pytest-tmp/
 codex_test_tmp/
+tmp/pdfs/
 
 # Editor/OS cruft
 .DS_Store
