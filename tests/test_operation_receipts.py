@@ -160,3 +160,36 @@ def test_manual_finance_repeated_post_creates_one_ledger_entry_and_receipt() -> 
     assert [dict(row) for row in receipts] == [
         {"command_name": "finance.manual_add", "result_entity_type": "ledger"}
     ]
+
+
+@pytest.mark.requires_postgres
+def test_shared_note_fee_is_one_cash_debit_without_position_allocation() -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "date": "2026-09-04",
+        "type": finance.TransactionType.SHARED_NOTE_FEE.value,
+        "amount": "3.44",
+        "description": "BTG #34281732 - despesas compartilhadas sem rateio",
+        "is_simulated": "0",
+        "_operation_key": str(uuid.uuid4()),
+    }
+
+    invalid = client.post("/finance/add", data={**form, "description": ""})
+    assert invalid.status_code in (302, 303)
+    assert "position_error=" in (invalid.headers.get("Location") or "")
+    assert finance.get_transactions(limit=20) == []
+
+    first = client.post("/finance/add", data=form)
+    repeated = client.post("/finance/add", data=form)
+    assert first.status_code in (302, 303)
+    assert repeated.status_code in (302, 303)
+    entries = [
+        tx
+        for tx in finance.get_transactions(limit=20)
+        if tx.type == finance.TransactionType.SHARED_NOTE_FEE
+    ]
+    assert len(entries) == 1
+    assert entries[0].amount == -3.44
+    assert entries[0].position_id is None

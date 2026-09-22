@@ -1734,6 +1734,15 @@ def create_app() -> Flask:
         except ValueError:
             return redirect(url_for("cash_covered_put"))  # Or error page
 
+        if tx_type == finance.TransactionType.SHARED_NOTE_FEE:
+            if amount <= 0 or not (form.get("description") or "").strip():
+                return redirect(
+                    url_for(
+                        "cash_covered_put",
+                        position_error="Informe valor positivo e referência da nota para a despesa compartilhada.",
+                    )
+                )
+            amount = -amount
         # Negative amount for withdrawal
         if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
             amount = -amount

@@ -880,6 +880,7 @@
               <select name="type" class="form-select">
                 <option value="DEPOSIT">Depósito (Aporte)</option>
                 <option value="WITHDRAW">Retirada (Saque)</option>
+                <option value="SHARED_NOTE_FEE">Despesa compartilhada de nota (sem rateio)</option>
               </select>
             </div>
             <div class="mb-3">
@@ -899,8 +900,9 @@
             </div>
             <div class="mb-3">
               <label class="form-label">Descrição</label>
-              <input type="text" name="description" class="form-control" placeholder="Opcional">
+              <input type="text" name="description" class="form-control" placeholder="Informe a referência da nota para despesa compartilhada">
             </div>
+            <p class="small text-muted mb-0">Para despesa compartilhada, informe o total positivo da nota uma única vez. O sistema debita o caixa sem atribuir o custo a uma operação individual.</p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
