@@ -3018,7 +3018,37 @@ def create_app() -> Flask:
             return redirect(
                 url_for("positions", strategy_tag="ranking", position_error=str(exc))
             )
-        if fees_input:
+        shared_fee_pending = form.get("shared_fee_pending") == "1"
+        shared_fee_note_ref = (form.get("shared_fee_note_ref") or "").strip()
+        if shared_fee_pending:
+            if not _is_option_ticker(ticker) or not shared_fee_note_ref:
+                return redirect(
+                    _url_with_query(
+                        next_url,
+                        position_error="Despesa compartilhada exige opção e referência da nota.",
+                    )
+                )
+            if fees_input and fees_input.strip():
+                try:
+                    shared_fee_input = float(fees_input.strip().replace(",", "."))
+                except ValueError:
+                    shared_fee_input = float("nan")
+                if not math.isfinite(shared_fee_input) or shared_fee_input != 0.0:
+                    return redirect(
+                        _url_with_query(
+                            next_url,
+                            position_error="Não informe taxa individual sem rateio documental.",
+                        )
+                    )
+            fees = 0.0
+        elif shared_fee_note_ref:
+            return redirect(
+                _url_with_query(
+                    next_url,
+                    position_error="Marque despesa compartilhada para usar a referência da nota.",
+                )
+            )
+        elif fees_input:
             fees = _parse_form_float(fees_input)
         else:
             fees = _auto_fees(
@@ -3064,6 +3094,8 @@ def create_app() -> Flask:
                 is_simulated=is_simulated,
                 parent_position_id=parent_id,
                 strategy_tag=strategy_tag_raw,
+                shared_fee_pending=shared_fee_pending,
+                shared_fee_note_ref=shared_fee_note_ref or None,
                 **performance_contract,
                 conn=conn,
             )

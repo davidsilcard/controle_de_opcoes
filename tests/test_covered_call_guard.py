@@ -250,6 +250,67 @@ def test_covered_call_web_add_blocks_probable_duplicate() -> None:
 
 
 @pytest.mark.requires_postgres
+def test_covered_call_web_add_preserves_shared_note_fee_without_estimate() -> None:
+    _ensure_snapshot_tables()
+    upsert_holding(
+        ticker="BBAS3",
+        quantity=2300,
+        avg_price=23.30,
+        is_simulated=False,
+        notes="Cobertura para nota compartilhada",
+    )
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {
+        "ticker": "BBASJ252",
+        "underlying": "BBAS3",
+        "qty": "2300",
+        "entry_price": "0.74",
+        "trade_date": "2026-09-04",
+        "trade_type": "swing",
+        "side": "short",
+        "strategy_tag": "covered_call",
+        "record_premium": "1",
+        "reserve_darf": "1",
+        "is_simulated": "0",
+        "contract_strike": "24.79",
+        "contract_expiry": "2026-10-16",
+        "shared_fee_pending": "1",
+        "shared_fee_note_ref": "BTG #34281732",
+    }
+
+    invalid = client.post("/positions/add", data={**form, "fees": "0.10"})
+    assert invalid.status_code in (302, 303)
+    assert "position_error=" in (invalid.headers.get("Location") or "")
+    assert portfolio.list_positions(include_closed=True, ticker="BBASJ252") == []
+
+    missing_ref = client.post(
+        "/positions/add", data={**form, "shared_fee_note_ref": ""}
+    )
+    assert missing_ref.status_code in (302, 303)
+    assert "position_error=" in (missing_ref.headers.get("Location") or "")
+    assert portfolio.list_positions(include_closed=True, ticker="BBASJ252") == []
+
+    response = client.post("/positions/add", data=form)
+    assert response.status_code in (302, 303)
+    positions = portfolio.list_positions(include_closed=True, ticker="BBASJ252")
+    assert len(positions) == 1
+    position = positions[0]
+    assert position["fees"] == 0.0
+    assert position["shared_fee_pending"] is True
+    assert position["shared_fee_note_ref"] == "BTG #34281732"
+    premiums = [
+        tx
+        for tx in finance.get_transactions(limit=200)
+        if tx.position_id == position["id"]
+        and tx.type == finance.TransactionType.PREMIUM
+    ]
+    assert len(premiums) == 1
+    assert premiums[0].amount == 1702.0
+
+
+@pytest.mark.requires_postgres
 def test_covered_call_exercise_without_confirmed_date_is_blocked() -> None:
     _ensure_snapshot_tables()
     upsert_holding(
