@@ -276,6 +276,7 @@ def test_covered_call_web_add_preserves_shared_note_fee_without_estimate() -> No
         "is_simulated": "0",
         "contract_strike": "24.79",
         "contract_expiry": "2026-10-16",
+        "performance_source_ref": "Nota BTG #34281732; contrato conferido em Opções.net",
         "shared_fee_pending": "1",
         "shared_fee_note_ref": "BTG #34281732",
     }
