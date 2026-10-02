@@ -726,6 +726,7 @@ def sync_short_option_buyback(
     exit_date: Optional[str],
     exit_price: Optional[float],
     is_simulated: bool,
+    buyback_fees: float = 0.0,
     conn: Optional[Any] = None,
 ) -> float:
     """Sincroniza a recompra de encerramento (BUY) para opção vendida."""
@@ -763,7 +764,7 @@ def sync_short_option_buyback(
                 db.commit()
             return 0.0
 
-        amount = -round(close_price * close_qty, 2)
+        amount = -round(close_price * close_qty + float(buyback_fees or 0.0), 2)
         description = f"Recompra opção {ticker} ({close_qty}x)"
 
         if existing_ids:
@@ -1060,6 +1061,7 @@ def sync_position_closure_effects(
                     else None
                 ),
                 is_simulated=bool(pos.get("is_simulated") or 0),
+                buyback_fees=float(pos.get("buyback_fees") or 0.0),
                 conn=db,
             )
         if infer_option_type(ticker) in {"CALL", "PUT"} and side == "long":

@@ -182,6 +182,7 @@ def _position_closure_financial_signature(
         "qty",
         "entry_price",
         "fees",
+        "buyback_fees",
         "trade_type",
         "side",
         "irrf",
@@ -195,7 +196,7 @@ def _position_closure_financial_signature(
         "is_simulated",
         "strategy_tag",
     )
-    zero_equivalent = {"fees", "irrf", "partial_qty"}
+    zero_equivalent = {"fees", "buyback_fees", "irrf", "partial_qty"}
     numeric_fields = {"qty", "entry_price", "exit_price", "partial_price"}
     lowercase_fields = {"trade_type", "side", "status", "strategy_tag"}
     normalized: list[Any] = []
@@ -3403,6 +3404,20 @@ def create_app() -> Flask:
             exit_date = None
             exit_price = None
             exit_reason = None
+        try:
+            # Formulários antigos sem o campo preservam o valor conhecido.
+            buyback_fees = float(str(form.get("buyback_fees", persisted_pos.get("buyback_fees") or 0) or 0).replace(",", "."))
+            if not math.isfinite(buyback_fees) or buyback_fees < 0:
+                raise ValueError("Taxas da recompra devem ser finitas e não negativas.")
+            if buyback_fees and not (
+                status == "closed" and side_raw == "short"
+                and infer_option_type(ticker) in {"CALL", "PUT"}
+                and exit_price is not None and exit_price > 0 and exit_date
+                and int(persisted_pos.get("qty") or 0) - int(partial_qty or 0) > 0
+            ):
+                raise ValueError("Taxas da recompra exigem opção vendida encerrada com preço e data de recompra. Ao reabrir, informe zero.")
+        except (ValueError, TypeError) as exc:
+            return redirect(url_for("positions", ticker=ticker, position_error=str(exc)))
         proposed_identity = {
             "ticker": ticker,
             "underlying": underlying,
@@ -3555,6 +3570,7 @@ def create_app() -> Flask:
                 else None
             ),
             fees=_parse_form_float(form.get("fees")),
+            buyback_fees=buyback_fees,
             status=status,
             exit_date=exit_date,
             exit_price=exit_price,

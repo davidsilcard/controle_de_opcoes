@@ -230,6 +230,7 @@ def _ensure_position_columns(conn: _DbConn) -> None:
         "performance_evidence_note": "TEXT",
         "shared_fee_pending": "INTEGER DEFAULT 0",
         "shared_fee_note_ref": "TEXT",
+        "buyback_fees": "DOUBLE PRECISION NOT NULL DEFAULT 0",
         "voided_at": "TIMESTAMPTZ",
         "voided_by": "TEXT",
         "void_reason": "TEXT",
@@ -541,6 +542,7 @@ def update_position(
     qty: Any = _UNSET,
     entry_price: Any = _UNSET,
     fees: Any = _UNSET,
+    buyback_fees: Any = _UNSET,
     status: Any = _UNSET,
     exit_date: Any = _UNSET,
     exit_price: Any = _UNSET,
@@ -589,6 +591,12 @@ def update_position(
     if fees is not _UNSET:
         fields.append("fees = ?")
         params.append(float(fees))
+    if buyback_fees is not _UNSET:
+        value = float(buyback_fees)
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("Taxas da recompra devem ser finitas e não negativas.")
+        fields.append("buyback_fees = ?")
+        params.append(value)
     if status is not _UNSET:
         fields.append("status = ?")
         params.append(status)
@@ -1000,7 +1008,7 @@ def summarize_realized_positions(
         except ValueError:
             continue
         gross_value = round(float(realized_pl), 2)
-        fees_value = round(float(pos.get("fees") or 0.0), 2)
+        fees_value = round(float(pos.get("fees") or 0.0) + float(pos.get("buyback_fees") or 0.0), 2)
         net_value = round(
             float(
                 pos.get("pl") if pos.get("pl") is not None else gross_value - fees_value
@@ -1154,6 +1162,7 @@ def _row_to_dict(row: Any) -> dict:
     entry_price = float(row["entry_price"])
     qty = int(row["qty"])
     fees = float(row["fees"] or 0.0)
+    buyback_fees = float(row["buyback_fees"] or 0.0) if "buyback_fees" in row.keys() else 0.0
     partial_qty = int(row["partial_qty"] or 0) if "partial_qty" in row.keys() else 0
     partial_price = (
         parse_decimal(row["partial_price"]) if "partial_price" in row.keys() else None
@@ -1209,7 +1218,7 @@ def _row_to_dict(row: Any) -> dict:
 
     pl = None
     if realized_pl is not None or pl_open is not None:
-        pl = (realized_pl or 0.0) + (pl_open or 0.0) - fees
+        pl = (realized_pl or 0.0) + (pl_open or 0.0) - fees - (buyback_fees if is_closed else 0.0)
 
     pl_pct = None
     if pl is not None and entry_price and qty > 0:
@@ -1260,6 +1269,7 @@ def _row_to_dict(row: Any) -> dict:
         "open_qty": open_qty,
         "entry_price": entry_price,
         "fees": fees,
+        "buyback_fees": buyback_fees,
         "status": row["status"],
         "side": side,
         "exit_date": row["exit_date"] if "exit_date" in row.keys() else None,

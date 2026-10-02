@@ -142,7 +142,7 @@ class _TransactionalPosition:
         self.syncs.append(deepcopy(position))
         close_qty = max(int(position["qty"]) - int(position.get("partial_qty") or 0), 0)
         self.ledger["buyback"] = (
-            -round(float(position.get("exit_price") or 0.0) * close_qty, 2)
+            -round(float(position.get("exit_price") or 0.0) * close_qty + float(position.get("buyback_fees") or 0.0), 2)
             if position["status"] == "closed"
             else 0.0
         )
@@ -275,6 +275,63 @@ def test_buyback_notes_only_do_not_synchronize(monkeypatch) -> None:
 
     assert store.post(store.payload(notes="Recompra conferida")).status_code == 302
     assert store.syncs == []
+
+
+def test_buyback_fees_change_does_not_change_entry_fees(monkeypatch) -> None:
+    store = _TransactionalPosition(monkeypatch, _position(
+        ticker="KLBNJ196", underlying="KLBN11", strategy_tag="covered_call",
+        qty=1000, entry_price=0.34, fees=0.44,
+        exit_price=0.06, exit_reason="recompra_encerramento",
+    ))
+    assert store.post(store.payload(buyback_fees="0.07")).status_code == 302
+    assert store.position["fees"] == 0.44
+    assert store.position["buyback_fees"] == 0.07
+    assert store.ledger["buyback"] == -60.07
+    assert store.ledger["realized"] == 279.49
+    assert len(store.syncs) == 1
+    assert store.post(store.payload(notes="Conferido")).status_code == 302
+    assert len(store.syncs) == 1
+
+
+def test_legacy_form_preserves_buyback_fees(monkeypatch) -> None:
+    store = _TransactionalPosition(monkeypatch, _position(
+        exit_price=0.01, exit_reason="recompra_encerramento", buyback_fees=0.07,
+    ))
+    payload = store.payload(notes="Formulário antigo")
+    payload.pop("buyback_fees")
+    assert store.post(payload).status_code == 302
+    assert store.position["buyback_fees"] == 0.07
+    assert not store.syncs
+
+
+@pytest.mark.parametrize("value", ["-0.01", "nan", "inf", "inválido"])
+def test_invalid_buyback_fees_do_not_write(monkeypatch, value) -> None:
+    store = _TransactionalPosition(monkeypatch, _position(
+        exit_price=0.01, exit_reason="recompra_encerramento",
+    ))
+    response = store.post(store.payload(buyback_fees=value))
+    assert "position_error=" in response.headers["Location"]
+    assert not store.updates
+    assert not store.syncs
+
+
+def test_buyback_fees_rejected_without_buyback(monkeypatch) -> None:
+    store = _TransactionalPosition(monkeypatch, _position())
+    response = store.post(store.payload(buyback_fees="0.07"))
+    assert "position_error=" in response.headers["Location"]
+    assert not store.updates
+
+
+def test_buyback_fees_sync_failure_rolls_back(monkeypatch) -> None:
+    store = _TransactionalPosition(monkeypatch, _position(
+        exit_price=0.01, exit_reason="recompra_encerramento",
+    ))
+    before = deepcopy(store.position)
+    store.fail_sync = True
+    with pytest.raises(RuntimeError, match="Falha simulada"):
+        store.post(store.payload(buyback_fees="0.07"))
+    assert store.position == before
+    assert store.events[-1] == "rollback"
 
 
 def test_reopening_buyback_still_synchronizes_closure_effects(monkeypatch) -> None:

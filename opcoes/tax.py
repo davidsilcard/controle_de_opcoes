@@ -71,6 +71,7 @@ def build_position_tax_events(position: Mapping[str, object]) -> list[TaxEvent]:
     qty = int(position.get("qty") or 0)
     entry_price = float(position.get("entry_price") or 0.0)
     fees = float(position.get("fees") or 0.0)
+    buyback_fees = float(position.get("buyback_fees") or 0.0)
     partial_qty = int(position.get("partial_qty") or 0)
     partial_price = position.get("partial_price")
     partial_date = str(position.get("partial_date") or "").strip()
@@ -102,7 +103,7 @@ def build_position_tax_events(position: Mapping[str, object]) -> list[TaxEvent]:
         )
 
     if status == "closed" and open_qty > 0 and exit_price is not None and exit_date:
-        amount = (direction * (float(exit_price) - entry_price) * open_qty) - fees
+        amount = (direction * (float(exit_price) - entry_price) * open_qty) - fees - buyback_fees
         events.append(
             TaxEvent(
                 date=exit_date,

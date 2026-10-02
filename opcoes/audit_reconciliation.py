@@ -203,7 +203,7 @@ def build_audit_reconciliation(
                 and exit_price is not None
                 and exit_price > 0
             ):
-                expected_buyback = -round(float(exit_price) * int(close_qty), 2)
+                expected_buyback = -round(float(exit_price) * int(close_qty) + float(pos.get("buyback_fees") or 0.0), 2)
 
             for event in events_by_position.get(pid, []):
                 event_type = _norm_upper(event.get("event_type"))

@@ -416,7 +416,7 @@ def _recompute_position_metrics(position: dict[str, Any]) -> None:
 
     pl = None
     if realized_pl is not None or pl_open is not None:
-        pl = (realized_pl or 0.0) + (pl_open or 0.0) - fees
+        pl = (realized_pl or 0.0) + (pl_open or 0.0) - fees - (float(position.get("buyback_fees") or 0.0) if is_closed else 0.0)
     position["pl"] = pl
 
     pl_pct = None

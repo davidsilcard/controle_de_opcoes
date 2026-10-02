@@ -147,6 +147,31 @@ internos. Repetir um envio não pode duplicar evento ou efeito financeiro.
 
 ## Melhoria funcional recomendada
 
+### Execução iniciada em 02/10/2026 — taxas da recompra
+
+O usuário autorizou atualizar a aplicação após esta auditoria. A inspeção do
+fluxo de baixa encontrou uma limitação: `fees` representa taxas da entrada,
+enquanto a recompra gerava débito apenas de preço × quantidade. Somar as taxas
+da recompra em `fees` tornaria o prêmio de abertura divergente; omiti-las
+tornaria caixa e resultado incompletos.
+
+Foi implementado o campo separado `buyback_fees` para a recompra total de
+opção vendida. Plano/aceite: preservar taxas de entrada e prêmio original;
+incluir taxas da recompra no BUY e no resultado realizado; refletir o mesmo
+valor em Auditoria e resumo de posições; rejeitar custo negativo/não finito
+ou sem baixa válida; preservar formulários antigos; testar persistência,
+repetição e liberação de cobertura no PostgreSQL descartável antes do release.
+Para #73, os valores esperados são prêmio 339,56, BUY -60,07 e resultado
+279,49. Até publicação e verificação da gravação, a baixa segue pendente.
+
+Validação local da implementação: suíte completa com 294 aprovados e 94
+pulados por dependência de PostgreSQL, além de compilação e conferência de
+diff. Os skips não validam persistência: o teste novo de PostgreSQL verifica
+taxas separadas, resultado, caixa, repetição sem duplicidade e liberação das
+1.000 ações. Release exige CI verde do SHA exato pelo script oficial.
+
+### Conciliação por nota/período
+
 Adicionar uma conciliação por nota/período com linhas esperadas, linhas
 vinculadas, diferença de caixa, custo único e estado `parcial`/`conciliada`.
 Original e resumo devem apontar para a mesma nota, não gerar importações
