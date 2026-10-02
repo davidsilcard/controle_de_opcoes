@@ -3,6 +3,13 @@
 Estado em 22/09/2026. Este inventário **não é uma ordem de importação**. Conferir
 novamente a produção antes de cada gravação; não recriar operação existente.
 
+**Nova conferência em 02/10/2026:** o usuário forneceu as quatro notas completas
+até 25/09. A abertura KLBNJ196 abaixo continua cadastrada, mas foi encontrada
+recompra total de 25/09 ainda ausente da produção. Há também BBASV222 e
+execuções de CMIGU105/HYPEJ26 pendentes. O retrato atualizado e a conciliação
+estão em [auditoria-setembro-2026.md](auditoria-setembro-2026.md). As seções
+anteriores são histórico da conferência, não instrução para recriar negócios.
+
 ## Atualização conferida em 02/10/2026 — KLBNJ196
 
 - Nota BTG #34573207, pregão 21/09/2026, fornecida pelo usuário: venda de
