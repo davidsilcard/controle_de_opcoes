@@ -183,6 +183,17 @@ taxas da recompra 0,07; manter a fonte das duas notas nas observações. Conferi
 BUY -60,07, resultado 279,49, reserva KLBN11 zero, 1.000 livres e histórico.
 Não cadastrar outra abertura nem recalcular prêmio/DARF de entrada.
 
+Retomada após login: #73 foi reconsultada aberta, com 1.000 KLBN11 reservadas.
+O formulário foi preenchido com os valores acima, mas o controle do navegador
+falhou no clique de envio. Uma nova consulta mostrou a posição ainda aberta,
+sem baixa persistida. A tentativa de enviar pelo teclado também falhou antes
+de despachar a tecla; a captura de tela posteriormente ficou indisponível.
+Não houve confirmação de gravação. Não contornar com SQL ou com a CLI legada
+de fechamento (ela não recebe as taxas separadas). Retomar pela UI do usuário:
+conferir novamente #73 e enviar `Salvar operação` com os valores auditados;
+depois validar persistência, caixa, resultado, estoque e histórico. Se já
+estiver fechada, não reenviar: conferir os valores existentes primeiro.
+
 ### Conciliação por nota/período
 
 Adicionar uma conciliação por nota/período com linhas esperadas, linhas
