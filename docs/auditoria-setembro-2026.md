@@ -172,6 +172,17 @@ taxas separadas, resultado, caixa, repetição sem duplicidade e liberação das
 O histórico legível também exibe `Taxas da recompra`, além da preservação
 integral do valor pelo diário de alterações do PostgreSQL.
 
+Publicação concluída em 02/10/2026 pelo `deploy/scripts/release.ps1`:
+implementação `12fd8c7` e complemento do histórico `88a24e5`, ambos com CI
+aprovado. Validação final do segundo SHA: 386 testes aprovados e 4 pulados;
+VPS em `88a24e5`, login e edge saudáveis. Ao retomar a posição na UI, a sessão
+estava expirada por inatividade. **Nenhuma baixa financeira foi enviada.**
+Próximo passo após login do usuário: reconsultar #73, registrar fechamento
+25/09, preço 0,06, motivo recompra, taxas de entrada preservadas em 0,44 e
+taxas da recompra 0,07; manter a fonte das duas notas nas observações. Conferir
+BUY -60,07, resultado 279,49, reserva KLBN11 zero, 1.000 livres e histórico.
+Não cadastrar outra abertura nem recalcular prêmio/DARF de entrada.
+
 ### Conciliação por nota/período
 
 Adicionar uma conciliação por nota/período com linhas esperadas, linhas
