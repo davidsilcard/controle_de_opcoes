@@ -3,6 +3,31 @@
 Estado em 22/09/2026. Este inventário **não é uma ordem de importação**. Conferir
 novamente a produção antes de cada gravação; não recriar operação existente.
 
+## Atualização conferida em 02/10/2026 — KLBNJ196
+
+- Nota BTG #34573207, pregão 21/09/2026, fornecida pelo usuário: venda de
+  1.000 CALLs KLBNJ196 sobre KLBN11 a R$ 0,34; bruto R$ 340,00.
+- Despesas individualizadas da única negociação: liquidação R$ 0,09,
+  registro R$ 0,23 e emolumentos R$ 0,12; total R$ 0,44 e crédito líquido
+  R$ 339,56. IRRF de R$ 0,01 registrado separadamente.
+- Contrato consultado na B3 em 02/10/2026: strike exibido R$ 19,63 e
+  vencimento 16/10/2026. Fonte:
+  https://bvmf.bmfbovespa.com.br/cias-listadas/Titulos-Negociaveis/DetalheTitulosNegociaveis.aspx?cb=KLBN&idioma=pt-BR&or=res&tip=I
+  A nota comprova a negociação, mas não informa o strike; a referência do
+  cadastro identifica a data da consulta do contrato.
+- Antes de gravar, o filtro de todos os status não encontrou KLBNJ196 e o
+  estoque consolidado mostrou 1.000 KLBN11 livres. Cadastro realizado pela UI
+  como posição **#73**, real, vendida, Covered Call, aberta em 21/09/2026.
+- Após gravar: 1.000 KLBN11 totais, 1.000 reservadas e zero livres; prêmio
+  esperado e no caixa R$ 339,56; provisão DARF esperada e no caixa R$ 50,93;
+  saldo após provisão R$ 288,63. Diferenças da posição iguais a zero.
+- Auditoria de produção: zero alertas pelas regras atuais. As 11 referências
+  anteriores de despesas compartilhadas seguem sem rateio documental; isso
+  impede certificar os totais de DARF, mas não a conciliação individual da #73.
+- **Não recriar esta negociação.** O cadastro não encerra as pendências
+  anteriores de CMIGU105 e HYPEJ26 descritas abaixo. Sem mudança de código
+  ou necessidade de deploy para esta inclusão de dados.
+
 ## Fontes
 
 - Nota BTG #34281732, pregão 04/09/2026, no arquivo local
