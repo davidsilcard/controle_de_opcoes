@@ -13,6 +13,7 @@ _POSITION_FIELDS = (
     ("qty", "Quantidade"),
     ("entry_price", "Preço de entrada"),
     ("fees", "Taxas"),
+    ("buyback_fees", "Taxas da recompra"),
     ("trade_date", "Data de abertura"),
     ("exit_date", "Data de fechamento"),
     ("exit_price", "Preço de fechamento"),

@@ -5,6 +5,7 @@ import pytest
 from opcoes import finance, holdings, portfolio
 from opcoes.audit_reconciliation import build_audit_reconciliation
 from opcoes.tax import build_position_tax_events
+from opcoes.record_timeline import build_position_history_timeline
 
 
 def _closed_position():
@@ -29,6 +30,18 @@ def test_buyback_fee_reconciles_without_changing_premium():
     assert row["expected_buyback"] == -60.07
     assert row["diff_buyback"] == 0
     assert not ctx["audit_issues"]
+
+
+def test_buyback_fee_is_visible_in_preserved_history():
+    current = _closed_position()
+    before = {**current, "buyback_fees": 0}
+    timeline = build_position_history_timeline(current, [dict(
+        id=1, prior_values=before, change_kind="UPDATE", actor="admin",
+        reason="Recompra nota 34682203",
+    )])
+    assert timeline[0]["changes"] == [dict(
+        field="buyback_fees", label="Taxas da recompra", before="0", after="0.07",
+    )]
 
 
 @pytest.mark.requires_postgres

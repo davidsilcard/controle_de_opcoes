@@ -169,6 +169,8 @@ pulados por dependência de PostgreSQL, além de compilação e conferência de
 diff. Os skips não validam persistência: o teste novo de PostgreSQL verifica
 taxas separadas, resultado, caixa, repetição sem duplicidade e liberação das
 1.000 ações. Release exige CI verde do SHA exato pelo script oficial.
+O histórico legível também exibe `Taxas da recompra`, além da preservação
+integral do valor pelo diário de alterações do PostgreSQL.
 
 ### Conciliação por nota/período
 
