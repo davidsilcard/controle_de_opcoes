@@ -6,6 +6,36 @@ importação automática: consultar novamente a produção antes de cada gravaç
 
 ## Escopo e fontes
 
+### Retomada em 05/10/2026 — estado e limite operacional declarado
+
+- Consulta autenticada da UI: KLBNJ196 (#73) encerrada em 25/09/2026 por
+  recompra; bruto R$ 280,00, taxas R$ 0,51 e resultado R$ 279,49 antes da
+  apuração mensal. Estoque KLBN11: 1.000 totais, zero reservadas, 1.000 livres.
+  A baixa deixou de ser pendente; não recriar abertura nem fechamento.
+- Filtro `CMIGU105`, todos os status: nenhuma posição registrada. A abertura
+  de 27/08 e a recompra de 04/09 continuam pendentes.
+- O usuário declarou garantia global de aproximadamente R$ 463 mil, mas
+  escolheu acompanhar apenas R$ 68.000 disponíveis **além** dos R$ 24.288
+  reservados: limite operacional acompanhado de R$ 92.288. Não importar o
+  restante da carteira nem interpretar a declaração como depósito bancário.
+- A UI atualmente mostra esse montante no caixa porque o usuário lançou
+  um depósito manual de R$ 63.419,40 em 05/10/2026. Disponível R$ 68.000;
+  total R$ 92.288; colateral R$ 24.288. Isso é uma representação operacional
+  escolhida pelo usuário, não uma funcionalidade separada de garantia em
+  investimentos. Não afirmar que o modelo já separa garantia de dinheiro.
+- Não alterar ou estornar esse lançamento sem autorização específica.
+  A modelagem separada de limite/garantia e caixa continua como melhoria.
+- Antes de acrescentar receitas históricas, esclarecer os depósitos de
+  R$ 6.503,32 (26/08) e R$ 3.904,66 (04/09): aportes independentes ou ajustes
+  de saldo que já incluem negócios? Não presumir duplicidade nem compensar
+  automaticamente. A confirmação do limite atual não resolve essa origem.
+- Nenhuma gravação financeira foi enviada pelo assistente nesta retomada.
+  A despesa compartilhada de R$ 3,44 da nota #34281732 continua observada no
+  caixa; não repeti-la na recompra da CMIGU105.
+
+As seções datadas de 02/10 abaixo preservam o diagnóstico anterior. Para
+KLBNJ196, prevalece o estado conferido nesta retomada.
+
 Foram conferidas visualmente e por extração textual as quatro páginas de cada
 PDF de opções enviado pelo usuário: versão original e versão `Resumo`, com
 intervalo nominal de 04/09/2026 a 25/09/2026. Os dois arquivos representam as
