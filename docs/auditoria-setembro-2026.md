@@ -6,6 +6,58 @@ importação automática: consultar novamente a produção antes de cada gravaç
 
 ## Escopo e fontes
 
+### Execução em 05/10/2026 — registros sincronizados após autorização
+
+Esta seção prevalece sobre as pendências históricas abaixo. O usuário autorizou
+atualizar os registros pelas notas. Foram utilizados os formulários oficiais da
+aplicação autenticada, com consulta prévia para não recriar posições existentes.
+Não houve SQL improvisado, alteração de código ou novo deploy nesta execução.
+
+| ID | Registro | Estado confirmado na UI / Auditoria |
+| --- | --- | --- |
+| 74 | BBASV222, venda 2.000 a R$ 0,65 em 23/09 | Aberta; despesas individuais R$ 1,73; prêmio líquido R$ 1.298,27. |
+| 75 | CMIGU105, venda 2.100 a R$ 0,20 em 27/08 e recompra a R$ 0,02 em 04/09 | Encerrada; prêmio líquido R$ 419,45, recompra R$ 42,00, bruto R$ 378,00; resultado R$ 377,45 após despesas individuais de agosto, antes dos custos compartilhados de setembro. |
+| 76 | HYPEJ26, day trade 100 vendidas a R$ 0,30 e recompradas a R$ 0,32 em 04/09 | Encerrada separadamente; prêmio R$ 30,00, recompra R$ 32,00 e resultado bruto -R$ 2,00. |
+| 77 | HYPEJ26, venda regular 300 a R$ 0,30 em 04/09 | Aberta; prêmio bruto R$ 90,00; reserva de 300 HYPE3. |
+
+As posições #70, #71, #72 e #73 foram preservadas. A Auditoria confirma #73
+encerrada, recompra R$ 60,07 e resultado R$ 279,49. As dez execuções das quatro
+notas de setembro agora têm representação operacional; a abertura de agosto
+necessária à recompra da CMIGU105 também foi registrada.
+
+Verificação final: relatório de integridade com zero alertas nas regras atuais;
+prêmios, recompras e resultados realizados conferem com o ledger. Isso prova
+consistência interna, não certifica saldo bancário ou imposto mensal.
+CMIG4 permanece com 2.600 ações reservadas, BBAS3 com 2.300; HYPE3 com 300
+reservadas; KLBN11 permanece com 1.000 livres. A despesa compartilhada de
+R$ 3,44 da nota #34281732 foi preservada sem novo lançamento nem rateio.
+
+Limites que permanecem explícitos:
+
+- Contratos de referência: BBASV222 R$ 21,79 / 16/10/2026 e CMIGU105 R$ 10,36 /
+  18/09/2026, consultados no Opções.net em 05/10; HYPEJ26 utiliza o snapshot
+  de 02/10. Essas referências não comprovam o strike original nas datas de
+  venda. As observações das posições preservam essa ressalva; garantia e
+  retorno calculados a partir dessas referências não são históricos certificados.
+- A nota informa base day trade -R$ 2,03, mas o bruto é -R$ 2,00. Não foi
+  inventado rateio dos R$ 0,03. HYPE #76/#77 permanecem com custo sem rateio.
+- CMIG #75 tem despesas individuais na abertura e compartilhadas na recompra.
+  O modelo atual não representa perfeitamente essa pendência por perna; suas
+  notas a preservam. Não interpretar ausência de alerta como custo completo.
+- A provisão automática de entrada de #76 (-R$ 6,00) permaneceu visível,
+  embora o ciclo tenha prejuízo. Não equivale a imposto devido; a conciliação
+  mensal e a separação entre provisão e apuração fiscal continuam pendentes.
+- Os depósitos manuais foram preservados, sem estornos ou compensações
+  estimadas. Após inserir os negócios históricos, a tela mostrou disponível
+  R$ 25.906,56, colateral R$ 67.868,00 e total R$ 93.774,56. Não reajustar
+  artificialmente para R$ 68 mil livres: esclarecer primeiro a origem dos
+  depósitos e distinguir limite operacional de dinheiro efetivo.
+
+Fontes: notas #34281732, #34573207, #34642300, #34682203 e abertura histórica
+#34011960 (27/08). Dados pessoais e PDFs não foram adicionados ao Git.
+Próxima etapa: conciliar aportes/ajustes manuais e apuração mensal, mantendo
+separados os registros operacionais, o caixa real e a garantia em investimentos.
+
 ### Retomada em 05/10/2026 — estado e limite operacional declarado
 
 - Consulta autenticada da UI: KLBNJ196 (#73) encerrada em 25/09/2026 por
