@@ -224,6 +224,33 @@ Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo co
 - quadro de oportunidades de `PUT` com score, perfil e execucao;
 - cards de entradas/saidas entre snapshots, ranking historico e divisao por setor.
 
+O quadro de PUTs usa o **próximo vencimento mensal ainda negociável**, pela
+data/hora atual de São Paulo, e não o mês seguinte à data do snapshot. No dia
+do vencimento, avança para a próxima série às 15h45 (encerramento das séries
+vincendas na grade B3 consultada). Opções semanais não substituem a série mensal.
+Outubro de 2026: 16/10; novembro: 19/11, não o feriado de 20/11.
+
+`opcoes/market_calendar.py` preserva o calendário B3 conferido em 05/10/2026,
+com cobertura de abril/2026 até a sessão de 17/12/2027, fonte e grade horária.
+Antes do fim dessa cobertura, e sempre que a B3 alterar datas ou horários,
+revise o módulo contra as fontes oficiais, amplie os testes e publique pelo
+release normal. Fora da cobertura, a tela bloqueia a seleção com aviso:
+não inventa vencimentos. O fuso UTC-3 vigente em São Paulo também deve ser
+revisto se houver alteração legal. Não é preciso alterar posições existentes.
+
+A UI distingue ausência de contratos no snapshot de contratos que não passaram
+nos filtros, informa a data das cotações e sua defasagem. A seleção correta do
+vencimento não garante oportunidades aprovadas nem cotações atuais.
+
+Testes específicos de calendário, seleção, fontes antigas e mensagens:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_fundamentus_calendar.py tests/test_fundamentus_strategy.py tests/test_progressive_pages.py tests/test_strategy_contracts.py -q
+```
+
+O pipeline PostgreSQL e a auditoria visual da aba publicada continuam
+obrigatórios antes de considerar o release concluído.
+
 Quando não houver aprovadas, a tela informa o resultado dos filtros e direciona para a visão de reprovadas; ela não deve apresentar esse estado como funcionalidade "em construção". O indicador de dívida exibido é `Dívida/Patrimônio`, refletindo a métrica publicada pela fonte.
 
 ### Relatório / ranking

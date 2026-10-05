@@ -236,7 +236,6 @@
   </div>
 {% endif %}
 
-{% if rows %}
   {% if put_opportunities %}
     <div class="card mb-3">
       <div class="card-header">
@@ -354,10 +353,32 @@
     </div>
   {% elif put_target_vencimento %}
     <div class="alert alert-secondary small">
-      Sem oportunidades de PUT para o vencimento {{ put_target_vencimento }}.
+      {% if not put_snapshot_date %}
+        Dados de opções indisponíveis para o vencimento mensal {{ put_target_vencimento }}: nenhum snapshot disponível.
+      {% elif not rows %}
+        Nenhuma ação selecionada para consultar PUTs do vencimento mensal {{ put_target_vencimento }}. Revise os filtros de ações.
+      {% elif put_contract_count == 0 %}
+        Dados indisponíveis para o vencimento mensal {{ put_target_vencimento }}: nenhum contrato PUT dos ativos selecionados no snapshot {{ put_snapshot_date }}.
+      {% else %}
+        Nenhuma oportunidade de PUT passou nos filtros para o vencimento mensal {{ put_target_vencimento }}.
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="alert alert-warning small">
+      Calendário de vencimentos mensais indisponível para a data atual. Atualize o calendário B3; nenhuma data foi presumida.
     </div>
   {% endif %}
+  {% if put_snapshot_age_days is defined and put_snapshot_age_days is not none and put_snapshot_age_days > 0 %}
+    <div class="alert alert-warning small">
+      Cotações de opções de {{ put_snapshot_date }} ({{ put_snapshot_age_days }} dia(s) de defasagem).
+      O vencimento mensal é selecionado pela data atual de São Paulo, não pela data das cotações.
+    </div>
+  {% endif %}
+  {% if put_calendar_source %}
+    <p class="text-muted small">Calendário mensal: <a href="{{ put_calendar_source }}" target="_blank" rel="noopener noreferrer">B3</a>, conferido em {{ put_calendar_verified_on }}. No vencimento, a seleção avança às 15h45 (São Paulo).</p>
+  {% endif %}
 
+{% if rows %}
   <p class="text-muted small mb-2">Use o scroll horizontal para ver todas as colunas.</p>
   <p class="text-muted small mb-2">
     PEG (aprox.) = P/L dividido pelo Cresc. Rec. 5a (%). Usa crescimento de receita como proxy; valores <= 0 ficam em branco.

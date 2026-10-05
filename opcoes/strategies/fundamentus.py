@@ -22,6 +22,12 @@ from ..fundamentus import (
 )
 from ..settings import get_fundamentus_settings
 from ..utils import parse_ptbr_number
+from ..market_calendar import (
+    CALENDAR_SOURCE,
+    VERIFIED_ON,
+    market_now,
+    next_monthly_expiry,
+)
 
 
 _SECTOR_LABELS = {
@@ -225,14 +231,6 @@ def _parse_date(value: Optional[str]) -> Optional[dt.date]:
         return dt.datetime.strptime(text, "%d/%m/%Y").date()
     except ValueError:
         return None
-
-
-def _next_month_third_friday(base_date: dt.date) -> dt.date:
-    year = base_date.year + (1 if base_date.month == 12 else 0)
-    month = 1 if base_date.month == 12 else base_date.month + 1
-    first = dt.date(year, month, 1)
-    first_friday = first + dt.timedelta(days=(4 - first.weekday()) % 7)
-    return first_friday + dt.timedelta(days=14)
 
 
 def _latest_option_snapshot_date() -> Optional[str]:
@@ -957,21 +955,18 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     sector_breakdown = _build_sector_breakdown(filtered_rows) if filtered_rows else []
 
     option_snapshot_date = _latest_option_snapshot_date()
-    target_vencimento = None
     put_watchlist_count = 0
     put_profile_breakdown: List[Dict[str, Any]] = []
-    put_base_date = None
+    now = market_now()
+    put_base_date = now.date()
+    target_vencimento = next_monthly_expiry(now)
+    put_contract_count = 0
     fund_snapshot_dt = _parse_date(snap)
     option_snapshot_dt = _parse_date(option_snapshot_date)
     snapshot_lag_days = None
     if fund_snapshot_dt and option_snapshot_dt:
         snapshot_lag_days = (fund_snapshot_dt - option_snapshot_dt).days
     put_opportunities: List[Dict[str, Any]] = []
-    if option_snapshot_date:
-        put_base_date = (
-            _parse_date(option_snapshot_date) or _parse_date(snap) or dt.date.today()
-        )
-        target_vencimento = _next_month_third_friday(put_base_date)
     if filtered_rows and option_snapshot_date and target_vencimento:
         underlyings = [
             str(row.get("papel") or "").strip().upper()
@@ -979,6 +974,10 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             if row.get("papel")
         ]
         option_rows = _fetch_put_rows(option_snapshot_date, underlyings)
+        put_contract_count = sum(
+            _parse_date(str(row.get("vencimento") or "")) == target_vencimento
+            for row in option_rows
+        )
         price_map = _fetch_underlying_prices(option_snapshot_date, underlyings)
         put_opportunities = _build_put_opportunities(
             fundamentals=filtered_rows,
@@ -1030,6 +1029,12 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "previous_approved_count": previous_approved_count,
         "put_opportunities": put_opportunities,
         "put_target_vencimento": put_target_vencimento,
+        "put_contract_count": put_contract_count,
+        "put_calendar_source": CALENDAR_SOURCE,
+        "put_calendar_verified_on": VERIFIED_ON.isoformat(),
+        "put_snapshot_age_days": (
+            (put_base_date - option_snapshot_dt).days if option_snapshot_dt else None
+        ),
         "put_snapshot_date": option_snapshot_date,
         "put_watchlist_count": put_watchlist_count,
         "put_profile_breakdown": put_profile_breakdown,
