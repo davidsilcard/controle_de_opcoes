@@ -224,6 +224,51 @@ Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo co
 - quadro de oportunidades de `PUT` com score, perfil e execucao;
 - cards de entradas/saidas entre snapshots, ranking historico e divisao por setor.
 
+A aba usa a largura disponível do monitor. As tabelas mantêm cabeçalho,
+filtros e Papel fixos durante a rolagem. A visão inicial preserva todas as
+colunas (27 indicadores e 13 de PUT); `Essenciais` e `Escolher colunas`
+permitem simplificar a leitura. A preferência de colunas fica neste navegador,
+separada por tabela. Filtros de uma coluna oculta continuam aplicados e aparecem
+em botões que permitem removê-los. `Limpar filtros da tabela` remove apenas os
+filtros locais; não muda Aprovadas/Reprovadas/Todas nem as regras do snapshot.
+
+Para compartilhar os dados:
+
+1. Filtre/classifique e, se desejar, marque as linhas.
+2. Confira `Linhas para copiar` e `Colunas para copiar`. Sem seleção, a saída usa
+   todas as linhas filtradas do conjunto carregado; com seleção, usa somente
+   selecionadas dentro dos filtros, na ordem atual. Linhas selecionadas fora do
+   filtro são indicadas e não entram silenciosamente na saída.
+3. `Copiar para planilha` produz texto tabulado com cabeçalhos, adequado ao
+   **Google Planilhas com localidade Brasil**, vírgula decimal e percentuais.
+   Cole em uma célula vazia. A localidade da planilha deve corresponder ao
+   formato brasileiro para os números serem reconhecidos corretamente.
+4. `Copiar texto` produz blocos por ativo para colar no WhatsApp, com datas de
+   referência; nas PUTs preserva também vencimento, fonte e execução.
+5. `Exportar CSV` baixa o mesmo recorte em UTF-8, com ponto e vírgula. Na
+   importação no Google Planilhas, escolha esse separador e localidade Brasil.
+
+A cópia automática depende do navegador/contexto seguro (HTTPS). Se for
+negada, a tela apresenta o texto selecionado para cópia manual, sem indicar
+sucesso indevido. Zero, negativos e percentuais são preservados; ausências
+ficam vazias na planilha. Campos textuais que poderiam virar fórmulas são
+tratados como texto. A exportação respeita data/status/limite e deduplicação
+da visão carregada; não é uma exportação completa do banco de dados.
+
+O [plano de execução e critérios de aceite](docs/plano-ux-fundamentus.md)
+registra o escopo e a validação. Os testes de navegador usam os templates e
+assets reais, dados fictícios e uma cópia do Bootstrap 5.3.3 exclusivamente em
+`tests/assets/`, preservando sua licença. Não consultam banco nem CDNs.
+
+```powershell
+uv run playwright install chromium
+uv run pytest tests/test_fundamentus_table_ui.py -q
+```
+
+No CI, Chromium é instalado e esses testes são obrigatórios; não podem ser
+ignorados por falta de navegador. Testes locais sem Chromium instalado informam
+skip; isso não substitui o CI completo em PostgreSQL descartável.
+
 O quadro de PUTs usa o **próximo vencimento mensal ainda negociável**, pela
 data/hora atual de São Paulo, e não o mês seguinte à data do snapshot. No dia
 do vencimento, avança para a próxima série às 15h45 (encerramento das séries

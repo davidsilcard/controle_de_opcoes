@@ -1,0 +1,51 @@
+{% macro table_tools(name, title) %}
+  <div class="fundamentus-toolbar p-3 border-bottom">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+      <h2 id="{{ name }}-table-title" class="h6 mb-0">{{ title }}</h2>
+      <span class="small text-muted grid-count" aria-live="polite"></span>
+    </div>
+    <div class="fundamentus-actions">
+      <label class="small">Visão
+        <select class="form-select form-select-sm grid-profile">
+          <option value="all">Todas as colunas</option>
+          <option value="essential">Essenciais</option>
+          <option value="custom">Personalizada</option>
+        </select>
+      </label>
+      <details class="grid-column-picker">
+        <summary class="btn btn-outline-secondary btn-sm">Escolher colunas</summary>
+        <div class="grid-column-options p-3 border rounded bg-white"></div>
+      </details>
+      <label class="small">Linhas para copiar
+        <select class="form-select form-select-sm grid-scope">
+          <option value="auto">Selecionadas ou filtradas</option>
+          <option value="filtered">Todas as filtradas</option>
+        </select>
+      </label>
+      <label class="small">Colunas para copiar
+        <select class="form-select form-select-sm grid-export-columns">
+          <option value="visible">Exibidas</option>
+          <option value="all">Todas</option>
+        </select>
+      </label>
+      <button type="button" class="btn btn-primary btn-sm grid-export" data-format="tsv">Copiar para planilha</button>
+      <button type="button" class="btn btn-outline-primary btn-sm grid-export" data-format="text">Copiar texto</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm grid-export" data-format="csv">Exportar CSV</button>
+    </div>
+    <p class="small text-muted mb-1 mt-2 grid-scope-label"></p>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" class="btn btn-link btn-sm px-0 grid-clear-filters">Limpar filtros da tabela</button>
+      <button type="button" class="btn btn-link btn-sm grid-clear-selection">Limpar seleção</button>
+      <span class="small grid-selection-note"></span>
+    </div>
+    <div class="grid-active-filters d-flex flex-wrap gap-2"></div>
+    <p class="small mb-0 grid-feedback" role="status" aria-live="polite"></p>
+  </div>
+  <dialog class="grid-copy-dialog rounded border p-3" aria-labelledby="{{ name }}-copy-title">
+    <h2 id="{{ name }}-copy-title" class="h6">Copiar manualmente</h2>
+    <p class="small">O navegador não permitiu a cópia automática. O texto está selecionado: use Ctrl+C ou a opção Copiar do seu dispositivo.</p>
+    <label for="{{ name }}-copy-output" class="form-label small">Conteúdo do recorte escolhido</label>
+    <textarea id="{{ name }}-copy-output" class="form-control grid-copy-output" rows="10" readonly></textarea>
+    <button type="button" class="btn btn-outline-secondary btn-sm mt-3 grid-close-dialog">Fechar</button>
+  </dialog>
+{% endmacro %}

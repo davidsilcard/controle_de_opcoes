@@ -1,0 +1,41 @@
+.fundamentus-page { max-width: none; }
+.fundamentus-page, #fundamentus-dashboard, .fundamentus-grid { min-width: 0; }
+.fundamentus-page .card-body { min-width: 0; }
+.fundamentus-page .btn-group[aria-label="Filtro de status"] { flex-wrap: wrap; max-width: 100%; }
+.fundamentus-page .fundamentus-actions { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; }
+.fundamentus-actions > label { max-width: 100%; min-width: 0; }
+.fundamentus-actions select { width: 100%; max-width: 100%; }
+.fundamentus-actions > button, .grid-column-picker summary { max-width: 100%; white-space: normal; }
+.grid-column-picker { position: relative; }
+.grid-column-options { display: grid; gap: .4rem; grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr)); max-width: 36rem; }
+.grid-column-picker[open] { flex-basis: 100%; order: 1; }
+.grid-column-options label { display: flex; gap: .5rem; align-items: center; }
+.fundamentus-table-wrap { max-height: 70vh; overflow: auto; border: 1px solid #dee2e6; background: #fff; width: 100%; }
+.fundamentus-table { font-size: .9rem; width: max-content; min-width: 100%; margin-bottom: 0; }
+.fundamentus-table [hidden] { display: none !important; }
+.fundamentus-table thead th { position: sticky; top: 0; background: #f8f9fa; z-index: 2; white-space: nowrap; vertical-align: middle; }
+.fundamentus-table thead tr:nth-child(2) th { top: var(--grid-header-height, 2.5rem); }
+.fundamentus-table .grid-selection-cell { position: sticky; left: 0; min-width: 44px; width: 44px; text-align: center; z-index: 3; background: #fff; }
+.fundamentus-table [data-key="papel"] { position: sticky; left: 44px; z-index: 3; background: #fff; min-width: 90px; }
+.fundamentus-table thead .grid-selection-cell, .fundamentus-table thead [data-key="papel"] { z-index: 5; background: #f8f9fa; }
+.fundamentus-table tbody td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fundamentus-table tbody tr:hover td { --bs-table-bg-state: #eef4fc; }
+.fundamentus-table tbody tr.grid-selected td { --bs-table-bg-state: #e5f0ff; }
+.fundamentus-table td[data-key="motivo"], .fundamentus-table td[data-key="execution_note"], .fundamentus-table td[data-key="sector"] { white-space: normal; min-width: 12rem; max-width: 26rem; overflow-wrap: anywhere; }
+.fundamentus-table .column-filter { width: 7rem; min-width: 80px; max-width: 100%; }
+.fundamentus-table .sort-btn { color: #0758bf; text-decoration: none; min-height: 32px; }
+.fundamentus-table input[type="checkbox"] { width: 1rem; height: 1rem; }
+.grid-scroll-hint { padding: .5rem 1rem; margin: 0; background: #f8f9fa; }
+.grid-empty { padding: 1rem; margin: 0; }
+.grid-copy-dialog { width: min(44rem, calc(100% - 2rem)); max-height: 90vh; overflow: auto; }
+.grid-copy-dialog::backdrop { background: #0006; }
+.grid-copy-output { font: .85rem/1.5 monospace; }
+.fundamentus-navbar .navbar-nav { flex-direction: row; flex-wrap: wrap; gap: 0 .5rem; }
+@media (max-width: 991px) {
+  .fundamentus-navbar { position: static; }
+}
+@media (max-width: 575px) {
+  .fundamentus-actions > label { flex: 1 1 100%; }
+  .fundamentus-actions > button { min-height: 44px; }
+  .fundamentus-table .column-filter { font-size: 1rem; }
+}

@@ -28,6 +28,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://opcoes_test:opcoes_test@localhost:5432/opcoes_test
       OPCOES_SKIP_PRODUCTION_CHECKS: "1"
+      OPCOES_REQUIRE_BROWSER_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,5 +37,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Instalar dependências bloqueadas
         run: uv sync --locked --dev
+      - name: Instalar Chromium para contratos de interação da interface
+        run: uv run playwright install --with-deps chromium
       - name: Executar testes, incluindo PostgreSQL descartável
         run: uv run pytest -q
