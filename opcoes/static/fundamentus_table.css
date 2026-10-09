@@ -1,6 +1,7 @@
 .fundamentus-page { max-width: none; }
 .fundamentus-page, #fundamentus-dashboard, .fundamentus-grid { min-width: 0; }
 .fundamentus-page .card-body { min-width: 0; }
+.fundamentus-page #sector-chart { display: block; max-width: 100%; height: auto; }
 .fundamentus-page .btn-group[aria-label="Filtro de status"] { flex-wrap: wrap; max-width: 100%; }
 .fundamentus-page .fundamentus-actions { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; }
 .fundamentus-actions > label { max-width: 100%; min-width: 0; }

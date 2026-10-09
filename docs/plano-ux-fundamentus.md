@@ -62,6 +62,10 @@ Não modificar coleta, regras financeiras ou banco de dados.
   colunas personalizadas e larguras 375/1366/1920/3440 com zoom 200%.
 - Capturas dos templates reais revisadas em tela larga e celular; filtros
   têm largura controlada e a navegação móvel não cobre os controles da tabela.
+- CI da entrega principal `ac9ac3d`: 416 aprovados e 4 ignorados, com PostgreSQL
+  descartável e Chromium. Revisão complementar: gráfico de setores responsivo
+  incluído nos dados dos 9 testes de UI, todos aprovados novamente. O CI do
+  commit final é conferido antes de fornecer a publicação.
 - Os testes validam a serialização brasileira e o comportamento do navegador;
   ainda não houve colagem em uma conta real do Google Planilhas ou WhatsApp.
   Conferir isso após publicação; não representar esse teste como realizado.

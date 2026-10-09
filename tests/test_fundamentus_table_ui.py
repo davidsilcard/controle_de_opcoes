@@ -85,7 +85,9 @@ def _context() -> dict:
         "entered_opportunities": ["PETR4"],
         "exited_opportunities": [],
         "target_yield_pct": 8.0,
-        "sector_breakdown": [],
+        "sector_breakdown": [
+            {"label": "Energia", "count": 4, "pct": 100.0, "color": "#4e79a7"}
+        ],
         "put_target_vencimento": "16/10/2026",
         "put_snapshot_date": "2026-10-07",
         "put_score_formula": "score didático",

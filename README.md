@@ -226,7 +226,8 @@ Na interface web, a aba `Fundamentus` voltou a exibir o painel completo mesmo co
 
 A aba usa a largura disponível do monitor. As tabelas mantêm cabeçalho,
 filtros e Papel fixos durante a rolagem. A visão inicial preserva todas as
-colunas (27 indicadores e 13 de PUT); `Essenciais` e `Escolher colunas`
+colunas. O gráfico de setores também se adapta a telas estreitas e zoom.
+As tabelas oferecem 27 indicadores e 13 colunas de PUT; `Essenciais` e `Escolher colunas`
 permitem simplificar a leitura. A preferência de colunas fica neste navegador,
 separada por tabela. Filtros de uma coluna oculta continuam aplicados e aparecem
 em botões que permitem removê-los. `Limpar filtros da tabela` remove apenas os
