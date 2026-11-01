@@ -135,3 +135,140 @@ Isso comprova consistência interna do recorte lançado, não completude fiscal:
 Próximo trabalho funcional: separar garantia de dinheiro e criar registro de
 venda à vista com prévia, idempotência e efeitos atômicos. Exige plano específico
 e validação em banco isolado antes de qualquer reparo ou publicação.
+
+## Fechamento retomado em 01/11/2026
+
+Esta seção atualiza o estado operacional acima. A apuração fiscal permanece
+incompleta pelos motivos identificados abaixo; não interpretar o mês como
+fiscalmente conciliado.
+
+### Fontes, declarações e plano executado
+
+- Conferidos por extração textual e visualmente os dois PDFs enviados nesta
+  retomada: cinco páginas de opções e duas páginas de operações à vista.
+  São sete notas distintas; as três primeiras de opções e as duas à vista
+  repetem fontes já conferidas em 22/10. Não foram importadas novamente.
+- SHA-256 do PDF de opções:
+  `5e01cd23945efe536363681bafe49e0da29925b27f55ccc16d627dbba1b84b9d`.
+- SHA-256 do PDF à vista:
+  `e3dc83bbc61e3c32b68220cc7d1acbefe01c21993184bd5c77f283d4d2a43da5`.
+- O usuário confirmou ausência de exercícios, a compra nova de CALL VALEJ693
+  de longo prazo e a venda de KLBNK196 coberta pelas suas 1.000 KLBN11.
+  Autorizou usar os PMs cadastrados para calcular o resultado das ações.
+  Essa autorização é uma declaração de custo, não prova das aquisições.
+- Plano anterior às gravações: consultar produção e duplicidades; comparar as
+  notas; cadastrar somente as duas opções ausentes pelo formulário oficial;
+  conferir posição, ledger, recibo, cobertura e quadro operacional; documentar
+  separadamente a incompletude fiscal. Nenhuma ordem de mercado foi enviada.
+- Versão publicada consultada: `44ce33f59ac078815894c744b464e13853e0685d`, com
+  [CI Testes PostgreSQL aprovado](https://github.com/davidsilcard/controle_de_opcoes/actions/runs/37975174133).
+  Nenhuma alteração de código, migração ou deploy foi necessária nesta retomada.
+
+### Novas notas e registros persistidos
+
+| Nota | Pregão | Liquidação | Operação | Despesas individuais | Líquido |
+| --- | --- | --- | --- | ---: | ---: |
+| 35319063 | 23/10 | 26/10 | Compra 300 VALEJ693 a 12,02 | 4,82 | -3.610,82 |
+| 35410533 | 26/10 | 27/10 | Venda 1.000 KLBNK196 a 0,20 | 0,25 | +199,75 |
+
+- **#82 VALEJ693:** aberta, comprada, `ranking`; BUY #162 de -R$ 3.610,82;
+  recibo #22, `positions.add`. Taxas 0,99 + 2,50 + 1,33 = 4,82.
+  Não gerou prêmio, provisão nem resultado realizado. A consulta da UI mostra
+  vencimento 20/10/2028 pelo snapshot; o cadastro de opção comprada não preserva
+  `contract_strike`/`contract_expiry` nesse formulário. A referência documental
+  posterior foi mantida nas observações, sem afirmar preservação estruturada.
+- **#83 KLBNK196:** aberta, vendida, `covered_call`; PREMIUM #163 de
+  +R$ 199,75 e provisão DARF #164 de -R$ 29,96; recibo #23, `positions.add`.
+  Taxas 0,05 + 0,13 + 0,07 = 0,25. Reserva de 1.000 KLBN11, saldo livre zero;
+  PM operacional 17,96 e capital de referência 17.960,00. Não gerou resultado
+  realizado nem venda de ações. IRRF indicado de 0,01 ficou nas observações;
+  não foi novamente deduzido ou certificado como retenção efetiva.
+
+Referências consultadas em 01/11/2026: a B3 informa
+[VALEJ693, strike 69,30 / 20/10/2028](https://bvmf.bmfbovespa.com.br/cias-listadas/Titulos-Negociaveis/DetalheTitulosNegociaveis.aspx?cb=VALE&idioma=en-US&or=res&tip=I)
+e [KLBNK196, strike 19,63 / 19/11/2026](https://bvmf.bmfbovespa.com.br/cias-listadas/Titulos-Negociaveis/DetalheTitulosNegociaveis.aspx?cb=KLBN&idioma=pt-BR&or=res&tip=I).
+São referências posteriores, compatíveis com os prazos das notas, sem certificar
+automaticamente o strike original de abertura. A fonte e essa ressalva constam
+nas observações. Não deduzir strike pelo ticker.
+
+### Conciliação de fluxos e garantia
+
+As cinco notas de opções totalizam vendas brutas de R$ 7.520,00, compras brutas
+de R$ 10.002,00, despesas de R$ 23,40 e fluxo líquido de **-R$ 2.505,40**.
+As duas notas novas acrescentam -R$ 3.411,07 a esse fluxo; a provisão interna
+adicional de R$ 29,96 reduz o quadro operacional em R$ 3.441,03.
+Não confundir nenhum desses totais com lucro realizado.
+
+A venda de ações permanece em R$ 21.850,00 bruto e R$ 21.843,46 líquido.
+As despesas de R$ 6,54 incluem CCP 4,89, emolumentos 1,09 e transferência 0,56.
+A compra de LFTB11 permanece em R$ 23.341,50, com despesas de R$ 6,98
+(CCP 5,22 + emolumentos 1,16 + transferência 0,60). O fluxo conjunto das sete
+notas é -R$ 4.003,44; não reconcilia sozinho a conta da corretora.
+IRRF indicado nas cinco notas de opções soma R$ 0,17; na venda de ações, R$ 1,09.
+Os líquidos impressos não descontam esses valores novamente.
+
+O depósito que representa acréscimo de garantia de R$ 21.843,46 foi preservado,
+assim como a decisão anterior de manter LFTB11 fora do cadastro. Não houve
+novo depósito, SELL manual, débito de ETF, estorno ou rateio estimado.
+
+| Quadro operacional após as duas opções | Valor |
+| --- | ---: |
+| Total acompanhado | R$ 111.984,66 |
+| Colateral de PUT | R$ 92.922,00 |
+| Disponível após colateral | R$ 19.062,66 |
+
+### Resultado das ações pelo PM declarado e divergência fiscal
+
+Os eventos de estoque #21, #22 e #23 preservam os PMs imediatamente anteriores
+à baixa declarada em 22/10. Usados por instrução expressa do usuário:
+
+| Ativo | Quantidade vendida | PM declarado | Venda unitária | Resultado antes da despesa conjunta |
+| --- | ---: | ---: | ---: | ---: |
+| CAML3 | 1.000 | 6,60 | 6,56 | -40,00 |
+| FESA4 | 1.000 | 6,39 | 6,66 | +270,00 |
+| SOJA3 | 1.000 | 6,31 | 8,63 | +2.320,00 |
+| Total | 3.000 | | | +2.550,00 |
+
+Resultado conjunto pelo PM declarado: **R$ 2.550,00 - R$ 6,54 = R$ 2.543,46**.
+O custo conjunto declarado é R$ 19.300,00. A despesa foi subtraída somente do
+total desta nota; não foi inventada uma parcela líquida por ativo.
+
+**Divergência de completude:** a tela DARF de outubro continua mostrando
+-R$ 1.070,73 de resultado, R$ 0,00 de imposto, R$ 0,06 de IRRF e prejuízo
+acumulado total de R$ 1.072,73, pois lê as cinco baixas de opções e não as três
+vendas à vista. Esse zero não é uma conclusão fiscal válida para o mês completo.
+As vendas de ações de R$ 21.850,00 excedem o limite mensal de R$ 20 mil descrito
+pela [Receita Federal](https://www.gov.br/receitafederal/pt-br/assuntos/meu-imposto-de-renda/pagamento/renda-variavel/bolsa-de-valores-1/isencoes);
+não presumir isenção por terem sido destinadas à garantia.
+
+A soma de referência é +R$ 1.472,73 (ações +2.543,46 e opções -1.070,73),
+**antes das despesas compartilhadas de opções ainda não atribuídas aos ciclos
+encerrados**. Não equivale a base tributável final ou DARF autorizada. A nota de
+05/10 mistura operações fechadas e abertas; despesas de abertura de setembro
+também continuam sem rateio. A tela atribui R$ 0,06 de IRRF a BBASV222 na baixa,
+embora a origem documental seja a abertura de setembro. A conciliação do IRRF
+efetivamente retido e de sua competência permanece necessária.
+
+### Validação e continuação necessária
+
+- Auditoria autenticada após as gravações: zero alertas nas regras atuais e
+  os mesmos 16 casos sem rateio. Prêmios acumulados 15.846,66; compras de
+  opções -6.390,29; recompras -5.067,07; realizado acumulado 7.286,53.
+- Consulta direta adicional em transação PostgreSQL obrigatoriamente somente
+  leitura confirmou #82/#83, seus três lançamentos e seus dois recibos.
+  Não houve UPDATE/INSERT por SQL, criação de posição fictícia ou reenvio de
+  operação real para testar idempotência.
+- Os PDFs cobrem negócios até 26/10, não comprovam ausência de outros negócios,
+  transferências ou proventos no restante do mês. A declaração de que houve
+  vendas para garantia foi confrontada com as três vendas do PDF; eventuais
+  fontes adicionais devem ser conciliadas antes de certificar completude.
+- A próxima alteração funcional deve oferecer venda à vista com custo
+  declarado identificado, evento fiscal próprio e despesa única da nota,
+  preservando estoque já baixado e crédito de garantia já contabilizado.
+  Não usar depósito ou REALIZED avulso como substituto: a apuração atual lê
+  posições e isso não resolveria a origem fiscal.
+- Antes de qualquer reparo: versionar a prévia por nota/evento, explicitar os
+  efeitos sobre estoque, caixa, garantia e apuração, provar rollback e
+  idempotência em PostgreSQL isolado e cumprir o release do SHA exato.
+  A presente retomada atualizou as opções e documentou o resultado declarado
+  das ações; **não aplicou reparo fiscal das vendas à vista nem gerou DARF**.
