@@ -978,6 +978,45 @@ O script faz este ciclo:
 
 ## Runbook Rápido da VPS
 
+### Atualizar o sistema operacional e o kernel
+
+Manutenção do Ubuntu é separada do deploy da aplicação. Confira primeiro a
+distribuição (`cat /etc/os-release`), o kernel em execução (`uname -r`), o aviso
+oficial da vulnerabilidade, espaço em `/boot`, integridade de pacotes e saúde dos
+serviços. Atualizar outros pacotes ou reiniciar não comprova correção do kernel.
+
+Na VPS Ubuntu, atualize os índices e revise a simulação antes de instalar:
+
+```bash
+sudo apt-get update
+sudo apt-get -s --with-new-pkgs upgrade
+sudo apt-mark showhold
+sudo dpkg --audit
+```
+
+Após revisar os pacotes e prever a indisponibilidade da manutenção:
+
+```bash
+sudo apt-get --with-new-pkgs upgrade
+sudo apt-get check
+sudo systemctl reboot
+```
+
+`--with-new-pkgs` permite dependências novas, como `apt upgrade`, sem remover
+pacotes. Preserve configurações existentes e bloqueios de pacotes; não force
+`unhold`, `dist-upgrade`, kernels externos ou `autoremove` como atalho.
+Antes de um reinício, confirme que Docker, Caddy e PostgreSQL estão habilitados
+e que os containers da aplicação têm política de retorno automático.
+
+Depois da reconexão, valide `uname -r`, `systemctl --failed`, PostgreSQL,
+containers, `/login` e `/health` locais e públicos. Para certificar uma correção,
+compare o pacote efetivamente em execução com o aviso de segurança da
+distribuição; `needrestart` informar kernel atualizado significa apenas que não
+há outro kernel instalado pendente de ativação.
+
+Registro da manutenção de 01/11/2026 e acompanhamento da CVE-2026-98432:
+[relatório da VPS](docs/manutencao-vps-2026-11-01.md).
+
 ### Atualizar a aplicação
 
 A forma recomendada é um comando único no computador pessoal:
