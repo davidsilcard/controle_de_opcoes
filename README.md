@@ -389,6 +389,27 @@ Em `/audit`, o `Relatório de integridade` reúne os diagnósticos existentes em
 
 O GitHub Actions executa a suíte completa em PostgreSQL descartável a cada envio para `main` e em pull requests. Assim, os testes marcados como `requires_postgres` deixam de ser ignorados na validação publicada. O comando de release abaixo consulta esse workflow no mesmo commit e bloqueia a VPS se ele não estiver verde.
 
+O job usa explicitamente **Ubuntu 24.04**, compatível com o Playwright bloqueado
+em `uv.lock`. A versão da distribuição é revisada junto com a compatibilidade
+das dependências. O alias `ubuntu-latest` muda ao longo do tempo e causou falha
+na instalação de Chromium quando passou a selecionar Ubuntu 26.04.
+A [especificação SDD do ambiente de CI](docs/spec-ci-postgresql.md) registra
+os requisitos, a decisão e os critérios de aceite.
+
+Depois do push, na pasta do projeto, acompanhe a execução do commit enviado:
+
+```powershell
+$ciRun = gh run list --repo davidsilcard/controle_de_opcoes --workflow tests.yml --commit (git rev-parse HEAD) --limit 1 --json databaseId --jq '.[0].databaseId'
+gh run watch $ciRun --repo davidsilcard/controle_de_opcoes --exit-status
+```
+
+Aguarde a execução aparecer no GitHub antes de consultar seu número. Em falha,
+consulte a etapa com erro usando o número obtido acima:
+
+```powershell
+gh run view $ciRun --repo davidsilcard/controle_de_opcoes --log-failed
+```
+
 ### Publicação a partir do computador pessoal
 
 Uma única vez neste computador, instale e autentique o GitHub CLI. A autenticação abre o navegador e não deve ter token copiado para o chat:

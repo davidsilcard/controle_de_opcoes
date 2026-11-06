@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Ambiente compatível com o lock do Playwright. Contrato em docs/spec-ci-postgresql.md.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
