@@ -95,3 +95,78 @@ O acompanhamento depende do computador ligado, aplicativo desktop em execução
 e acesso ao projeto e à conexão SSH. Não foi instalado cron ou serviço de
 atualização próprio na VPS. A programação fica no aplicativo e não equivale a
 monitoramento contínuo do servidor.
+
+## Atualização direcionada em 06/11/2026
+
+Na verificação iniciada às 18h, America/Sao_Paulo, o APT oferecia `linux-virtual`,
+`linux-image-virtual` e o kernel assinado `6.8.0-149.149` no repositório
+oficial `noble-updates/main` já configurado. Até a verificação anterior,
+em 04/11, a candidata ainda era `6.8.0-147.147`.
+
+### Evidência e decisão
+
+O [comunicado oficial Ubuntu de 02/11](https://ubuntu.com/blog/fixes-available-in-proposed-pocket-for-cve-2026-98432)
+identifica `6.8.0-149.149` como a versão com a correção para Noble.
+O texto ainda descrevia a publicação em `-proposed`, mas a consulta APT
+de 06/11 comprovou a disponibilidade em `noble-updates`. O changelog do pacote
+`linux-modules-6.8.0-149-generic`, obtido por `apt-get changelog`, confirmou
+a inclusão do reparo `ipv4: free inet_opt and ireq_opt after an RCU grace period`,
+correspondente à descrição da CVE.
+
+A instalação foi executada com base nessas duas evidências e na autorização
+explícita do usuário para instalar a correção oficial e reiniciar futuramente.
+A [página da CVE](https://ubuntu.com/security/CVE-2026-98432) ainda indicava
+`work in progress` para Noble, e a
+[consulta de avisos USN](https://ubuntu.com/security/notices?details=CVE-2026-98432&order=newest)
+continuava sem resultados. Essa divergência permanece registrada para
+confirmação posterior. O acompanhamento continua ativo até a confirmação
+explícita no registro de segurança Ubuntu.
+
+### Execução e validação
+
+1. Atualizados os índices APT com falha explícita em qualquer repositório
+   indisponível, usando `apt-get -o APT::Update::Error-Mode=any update`.
+2. Conferidos `dpkg --audit`, `apt-get check`, serviços e espaço livre,
+   aproximadamente 703 MB em `/boot` e 179 GB em `/`. Docker, Caddy e PostgreSQL
+   estavam habilitados, e os dois containers usavam `unless-stopped`.
+3. Simulada a atualização direcionada. Resultado previsto e realizado de
+   **seis pacotes atualizados, seis novos e nenhuma remoção**, todos da família
+   do kernel. O bloqueio existente de `cloud-init` foi preservado.
+4. Instalado o kernel com o comando abaixo, preservando configurações.
+   `NEEDRESTART_MODE=l` apenas listou reinícios pendentes de serviços,
+   atendidos pelo reinício completo seguinte.
+
+   ```bash
+   sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l \
+     apt-get -y --no-remove \
+     -o Dpkg::Options::=--force-confdef \
+     -o Dpkg::Options::=--force-confold \
+     install --only-upgrade linux-virtual=6.8.0-149.149
+   ```
+
+5. Conferidos imagem, initramfs e atualização automática do GRUB.
+   `dpkg --audit` e `apt-get check` passaram. Solicitado
+   `systemctl reboot` às **18h18min04s**.
+6. Confirmado novo boot, identificador
+   `0d1fbe3b-c261-4fa6-8ded-90d7686a0ebd`, diferente do anterior
+   `a4443032-6997-49e5-a1a1-d9ecb829a4c9`.
+   A primeira conexão ocorreu durante a inicialização e apresentou HTTP
+   transitório sem sucesso. A validação aguardou a subida dos serviços.
+7. Às **18h19min30s**, todas as verificações abaixo passaram.
+
+| Verificação após o reinício | Resultado |
+| --- | --- |
+| Kernel em execução, `uname -r` | `6.8.0-149-generic` |
+| `linux-virtual`, `linux-image-virtual`, `linux-image-6.8.0-149-generic` | `6.8.0-149.149` |
+| `dpkg --audit` e `apt-get check` | Sem pendências |
+| `systemctl is-system-running` e unidades falhas | `running`, zero falhas |
+| Docker, Caddy, PostgreSQL e `postgresql@16-main` | Ativos, conferidos individualmente |
+| PostgreSQL 16/main e `pg_isready` | Online, aceitando conexões |
+| `opcoes-web`, `opcoes-edge` | Em execução após o boot |
+| Login local e HTTPS público | HTTP 200 nos dois endereços |
+| Health local e HTTPS público | `status: ok` nos dois endereços |
+
+O kernel com o reparo identificado no comunicado e changelog oficiais está
+em execução. A confirmação final pela página da CVE ou por aviso USN continua
+pendente. As próximas verificações devem conferir essa publicação e a saúde,
+sem repetir a instalação ou o reinício da mesma versão.

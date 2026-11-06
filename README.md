@@ -1005,6 +1005,25 @@ sudo systemctl reboot
 `--with-new-pkgs` permite dependências novas, como `apt upgrade`, sem remover
 pacotes. Preserve configurações existentes e bloqueios de pacotes; não force
 `unhold`, `dist-upgrade`, kernels externos ou `autoremove` como atalho.
+
+Para uma correção exclusiva do kernel `linux-virtual`, consulte o aviso oficial,
+confira a origem e a versão candidata e simule a atualização direcionada:
+
+```bash
+sudo apt-cache policy linux-virtual linux-image-virtual
+sudo apt-get -s install --only-upgrade linux-virtual
+```
+
+Após revisar a versão corrigida e as dependências, instale preservando as
+configurações existentes:
+
+```bash
+sudo apt-get --no-remove \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install --only-upgrade linux-virtual
+```
+
 Antes de um reinício, confirme que Docker, Caddy e PostgreSQL estão habilitados
 e que os containers da aplicação têm política de retorno automático.
 
@@ -1014,7 +1033,9 @@ compare o pacote efetivamente em execução com o aviso de segurança da
 distribuição; `needrestart` informar kernel atualizado significa apenas que não
 há outro kernel instalado pendente de ativação.
 
-Registro da manutenção de 01/11/2026 e acompanhamento da CVE-2026-98432:
+Registro da manutenção de 01/11/2026, atualização direcionada para
+`6.8.0-149-generic` em 06/11/2026 e acompanhamento da confirmação da
+CVE-2026-98432 pelo registro de segurança Ubuntu:
 [relatório da VPS](docs/manutencao-vps-2026-11-01.md).
 
 ### Atualizar a aplicação
