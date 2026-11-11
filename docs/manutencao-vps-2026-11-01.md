@@ -170,3 +170,42 @@ O kernel com o reparo identificado no comunicado e changelog oficiais está
 em execução. A confirmação final pela página da CVE ou por aviso USN continua
 pendente. As próximas verificações devem conferir essa publicação e a saúde,
 sem repetir a instalação ou o reinício da mesma versão.
+
+## Encerramento em 11/11/2026
+
+Na verificação final, a [página oficial Ubuntu da CVE-2026-98432](https://ubuntu.com/security/CVE-2026-98432)
+passou a informar **Fixed in 6.8.0-149.149** para o pacote `linux` do
+Ubuntu 24.04 LTS Noble. Essa versão coincide com os pacotes instalados e
+com o kernel efetivamente em execução na VPS. A pendência documental
+registrada em 06/11 foi resolvida por essa confirmação explícita.
+
+A [listagem oficial de avisos Ubuntu](https://ubuntu.com/security/notices?details=CVE-2026-98432&order=newest)
+também passou a apresentar avisos publicados em 10 e 11/11 relacionados à CVE.
+A leitura detalhada de USN-9022-1, USN-9024-1 e USN-9025-1 retornou HTTP 503.
+A confirmação de cobertura foi fundamentada no estado explícito por pacote,
+distribuição e versão na página da CVE, cuja consulta foi bem-sucedida.
+
+### Evidência final da VPS
+
+Verificação em 11/11/2026, America/Sao_Paulo, com integridade e boot
+reconferidos às 15h41:
+
+| Verificação | Resultado |
+| --- | --- |
+| `uname -r` | `6.8.0-149-generic` |
+| Imagem em execução e metapacotes `linux-virtual`/`linux-image-virtual` | `6.8.0-149.149` |
+| Índices APT | Atualizados com sucesso |
+| Versão instalada e candidata | `6.8.0-149.149` em `noble-updates` |
+| Identificador de boot | `0d1fbe3b-c261-4fa6-8ded-90d7686a0ebd`, o mesmo do reinício de 06/11 |
+| `dpkg --audit` e `apt-get check` | Sem pendências |
+| `systemctl is-system-running`, unidades falhas | `running`, zero falhas |
+| Docker, Caddy e `postgresql@16-main` | Ativos, conferidos individualmente |
+| PostgreSQL 16/main e `pg_isready` | Online, aceitando conexões |
+| `opcoes-web`, `opcoes-edge` | Em execução há quatro dias |
+| Login local e HTTPS público | HTTP 200 nos dois endereços |
+| Health local e HTTPS público | `status: ok` nos dois endereços |
+
+A correção oficial está confirmada para o kernel em execução e os serviços
+estão saudáveis. O objetivo do acompanhamento foi atingido. A programação
+`acompanhar-corre-o-do-kernel-da-vps` deve ser removida no aplicativo após
+registrar e publicar esta conclusão, mantendo este chat aberto.

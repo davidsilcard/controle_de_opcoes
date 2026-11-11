@@ -1055,8 +1055,8 @@ distribuição; `needrestart` informar kernel atualizado significa apenas que n�
 há outro kernel instalado pendente de ativação.
 
 Registro da manutenção de 01/11/2026, atualização direcionada para
-`6.8.0-149-generic` em 06/11/2026 e acompanhamento da confirmação da
-CVE-2026-98432 pelo registro de segurança Ubuntu:
+`6.8.0-149-generic` em 06/11/2026 e confirmação final da correção da
+CVE-2026-98432 pelo registro de segurança Ubuntu em 11/11/2026:
 [relatório da VPS](docs/manutencao-vps-2026-11-01.md).
 
 ### Atualizar a aplicação
