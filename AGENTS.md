@@ -3,8 +3,9 @@
 1. Leia [continuidade](docs/continuidade.md) e [estado operacional](docs/estado-operacional.md).
 2. Confira a árvore e o histórico Git. Consulte a fonte indicada antes de agir sobre dados, produção ou uma pendência antiga.
 3. Planeje as alterações antes de escrever. Explique o impacto para quem usa a aplicação e questione propostas que prejudiquem a precisão, o histórico ou a operação.
-4. Trabalhe na `main`. Revise e valide a entrega, faça commit e push e, quando a versão da aplicação precisar subir, use o fluxo oficial de release do README. Passe um comando por vez quando a execução na VPS precisar do usuário.
-5. Se a tarefa mudar o estado operacional, uma decisão ou uma pendência, atualize os arquivos de retomada com a evidência, a data e o próximo passo. Registre informações suficientes para continuar sem o histórico do chat.
+4. Trabalhe na `main`. Revise e valide a entrega, faça commit e push e, quando a versão da aplicação precisar subir, use o fluxo oficial de release do README.
+5. Execute diretamente os comandos da VPS pelo alias SSH `hostinger-opcoes`. Use o acesso PostgreSQL da aplicação para diagnósticos autorizados. Quando só o usuário puder executar uma etapa, passe um comando por vez se o procedimento for complexo.
+6. Se a tarefa mudar o estado operacional, uma decisão ou uma pendência, atualize os arquivos de retomada com a evidência, a data e o próximo passo. Registre informações suficientes para continuar sem o histórico do chat.
 
 ## Regras do projeto
 

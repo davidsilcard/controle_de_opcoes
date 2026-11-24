@@ -999,6 +999,10 @@ O script faz este ciclo:
 
 ## Runbook Rápido da VPS
 
+Para manutenção remota, use o alias SSH `hostinger-opcoes` configurado no
+computador de operação. O [diagnóstico PostgreSQL](#compose-para-producao-na-vps)
+roda pelo container web com a configuração de produção já carregada.
+
 ### Atualizar o sistema operacional e o kernel
 
 Manutenção do Ubuntu é separada do deploy da aplicação. Confira primeiro a

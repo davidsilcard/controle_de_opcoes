@@ -9,6 +9,7 @@ arquivo quando houver evidência nova ou uma decisão que mude o próximo passo.
 | --- | --- |
 | Repositório | A revisão começou com `main` limpa, em `bf767da`, igual à referência local `origin/main`. O histórico contém auditorias e decisões de implantação que permitem retomar o trabalho. |
 | VPS | Consulta por SSH confirmou checkout limpo em `44ce33f`, containers web e Edge em execução, `/login` local HTTP 200 e `/health` local com `status: ok`. |
+| PostgreSQL | Pelo alias `hostinger-opcoes`, o `db check` no container web confirmou conexão TCP e execução de `SELECT 1` com o acesso da aplicação. |
 | Coleta da VPS | O timer disparou às 02h00 e o serviço concluiu com sucesso às 04h24 de 24/11. O journal registrou exportação de `data/opcoes_latest.csv` e snapshot Fundamentus de 24/11 com 280 linhas, 32 aprovadas no filtro. Também houve avisos de cotações ausentes no Yahoo. O próximo disparo constava para 25/11 às 02h00. |
 | Dados financeiros | Esta retomada analisou código e relatórios. A última conferência financeira disponível no Git é o fechamento de outubro retomado em 01/11. Consulte a base autenticada e as notas do período antes de registrar novos fatos. |
 
