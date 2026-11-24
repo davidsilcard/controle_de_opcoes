@@ -78,10 +78,11 @@ em mudanças separadas, sem enfraquecer validações financeiras para fazer test
 
 ## Publicação e espaço na VPS
 
-Revisar diff, testar, fazer commit e push na `main`; executar somente:
+Revisar diff, testar, fazer commit e push na `main`. Use o fluxo atual do
+[README](../README.md#atualizar-a-aplicação) no PowerShell local:
 
-```bash
-cd /home/david/apps/controle_de_opcoes && bash deploy/scripts/update-vps.sh
+```powershell
+.\deploy\scripts\release.ps1
 ```
 
 O script verifica espaço, recompila, substitui os containers da aplicação e remove

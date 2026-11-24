@@ -8,5 +8,5 @@ Welcome to the Conductor documentation for the **Opções** project.
 - [Product Guidelines](./product-guidelines.md)
 - [Tracks Registry](./tracks.md)
 
-## Directories
-- [Tracks](./tracks/)
+- [Continuidade da aplicação](../docs/continuidade.md)
+- [Estado operacional](../docs/estado-operacional.md)

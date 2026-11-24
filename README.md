@@ -3,6 +3,11 @@
 Aplicação para controle de estratégias com opções, com foco didático para cliente leigo.
 Arquitetura operacional consolidada em **PostgreSQL** para manter histórico único e consistente.
 
+## Retomar a manutenção
+
+- [Continuidade](docs/continuidade.md) reúne a arquitetura, as fontes dos dados, os contratos das telas e o procedimento de manutenção.
+- [Estado operacional](docs/estado-operacional.md) registra as últimas verificações, as pendências e a evidência de cada uma.
+
 ## Pré-requisitos
 
 - Python 3.12+
@@ -317,6 +322,11 @@ O filtro da grade de posições não altera o quadro de estoque consolidado: tot
 reservado e livre são calculados com todas as posições abertas, inclusive as
 que não correspondem ao ticker pesquisado. Para uma nova Covered Call, confirme
 também a cobertura na aba da estratégia antes de cadastrar.
+
+Para cadastro e baixa reais, use os formulários autenticados da estratégia e
+de Posições. Os comandos `position add` e `position close` abaixo são legados:
+o cadastro direto não usa o fluxo de recibo do formulário e a baixa sincroniza
+o efeito financeiro depois de gravar a posição.
 
 ```bash
 uv run python -m opcoes.cli position add --ticker PETR4 --underlying PETR4 --trade-date 2026-03-02 --qty 100 --price 34.10 --fees 2.5 --side long
@@ -951,22 +961,12 @@ Exemplo local:
 docker compose up -d --build
 ```
 
-Exemplo de producao na VPS:
+Em produção, use o [fluxo oficial de publicação](#atualizar-a-aplicação).
+Para diagnosticar o banco no container já publicado, use o helper versionado:
 
 ```bash
-export OPCOES_APP_ENV_FILE=/etc/controle_de_opcoes/app.env
-export OPCOES_WEB_BIND=127.0.0.1:8000:8000
-export OPCOES_DATA_DIR=/home/david/apps/controle_de_opcoes/data
-docker compose up -d --build
-```
-
-Para evitar repetir essas variaveis na VPS, use o helper versionado:
-
-```bash
-git pull origin main
-deploy/scripts/opcoes-compose-vps.sh up -d --build
-docker builder prune -af --reserved-space 2GB
-deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
+cd ~/apps/controle_de_opcoes
+bash deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli db check
 ```
 
 Observacao:
@@ -1264,10 +1264,16 @@ Consulta rapida das execucoes registradas no banco:
 deploy/scripts/opcoes-compose-vps.sh exec -T web /app/.venv/bin/python -m opcoes.cli service-run list
 ```
 
-Execucao manual do job agendado:
+Para atualizar o mercado manualmente na VPS, inicie o mesmo serviço do timer.
+O painel `Configurações > Automação e serviços` mostra o andamento.
 
 ```bash
 sudo systemctl start opcoes-scrape.service
+```
+
+Para executar pontualmente a verificação do watchdog:
+
+```bash
 sudo systemctl start opcoes-scrape-watchdog.service
 ```
 
@@ -1335,13 +1341,14 @@ Leitura esperada:
 - a execucao atual aparece como `running` enquanto roda
 - ao final, deve virar `success`
 - se morrer fora do fluxo normal, o watchdog pode marcar como `failed`
+- confira no log e nas telas a data dos snapshots de opções e da Fundamentus e investigue avisos de falha por ativo. O status `success` indica que o script terminou, mesmo quando a fonte de mercado deixou lacunas.
 
 Observacao de horario:
 
 - o timer versionado roda em `Mon..Fri *-*-* 05:00:00 UTC`, que equivale a `02:00` em `America/Sao_Paulo` no cenario atual.
 - esse horario foi antecipado para evitar sobreposicao com o `apt-daily-upgrade`, que reinicia o PostgreSQL na janela da manha.
 - se voce mudar a politica de horario depois, ajuste o `OnCalendar` e rode `sudo systemctl daemon-reload`.
-- depois de atualizar o repositorio na VPS com `git pull`, rode `deploy/scripts/opcoes-compose-vps.sh up -d --build` para que o container use os comandos e telas novos.
+- para publicar mudanças de código, use o [fluxo oficial de publicação](#atualizar-a-aplicação).
 - na tela de configuracoes, o painel de automacao separa `Ultimo horario previsto` de `Ultimo inicio real`, evitando confundir o horario agendado do servico com um disparo manual ou atrasado.
 - timestamps de cotacao agora sao exibidos para o usuario em `America/Sao_Paulo`, enquanto o timestamp bruto do provider continua visivel para auditoria.
 
@@ -1522,7 +1529,7 @@ Observacoes:
 - a retenção limpa apenas dados de mercado e apoio operacional; não toca nos dados fiscais nem nas operações do usuário.
 - o plano de evolução para registros permanentes, correção rastreável e cadastro seguro está em `docs/plano-registro-permanente.md`.
 - a conferência dos cadastros de setembro, incluindo a KLBNJ196 (#73) validada em 02/10/2026, está em [docs/conferencia-setembro-2026.md](docs/conferencia-setembro-2026.md); confira a produção antes de repetir qualquer lançamento.
-- a [auditoria documental de setembro](docs/auditoria-setembro-2026.md), conferida em 02/10/2026, separa integridade interna de completude: identificou seis execuções pendentes e a recompra total da KLBNJ196 ainda não cadastrada. É diagnóstico somente leitura, não reparo aplicado nem autorização de importação automática.
+- a [execução de 05/10 da auditoria de setembro](docs/auditoria-setembro-2026.md#execução-em-05102026--registros-sincronizados-após-autorização) confirmou a baixa da KLBNJ196 e a representação das dez execuções das quatro notas. Custos compartilhados, origem dos depósitos e conciliação fiscal ainda exigem conferência.
 - a [auditoria operacional de outubro](docs/auditoria-outubro-2026.md), executada em 22/10/2026, documenta cinco baixas, quatro aberturas, despesas de notas sem rateio, atualização do estoque vendido e acréscimo de garantia declarado. A verificação terminou sem alertas nas regras atuais; apuração fiscal das vendas à vista e separação entre garantia em investimentos e caixa permanecem pendentes. Os registros foram feitos na aplicação publicada, sem mudança de código ou necessidade de deploy.
 - a retomada do fechamento de outubro em 01/11/2026, no mesmo relatório, conciliou sete notas e registrou VALEJ693 (#82) e KLBNK196 (#83), com recibos e ledger conferidos. Pelo PM cadastrado e declarado pelo usuário, as três vendas de ações resultam em R$ 2.543,46 após a despesa conjunta; a tela fiscal ainda não inclui essas vendas e o imposto zero exibido não certifica o mês. O quadro operacional ficou em R$ 111.984,66 totais, R$ 92.922,00 reservados e R$ 19.062,66 disponíveis. Não houve duplicação da garantia, reparo fiscal ou deploy; os registros já estão na base publicada.
 - em `Posições`, a baixa total de opção vendida distingue **taxas da entrada** de **taxas da recompra**. Preencha o preço real da recompra, sua data e o motivo `Recompra para encerrar`; informe apenas os custos individuais dessa recompra no novo campo. O débito inclui esses custos e o resultado realizado desconta entrada + recompra; prêmio recebido e provisão original não são reescritos. Não repetir custos compartilhados já lançados. Campos antigos preservam a taxa de recompra existente; reabrir exige zerá-la explicitamente. O schema adiciona `buyback_fees` com padrão zero pelo mecanismo versionado existente, sem alterar valores históricos.

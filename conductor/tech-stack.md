@@ -8,12 +8,15 @@
 - **uv**
 
 ## Frameworks & Libraries
-- **Backend:** Flask
+- **Backend web:** Flask e Jinja
+- **Edge:** FastAPI e Uvicorn
 - **Scraping:** Playwright (Python wrapper)
 - **Finance Data:** yfinance
-- **Database:** SQLite
+- **Database:** PostgreSQL
 - **Testing:** Pytest
 
 ## Infrastructure & Tools
-- **Database:** SQLite (local files: `data/*.db`)
+- **Database:** PostgreSQL, com schemas de autenticação, operações, mercado e automação
+- **Produção:** PostgreSQL no host, web e Edge em Docker, Caddy e coleta via systemd
+- **CI:** PostgreSQL 16 descartável e Chromium no Ubuntu 24.04
 - **Version Control:** Git
